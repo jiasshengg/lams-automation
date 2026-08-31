@@ -98,3 +98,90 @@ test('commit saves and verifies the copy in the destination library', async ({ p
   await expect(page.getByRole('heading', { name: config.lessonTitle })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Open design' })).toBeHidden();
 });
+
+test('dry run verifies a missing final destination folder can be created without creating it', async ({ page }) => {
+  await page.setContent(`
+    <button id="saveDropButton">Save menu</button>
+    <a href="#" onclick="document.querySelector('[role=dialog]').hidden = false">Save as</a>
+    <div role="dialog" aria-label="Save design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+      </div>
+      <input aria-label="Type the learning design name to save" value="source">
+      <button id="ldStoreDialogNewFolderButton" onclick="prompt('Please enter the name for a new folder')">New</button>
+      <button id="ldStoreDialogSaveButton">Save</button>
+    </div>
+  `);
+  const config = {
+    sourceLessonTitle: '[for interns] TEST LESSON A 280826',
+    lessonTitle: '[Nathanael]',
+    destinationFolderPath: ['Courses', 'DL Playground 2026/2027 [internal]', '![Nathanael]'],
+    createDestinationFolder: true,
+    browser: { actionTimeoutMs: 2_000 }
+  } as LamsConfig;
+  let promptCount = 0;
+  page.on('dialog', async (dialog) => {
+    promptCount += 1;
+    await dialog.dismiss();
+  });
+
+  const result = await copyLesson(page, config, { commit: false });
+
+  expect(result.committed).toBe(false);
+  expect(result.destinationFolderCreated).toBe(false);
+  expect(promptCount).toBe(0);
+  await expect(page.getByRole('treeitem', { name: '![Nathanael]', exact: true })).toHaveCount(0);
+});
+
+test('commit creates only the missing final folder, saves the copy, and verifies both', async ({ page }) => {
+  await page.setContent(`
+    <button id="saveDropButton">Save menu</button>
+    <a href="#" onclick="document.querySelector('#save-dialog').hidden = false">Save as</a>
+    <div id="save-dialog" role="dialog" aria-label="Save design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        <div id="save-folder-slot"></div>
+      </div>
+      <input aria-label="Type the learning design name to save" value="source">
+      <button id="ldStoreDialogNewFolderButton" onclick="
+        const name = prompt('Please enter the name for a new folder');
+        if (name) document.querySelector('#save-folder-slot').outerHTML = '&lt;div role=treeitem&gt;' + name + '&lt;/div&gt;';
+      ">New</button>
+      <button id="ldStoreDialogSaveButton" onclick="
+        const title = this.parentElement.querySelector('input').value;
+        this.parentElement.hidden = true;
+        document.querySelector('h1').textContent = title;
+        document.querySelector('h1').hidden = false;
+        document.querySelector('#copied-design').textContent = title;
+      ">Save</button>
+    </div>
+    <h1 hidden></h1>
+    <button id="openButton" onclick="document.querySelector('#open-dialog').hidden = false">Open</button>
+    <div id="open-dialog" role="dialog" aria-label="Open design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        <div role="treeitem">![Nathanael]</div>
+        <div id="copied-design" role="treeitem"></div>
+      </div>
+      <button id="ldStoreDialogCancelButton" onclick="this.parentElement.hidden = true">Cancel</button>
+    </div>
+  `);
+  const config = {
+    sourceLessonTitle: '[for interns] TEST LESSON A 280826',
+    lessonTitle: '[Nathanael]',
+    destinationFolderPath: ['Courses', 'DL Playground 2026/2027 [internal]', '![Nathanael]'],
+    createDestinationFolder: true,
+    browser: { actionTimeoutMs: 2_000 }
+  } as LamsConfig;
+  page.on('dialog', async (dialog) => dialog.accept('![Nathanael]'));
+
+  const result = await copyLesson(page, config, { commit: true });
+
+  expect(result.committed).toBe(true);
+  expect(result.destinationFolderCreated).toBe(true);
+  await expect(page.getByRole('heading', { name: '[Nathanael]' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Open design' })).toBeHidden();
+});

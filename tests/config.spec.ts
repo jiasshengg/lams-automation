@@ -32,3 +32,14 @@ test('rejects attempts to override stable environment fields per run', () => {
     parseRequestOverrides(JSON.stringify({ workspaceCourse: 'Another course', baseUrl: 'https://example.invalid' }))
   ).toThrow('cannot override stable environment fields');
 });
+
+test('accepts an explicit request to create only the missing final destination folder', () => {
+  const overrides = parseRequestOverrides(
+    JSON.stringify({
+      destinationFolderPath: ['Courses', 'DL Playground 2026/2027 [internal]', '![Nathanael]'],
+      createDestinationFolder: true
+    })
+  );
+
+  expect(overrides.createDestinationFolder).toBe(true);
+});
