@@ -28,7 +28,7 @@ export async function setGateRotationSeconds(
     );
   }
 
-  await openActivityProperties(page, before.uiid, gateName, config);
+  await openActivityProperties(page, before.uiid, gateName, config.browser.actionTimeoutMs);
   const select = page.locator('#propertiesDialog .propertiesContentFieldPasswordDynamicSeconds').first();
   await select.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
   await select.selectOption(String(seconds));

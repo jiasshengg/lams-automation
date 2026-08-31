@@ -90,7 +90,7 @@ async function inspectNodeControls(
     const directory = await saveDiagnostics(page, `${label}-node-not-unique`);
     throw new Error(`Expected one ${nodeName} runtime node; found ${matches.length}. Diagnostics: ${directory}`);
   }
-  await openActivityProperties(page, matches[0]!.uiid, nodeName, config);
+  await openActivityProperties(page, matches[0]!.uiid, nodeName, config.browser.actionTimeoutMs);
   return saveDiagnostics(page, label);
 }
 

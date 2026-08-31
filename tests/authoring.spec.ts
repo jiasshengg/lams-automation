@@ -134,7 +134,7 @@ test('opens activity properties through an overlaying dialog and confirms the sw
     </script>
   `);
 
-  await openActivityProperties(page, 8, 'iRAT', { browser: { actionTimeoutMs: 2_000 } } as LamsConfig);
+  await openActivityProperties(page, 8, 'iRAT', 2_000);
   await expect(page.locator('.propertiesContentFieldTitle')).toHaveValue('iRAT');
 });
 
@@ -145,7 +145,7 @@ test('reports a properties dialog that never shows the requested activity', asyn
   `);
 
   await expect(
-    openActivityProperties(page, 7, 'iRAT', { browser: { actionTimeoutMs: 1_000 } } as LamsConfig)
+    openActivityProperties(page, 7, 'iRAT', 1_000)
   ).rejects.toThrow(/did not switch to "iRAT"/);
 });
 
@@ -165,7 +165,7 @@ test('ignores stale hidden title fields from other activities', async ({ page })
     </script>
   `);
 
-  await openActivityProperties(page, 8, 'iRAT', { browser: { actionTimeoutMs: 2_000 } } as LamsConfig);
+  await openActivityProperties(page, 8, 'iRAT', 2_000);
   await expect(page.locator('.propertiesContentFieldTitle').nth(1)).toHaveValue('iRAT');
 });
 
@@ -203,6 +203,6 @@ test('confirms a tool activity whose dialog title is a span, not an input', asyn
     </script>
   `);
 
-  await openActivityProperties(page, 8, 'iRAT', { browser: { actionTimeoutMs: 2_000 } } as LamsConfig);
+  await openActivityProperties(page, 8, 'iRAT', 2_000);
   await expect(page.locator('.propertiesContentFieldTitle')).toHaveText('iRAT');
 });

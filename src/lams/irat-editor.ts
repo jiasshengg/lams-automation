@@ -1,8 +1,7 @@
 import type { Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
-import { inspectAuthoringGraph, type AuthoringGraph, type GraphNode } from './authoring.js';
+import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
 import type { IratEditor, IratObservedQuestion, IratObservedState } from './irat.js';
-import { findUniqueCheckbox } from './ae-settings.js';
 
 /**
  * Live adapter for the LAMS Assessment authoring UI.
@@ -11,6 +10,54 @@ import { findUniqueCheckbox } from './ae-settings.js';
  * Assessment selectors come from the LAMS v4.8 authoring JSPs and are scoped
  * to the visible activity/question frames before use.
  */
+/**
+ * Live LAMS Assessment reference-row selectors, captured from the authenticated
+ * authoring iframe of a real TBL lesson (artifacts/*-irat-question-inspection-failure).
+ *
+ * The row's second cell holds the display order ("1)"), so the question title lives in
+ * the question cell's bold span rather than in a fixed `td` index. The type is a
+ * Bootstrap badge, not a ".question-type-alert" — that class does not exist in this
+ * markup. "Answer required" is toggled by, and read from, the BUTTON that calls
+ * toggleQuestionRequired(this): its own inline handler does hasClass('text-danger') on
+ * that button, and toggles text-danger/text-muted there, not on the inner <i> icon.
+ */
+export const QUESTION_TITLE = 'td .fw-semibold';
+export const QUESTION_TYPE_BADGE = 'td .badge.bg-primary-subtle';
+export const REQUIRED_TOGGLE = 'button[onclick*="toggleQuestionRequired"]';
+export const MAX_MARK_INPUT = 'input.max-mark-input';
+/**
+ * The question editor opens as an unnamed iframe inside the activity frame. This LAMS
+ * build no longer uses ThickBox, so "#TB_iframeContent" never appears; the iframe is
+ * addressed by its stable editReference.do source instead.
+ */
+export const QUESTION_EDITOR_IFRAME = 'iframe[src*="editReference.do"]';
+/**
+ * The tool activity opens in a Bootstrap modal on the parent authoring page, whose only
+ * dismissal control is the header close button. The frame itself exposes no cancel.
+ */
+export const ACTIVITY_DIALOG_CLOSE = '.modal.dialogContainer.show[id^="dialogActivity"] .modal-header .btn-close';
+/**
+ * Dismissing that modal only removes its "show" class and hides it; LAMS leaves the
+ * activity iframe attached, so completion is confirmed by the dialog no longer showing.
+ */
+// Other LAMS modals (notably #propertiesDialog) keep a stale "show" class while hidden,
+// so the activity dialog is addressed by its dialogActivity id prefix as well.
+export const ACTIVITY_DIALOG = '.modal.dialogContainer.show[id^="dialogActivity"]';
+/** "Continue" in the frame's own "Confirm Cancel" modal, raised when closing unsaved work. */
+export const CANCEL_CONFIRM = '#authoringCancelModalConfirm';
+
+/**
+ * Every iRAT advanced setting has a stable id in the activity frame's markup. The labels
+ * wrap a description block, which makes label-based matching brittle, so ids are used.
+ */
+export const ADVANCED_TOGGLES = {
+  shuffleQuestions: '#shuffled',
+  shuffleAnswers: '#shuffledAnswers',
+  questionsNumbering: '#questions-numbering',
+  answerJustification: '#allowAnswerJustification',
+  confidenceLevels: '#enable-confidence-levels'
+} as const;
+
 export class LamsIratEditor implements IratEditor {
   private activityFrame: Frame | undefined;
 
@@ -43,18 +90,20 @@ export class LamsIratEditor implements IratEditor {
   async updateGate(gate: IratRequest['gate']): Promise<void> {
     const graph = await inspectAuthoringGraph(this.page);
     const node = uniqueGraphNode(graph, gate.name, 'gate');
-    await this.canvasNode(node).click();
-    const dialog = this.page.locator('#propertiesDialog:visible');
-    await dialog.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    // The properties panel is a floating, semi-transparent modal that stays over the
+    // canvas after use, so a real click on a node is intercepted. openActivityProperties
+    // dispatches the event directly and waits for the panel to switch to this activity.
+    await openActivityProperties(this.page, node.uiid, gate.name, this.timeoutMs);
+    const dialog = this.page.locator('#propertiesDialog');
 
-    await dialog.locator('.propertiesContentFieldTitle').fill(gate.name);
-    await dialog.locator('.propertiesContentFieldDescription').fill(gate.description);
-    await dialog.locator('.propertiesContentFieldGateType').selectOption(gate.type);
-    await setCheckbox(dialog.locator('.propertiesContentFieldPasswordDynamic'), gate.dynamicPassword);
+    await visibleField(dialog, '.propertiesContentFieldTitle').fill(gate.name);
+    await visibleField(dialog, '.propertiesContentFieldDescription').fill(gate.description);
+    await visibleField(dialog, '.propertiesContentFieldGateType').selectOption(gate.type);
+    await setCheckbox(visibleField(dialog, '.propertiesContentFieldPasswordDynamic'), gate.dynamicPassword);
     if (gate.dynamicPassword) {
-      await dialog.locator('.propertiesContentFieldPasswordDynamicSeconds').selectOption(String(gate.rotationSeconds));
+      await visibleField(dialog, '.propertiesContentFieldPasswordDynamicSeconds').selectOption(String(gate.rotationSeconds));
     }
-    await dialog.locator('.propertiesContentFieldPasswordDynamicSeconds').blur();
+    await visibleField(dialog, '.propertiesContentFieldPasswordDynamicSeconds').blur();
 
     const updated = uniqueGraphNode(await inspectAuthoringGraph(this.page), gate.name, 'gate');
     if (
@@ -71,11 +120,10 @@ export class LamsIratEditor implements IratEditor {
     const graph = await inspectAuthoringGraph(this.page);
     const activity = uniqueGraphNode(graph, this.request.activityName, 'tool');
     const teamSetup = uniqueGraphNode(graph, teamSetupName, 'grouping');
-    await this.canvasNode(activity).click();
-    const dialog = this.page.locator('#propertiesDialog:visible');
-    await dialog.waitFor({ state: 'visible', timeout: this.timeoutMs });
-    await dialog.locator('.propertiesContentFieldGrouping').selectOption({ label: teamSetupName });
-    await dialog.locator('.propertiesContentFieldGrouping').blur();
+    await openActivityProperties(this.page, activity.uiid, this.request.activityName, this.timeoutMs);
+    const dialog = this.page.locator('#propertiesDialog');
+    await visibleField(dialog, '.propertiesContentFieldGrouping').selectOption({ label: teamSetupName });
+    await visibleField(dialog, '.propertiesContentFieldGrouping').blur();
 
     const updated = uniqueGraphNode(await inspectAuthoringGraph(this.page), this.request.activityName, 'tool');
     if (!updated.grouped || updated.groupingUiid !== teamSetup.uiid) {
@@ -90,8 +138,16 @@ export class LamsIratEditor implements IratEditor {
     const frame = await this.ensureActivityFrame();
     const row = await exactQuestionRow(frame, question.title);
     await row.locator('.edit-reference-link').click();
-    const questionFrame = await waitForChildFrame(frame, '#TB_iframeContent', this.timeoutMs);
+    const questionFrame = await waitForChildFrame(frame, QUESTION_EDITOR_IFRAME, this.timeoutMs);
     await questionFrame.locator('#assessmentQuestionForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
+
+    // "Default question grade" and "One or multiple answers?" both live inside the
+    // collapsed "Advanced settings" accordion, so it is expanded before either is set.
+    const advanced = questionFrame.locator('#advancedSettingsCollapse');
+    if (!(await advanced.isVisible())) {
+      await questionFrame.locator('[data-bs-target="#advancedSettingsCollapse"]').click();
+      await advanced.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    }
 
     await questionFrame.locator('#title').fill(question.title);
     await setCkEditor(questionFrame, 'description', formattedHtml(question.content, question.fontFamily, question.fontSize));
@@ -106,52 +162,84 @@ export class LamsIratEditor implements IratEditor {
       await setHiddenValue(questionFrame.locator(`#optionMaxMark${index}`), answer.weight / 100);
     }
 
-    // The guide checks "Default question grade" per question (1 for iRAT). No stable id
-    // was observed, so it is matched by its visible label and read back.
-    const gradeField = questionFrame.getByLabel('Default question grade', { exact: false }).first();
+    // Both the grade and the answer-count select live in the same accordion, expanded above.
+    const gradeField = questionFrame.locator('#maxMark');
     await gradeField.fill(String(question.marks));
     if ((await gradeField.inputValue()).trim() !== String(question.marks)) {
       throw new Error(`Default question grade for "${question.title}" did not accept ${question.marks}.`);
     }
-    await questionFrame.locator('#saveAsButton').click();
-    await frame.locator('#TB_iframeContent').waitFor({ state: 'detached', timeout: this.timeoutMs });
+
+    // LAMS reveals "Save as new version" only once the question is dirty, and only that
+    // control forks a new question-bank version. Plain Save rewrites the shared question
+    // in place, which would also change the source lesson this copy came from, so the run
+    // stops rather than falling back to it.
+    const saveAsNewVersion = questionFrame.locator('#saveAsButton');
+    try {
+      await saveAsNewVersion.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    } catch {
+      throw new Error(
+        `"Save as new version" never appeared for "${question.title}"; refusing to save the shared question in place.`
+      );
+    }
+    await saveAsNewVersion.click();
+    await frame.locator(QUESTION_EDITOR_IFRAME).waitFor({ state: 'detached', timeout: this.timeoutMs });
     const updatedRow = await exactQuestionRow(frame, question.title);
-    const requiredIcon = updatedRow.locator('.fa-asterisk');
-    const isMandatory = await requiredIcon.evaluate((element) => element.classList.contains('text-danger'));
-    if (isMandatory !== question.mandatory) await requiredIcon.click();
+
+    // The visible "Mark" column is the assessment reference's own maxMark input, which is
+    // separate from the question bank's default grade set inside the editor dialog. The
+    // deployment guide's per-question mark is what learners are scored on, so set both.
+    const markInput = updatedRow.locator(MAX_MARK_INPUT);
+    if (Number(await markInput.inputValue()) !== question.marks) {
+      await markInput.fill(String(question.marks));
+      await markInput.blur();
+    }
+    if (Number(await markInput.inputValue()) !== question.marks) {
+      throw new Error(`Mark for "${question.title}" did not accept ${question.marks}.`);
+    }
+
+    // LAMS renders no required-state class on load: text-danger/text-muted are written
+    // only by toggleQuestionRequired's AJAX callback, so the stored value is unreadable
+    // until the toggle is exercised. Clicking is therefore treated as a probe — the class
+    // that comes back is authoritative, and a second click converges when the stored value
+    // already differed from what the class implied. Without this, re-running the workflow
+    // would silently invert every question's "answer required" flag.
+    const requiredToggle = updatedRow.locator(REQUIRED_TOGGLE);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const observed = await requiredToggle.evaluate((element) =>
+        element.classList.contains('text-danger') ? true : element.classList.contains('text-muted') ? false : null
+      );
+      if (observed === question.mandatory) break;
+      await requiredToggle.click();
+      await waitForToggleResponse(requiredToggle, this.timeoutMs);
+    }
     await waitForMandatoryState(frame, question.title, question.mandatory, this.timeoutMs);
   }
 
   async updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void> {
     const frame = await this.ensureActivityFrame();
-    await frame.locator('[role="tab"], a').filter({ hasText: /^Advanced$/i }).first().click();
-    await frame.locator('#shuffledAnswers').waitFor({ state: 'visible', timeout: this.timeoutMs });
-    await setCheckbox(frame.locator('#shuffledAnswers'), settings.shuffleAnswers);
-    if (settings.displayAllQuestions) {
-      await frame.locator('#questionDistributionTypeAll').check();
-    } else {
+    // The activity page is a set of collapsible cards, not tabs, so every setting is
+    // revealed with "Expand all" before it is set. Each toggle carries a stable id in
+    // this markup, so none of them needs to be matched by its visible label.
+    await frame.locator('#expandAllButton').click();
+    await frame.locator(ADVANCED_TOGGLES.shuffleAnswers).waitFor({ state: 'visible', timeout: this.timeoutMs });
+
+    if (!settings.displayAllQuestions) {
       throw new Error('The live adapter currently requires displayAllQuestions=true; no alternative distribution was supplied.');
     }
-    await setCheckbox(frame.locator('#allowAnswerJustification'), settings.answerJustification);
-    await setCheckbox(frame.locator('#enable-confidence-levels'), settings.confidenceLevels);
-    // The deployment guide turns these two on for iRAT (the inverse of AE). No stable id
-    // was observed for them, so they are matched by their visible label, like the AE
-    // activity settings, and read back rather than assumed.
-    await this.setLabelledToggle('Shuffle questions', settings.shuffleQuestions);
-    await this.setLabelledToggle("Enable questions' numbering", settings.questionsNumbering);
-  }
+    await frame.locator('#questionDistributionTypeAll').check();
 
-  private async setLabelledToggle(label: string, expected: boolean): Promise<void> {
-    const { locator } = await findUniqueCheckbox(this.page, label, this.timeoutMs);
-    await setCheckbox(locator, expected);
-    if ((await locator.isChecked()) !== expected) {
-      throw new Error(`Checkbox "${label}" did not remain ${expected ? 'enabled' : 'disabled'}.`);
+    for (const [key, selector] of Object.entries(ADVANCED_TOGGLES)) {
+      const expected = settings[key as keyof IratRequest['advanced']];
+      const toggle = frame.locator(selector);
+      await setCheckbox(toggle, expected);
+      if ((await toggle.isChecked()) !== expected) {
+        throw new Error(`Advanced setting "${key}" did not remain ${expected ? 'enabled' : 'disabled'}.`);
+      }
     }
   }
 
   async verifyPrintView(request: IratRequest): Promise<void> {
     const frame = await this.ensureActivityFrame();
-    await frame.locator('[role="tab"], a').filter({ hasText: /^Basic$/i }).first().click();
     const popupPromise = this.page.waitForEvent('popup', { timeout: this.timeoutMs });
     await frame.locator('button[onclick*="showQuestionsPrintPage"]').click();
     const printPage = await popupPromise;
@@ -179,7 +267,7 @@ export class LamsIratEditor implements IratEditor {
     this.page.on('dialog', dialogHandler);
     try {
       await frame.locator('#saveButton').click();
-      await this.page.locator('iframe[id^="dialogActivity"]').waitFor({ state: 'detached', timeout: this.timeoutMs });
+    await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
     } finally {
       this.page.off('dialog', dialogHandler);
       this.activityFrame = undefined;
@@ -207,15 +295,25 @@ export class LamsIratEditor implements IratEditor {
     for (let index = 0; index < (await rows.count()); index += 1) {
       const row = rows.nth(index);
       questions.push({
-        title: normalizeText(await row.locator('td').nth(1).innerText()),
-        type: normalizeQuestionType(await row.locator('.question-type-alert').innerText()),
-        mandatory: await row.locator('.fa-asterisk').evaluate((element) => element.classList.contains('text-danger'))
+        title: normalizeText(await row.locator(QUESTION_TITLE).innerText()),
+        type: normalizeQuestionType(await row.locator(QUESTION_TYPE_BADGE).innerText()),
+        mandatory: await row.locator(REQUIRED_TOGGLE).evaluate((element) => element.classList.contains('text-danger'))
       });
     }
 
-    this.page.once('dialog', async (dialog) => dialog.accept());
-    await frame.locator('#cancelButton').click();
-    await this.page.locator('iframe[id^="dialogActivity"]').waitFor({ state: 'detached', timeout: this.timeoutMs });
+    // The activity authoring frame exposes only a Save control. Its dialog is a Bootstrap
+    // modal owned by the parent authoring page, so it is dismissed from the modal header.
+    // That routes into the frame's doCancel(), which raises an in-frame "Confirm Cancel"
+    // modal; discarding the unchanged inspection requires confirming it.
+    await this.page.locator(ACTIVITY_DIALOG_CLOSE).click();
+    const confirmDiscard = frame.locator(CANCEL_CONFIRM);
+    try {
+      await confirmDiscard.waitFor({ state: 'visible', timeout: this.timeoutMs });
+      await confirmDiscard.click();
+    } catch {
+      // Some activities close without prompting; the dialog check below is authoritative.
+    }
+    await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
     this.activityFrame = undefined;
     return questions;
   }
@@ -227,6 +325,10 @@ export class LamsIratEditor implements IratEditor {
   }
 
   private async openActivityFrame(activity: GraphNode): Promise<Frame> {
+    // A real double click is what LAMS binds to; a dispatched dblclick carries detail 0
+    // and its handler ignores it. The floating properties panel can cover the node, so it
+    // is dismissed first when it is showing.
+    await this.dismissPropertiesDialog();
     await this.canvasNode(activity).dblclick({ delay: 80 });
     const iframe = this.page.locator('iframe[id^="dialogActivity"]:visible');
     await iframe.waitFor({ state: 'visible', timeout: this.timeoutMs });
@@ -235,6 +337,18 @@ export class LamsIratEditor implements IratEditor {
     await frame.locator('#authoringForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
     this.activityFrame = frame;
     return frame;
+  }
+
+  /**
+   * The properties panel has no close control: LAMS hides it when the canvas background is
+   * clicked. It is only dismissed when actually showing, and the canvas click selects
+   * nothing, so no activity is moved, opened, or changed.
+   */
+  private async dismissPropertiesDialog(): Promise<void> {
+    const dialog = this.page.locator('#propertiesDialog');
+    if (!(await dialog.isVisible())) return;
+    await this.page.locator('#canvas').click({ position: { x: 5, y: 5 } });
+    await dialog.waitFor({ state: 'hidden', timeout: this.timeoutMs }).catch(() => undefined);
   }
 
   private canvasNode(node: GraphNode): Locator {
@@ -252,7 +366,7 @@ async function exactQuestionRow(frame: Frame, title: string): Promise<Locator> {
   const rows = frame.locator('#referencesTable tbody tr');
   const matchingIndexes: number[] = [];
   for (let index = 0; index < (await rows.count()); index += 1) {
-    if (normalizeText(await rows.nth(index).locator('td').nth(1).innerText()) === normalizeText(title)) matchingIndexes.push(index);
+    if (normalizeText(await rows.nth(index).locator(QUESTION_TITLE).innerText()) === normalizeText(title)) matchingIndexes.push(index);
   }
   if (matchingIndexes.length !== 1) throw new Error(`Expected one iRAT question named "${title}"; found ${matchingIndexes.length}.`);
   return rows.nth(matchingIndexes[0]!);
@@ -318,10 +432,11 @@ async function waitForMandatoryState(frame: Frame, title: string, mandatory: boo
     ({ expectedTitle, expectedMandatory }) => {
       const rows = Array.from(document.querySelectorAll('#referencesTable tbody tr'));
       const row = rows.find((candidate) => {
-        const cell = candidate.querySelectorAll('td')[1];
+        const cell = candidate.querySelector('td .fw-semibold');
         return (cell?.textContent ?? '').replace(/\s+/g, ' ').trim() === expectedTitle.replace(/\s+/g, ' ').trim();
       });
-      return row?.querySelector('.fa-asterisk')?.classList.contains('text-danger') === expectedMandatory;
+      const toggle = row?.querySelector('button[onclick*="toggleQuestionRequired"]');
+      return toggle ? toggle.classList.contains('text-danger') === expectedMandatory : false;
     },
     { expectedTitle: title, expectedMandatory: mandatory },
     { timeout: timeoutMs }
@@ -346,4 +461,34 @@ function normalizeText(value: string): string {
 
 function normalizeQuestionType(value: string): string {
   return /multiple\s*choice/i.test(value) ? 'multiple-choice' : normalizeText(value).toLowerCase();
+}
+
+
+/**
+ * The properties panel keeps one field set per activity in the DOM and lays out only the
+ * active one, so a bare class selector matches stale siblings. Only the visible field
+ * belongs to the activity the panel is currently showing.
+ */
+function visibleField(dialog: Locator, className: string): Locator {
+  return dialog.locator(className).filter({ visible: true }).first();
+}
+
+/** Waits for toggleQuestionRequired's callback to stamp the resulting state on the button. */
+async function waitForToggleResponse(toggle: Locator, timeoutMs: number): Promise<void> {
+  await toggle
+    .evaluate(
+      (element) =>
+        new Promise<void>((resolve, reject) => {
+          const deadline = Date.now() + 10_000;
+          const poll = () => {
+            if (element.classList.contains('text-danger') || element.classList.contains('text-muted')) resolve();
+            else if (Date.now() > deadline) reject(new Error('no toggle response'));
+            else setTimeout(poll, 50);
+          };
+          poll();
+        }),
+      undefined,
+      { timeout: timeoutMs }
+    )
+    .catch(() => undefined);
 }

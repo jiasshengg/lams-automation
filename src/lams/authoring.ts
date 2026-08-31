@@ -232,7 +232,7 @@ export async function openActivityProperties(
   page: Page,
   uiid: number,
   expectedTitle: string,
-  config: LamsConfig
+  timeoutMs: number
 ): Promise<void> {
   const node = page.locator(`#canvas > svg > g.svg-activity[uiid="${uiid}"]`);
   if ((await node.count()) !== 1) {
@@ -255,7 +255,7 @@ export async function openActivityProperties(
         });
       },
       ['#propertiesDialog .propertiesContentFieldTitle', expectedTitle] as const,
-      { timeout: config.browser.actionTimeoutMs }
+      { timeout: timeoutMs }
     );
   } catch (error) {
     const directory = await saveDiagnostics(page, 'properties-dialog-not-switched');
