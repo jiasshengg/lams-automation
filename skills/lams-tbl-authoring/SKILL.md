@@ -17,8 +17,10 @@ Choose only the modes requested by the user:
 - **Commit copy:** create the exact requested copy after a successful dry run.
 - **Inspect:** list the copied lesson's graph without validating expectations.
 - **Validate:** compare the graph with manually configured expectations.
+- **AE preflight:** validate already-structured, human-reviewed AE JSON and produce the deterministic execution plan without opening LAMS.
+- **AE inspect:** compare one exact AE activity's graph and checkbox settings without saving.
 
-Do not parse an AE Source of Truth. Do not create, delete, publish, start, move, or restructure authoring nodes.
+Do not parse an AE Source of Truth. The AE preflight input must already be structured and reviewed. Do not create, delete, publish, start, move, save, or restructure authoring nodes during AE inspection.
 
 ## Resolve inputs
 
@@ -31,6 +33,8 @@ For an actual copy, require all of the following before mutation:
 - an explicit request to create/save the copy.
 
 For validation, require the exact expected linear flow and manual AE node/gate counts. Gate-property expectations are optional. If a consequential target or expectation is ambiguous, stop and ask for the missing value instead of inferring it from similar lessons.
+
+For AE preflight, require an exact local `--ae-json` path. For AE inspection, additionally require the exact destination folder path, destination lesson title, and exact AE node title. Reject `--commit`.
 
 Read [references/configuration.md](references/configuration.md) when preparing per-run inputs or changing the one-time environment configuration. Preserve credentials outside the repository and never place passwords, cookies, tokens, or OTPs in JSON.
 
@@ -58,6 +62,20 @@ Read [references/configuration.md](references/configuration.md) when preparing p
    npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    ```
+
+8. Preflight structured AE JSON locally before any AE browser inspection:
+
+   ```bash
+   npm run plan:ae -- --ae-json '<AE_JSON_PATH>'
+   ```
+
+9. Inspect one exact AE node only after preflight succeeds and `aeOpenActivity` has been captured from the real DOM:
+
+   ```bash
+   npm run inspect:ae -- --config configs/local.json --ae-json '<AE_JSON_PATH>' --node '<EXACT_AE_NODE_TITLE>' --request-json '<REQUEST_JSON>'
+   ```
+
+   This command is read-only and rejects `--commit`. A validation mismatch may exit with code `2`.
 
 Read [references/operations.md](references/operations.md) for command outcomes, stopping conditions, and reporting requirements.
 

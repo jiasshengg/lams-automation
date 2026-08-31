@@ -34,6 +34,16 @@ Current validation covers:
 
 It does not cover automatic Source-of-Truth parsing, branching/merging topology, or automatic correction.
 
+## AE preflight
+
+`npm run plan:ae -- --ae-json '<AE_JSON_PATH>'` is local and non-mutating. It validates break-derived node/gate counts, question numbering, marks, MCQ correctness, gate adjacency, and SoT-supported attempts/passing-mark overrides. It also emits normalized question HTML/options and the canonical activity settings when called with `--json`.
+
+## AE settings inspection
+
+`npm run inspect:ae -- --config configs/local.json --ae-json '<AE_JSON_PATH>' --node '<EXACT_AE_NODE_TITLE>' --request-json '<REQUEST_JSON>'` is read-only. It verifies the approved course, exact lesson, AE graph, and exact node before opening the activity and checking all required checkbox labels. It rejects `--commit` and never clicks the activity Save control.
+
+An exit code of `2` means the browser inspection completed but the graph or activity settings did not match. A missing or ambiguous selector/control is an automation stop and must include diagnostics. Question content/version inspection and AE mutation remain unsupported until authenticated DOM evidence is captured.
+
 ## Failures
 
 When the automation saves diagnostics, report the artifact directory. Diagnostics may include a screenshot, HTML, frame information, and a DOM summary. Do not include browser profiles, authentication material, or secrets in the report.

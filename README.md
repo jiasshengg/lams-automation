@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. The current implementation covers the first-box workflow: verify the safe playground course, open LAMS Authoring, traverse a configurable folder path, open an exact source design, and reach Save As. It does not modify authoring nodes.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It covers the first-box lesson-copy workflow plus an incremental AE foundation: validate structured AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not parse a Source-of-Truth `.docx`, import questions, edit question rows, restructure nodes, or save AE changes yet.
 
 ## Agent skill
 
@@ -84,6 +84,36 @@ Gate settings can also be validated without opening or changing the gate propert
 
 Each property is optional, so different lessons can validate only the settings they require. A mismatch is reported as a validation failure; the script never corrects or saves the gate automatically.
 
+## AE preflight and read-only inspection
+
+Convert the SoT into reviewed structured JSON matching [`configs/ae-example.json`](configs/ae-example.json). This conversion is intentionally outside the current automation until a real SoT `.docx` is available for parser fixtures. Preflight the JSON locally before launching a browser:
+
+```bash
+npm run plan:ae -- --ae-json configs/ae-example.json
+```
+
+The preflight refuses invalid data and derives a deterministic plan that:
+
+- requires AE nodes = `breakMarkerCount + 1` and AE gates = `breakMarkerCount`;
+- requires question numbers to be globally sequential from 1;
+- defaults each question to 4 marks and checks `expectedTotalMarks` when supplied;
+- removes `[X marks]`/numeric mark annotations and typed `A)`/`A.` option prefixes;
+- emits bold-underlined `Case X` and required blank paragraphs in `promptHtml`;
+- assigns 100% to exactly one MCQ answer and 0% to the others;
+- sets Answer required, sequential-letter answer prefixes, Save as new version, and latest-version selection in the plan;
+- fixes all video-specified AE activity settings, with optional SoT overrides only for attempts and passing mark;
+- checks every gate against its adjacent AE nodes and following question number.
+
+To inspect one exact AE activity in the playground without saving, first add an evidence-backed `selectors.aeOpenActivity` to ignored `configs/local.json`. Then run:
+
+```bash
+npm run inspect:ae -- --config configs/local.json --ae-json <AE_JSON> --node "<EXACT_AE_NODE_TITLE>" --request-json '<REQUEST_JSON>'
+```
+
+The command verifies the exact playground heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
+
+The next implementation gate is authenticated DOM evidence for the question table, rich-text editor, Advanced question settings, version selector, and final Save action. Do not add selectors for those controls from the video alone.
+
 ## Selector discovery workflow
 
 No LAMS-specific selector has been guessed. The example config only uses the supplied visible cohort and TBL text. Selectors use one of these forms:
@@ -111,6 +141,7 @@ Collect the following from the actual LAMS page before adding the remaining sele
 3. Whether Authoring is in the main page, a popup/new tab, or an iframe. If it is an iframe, record its `title`, `name`, or stable attribute.
 4. Whether nodes are HTML, SVG, or canvas-rendered. For HTML/SVG, record one repeated node element's outer HTML and which child/attribute contains its name and type. For canvas, DOM selectors cannot enumerate nodes; record any accompanying model/network data or accessibility tree exposed by LAMS.
 5. One example each for Team Setup, a gate, iRAT/tRAT, Leader Selection, and AE, including stable classes/data attributes and displayed text.
+6. In one AE activity, the accessible role/name or stable attribute for its property-panel Open control (`selectors.aeOpenActivity`), question rows, per-question Edit, marks, Answer required, Advanced settings, Save as new version, latest-version selector, activity Advanced section, and final Save.
 
 Once known, add `openLesson`, `openAuthoring`, `authoringRoot`, and `authoringNode` under `selectors`. For example (illustrative only, not a LAMS selector):
 

@@ -60,6 +60,19 @@ Every property except `name` is optional. Only add an expectation when it came f
 
 Keep `headless` false during development. Store the persistent profile only under ignored `.playwright/`. The user completes authentication manually when needed.
 
+For read-only AE inspection, `selectors.aeOpenActivity` is a stable local-environment selector for the Open control shown after selecting one exact AE SVG node. Discover it from authenticated DOM diagnostics; do not infer it from the training video. Keep it in ignored `configs/local.json`, not per-run JSON.
+
+## Structured AE preflight input
+
+Pass the local path separately with `--ae-json`; do not merge AE question content into `--request-json`. Use `configs/ae-example.json` as the schema example. Required fields are:
+
+- `sourceLabel`, `breakMarkerCount`, non-empty `nodes`, and `gates`;
+- exact node titles and globally sequential question numbers;
+- `mcq` or `essay` question type, prompt text, and MCQ options with exactly one `correct: true`;
+- exact gate title, adjacent node titles, and the first question number after each gate.
+
+`marks` defaults to 4. `attempts` defaults to 1 and `passingMark` to null; supply them only when the SoT explicitly overrides those defaults. `expectedTotalMarks` is optional but recommended.
+
 ## Configuration checks
 
 Before running a committed copy, reject the merged request when:
