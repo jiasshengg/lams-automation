@@ -12,22 +12,26 @@ export const AE_ACTIVITY_CHECKBOXES: readonly AECheckboxRequirement[] = Object.f
   { key: 'questionNumbering', label: "Enable questions' numbering", expected: false },
   {
     key: 'displayAllAfterCompletion',
-    label: 'Display all questions and answers once the student finishes',
+    label: 'Display all questions and answers once the student finishes.',
     expected: true
   },
-  { key: 'questionFeedback', label: 'Allow question feedback after each question', expected: false },
+  {
+    key: 'questionFeedback',
+    label: 'Allow students to see question feedback after each question',
+    expected: false
+  },
   {
     key: 'discloseAnswersInMonitor',
-    label: "Disclose the student's and other groups' answers in Monitor",
+    label: "Disclose student's and other groups' answers in monitor",
     expected: true
   },
   { key: 'peerRating', label: "Allow students to rate peers' answers", expected: false },
-  { key: 'answerJustification', label: 'Answer justification', expected: true },
-  { key: 'burningQuestions', label: 'Burning questions', expected: false },
-  { key: 'focusTracking', label: 'Focus tracking', expected: false },
-  { key: 'discussionNotepad', label: 'Discussion notepad', expected: false },
-  { key: 'discussionSentimentVoting', label: 'Discussion sentiment voting', expected: true },
-  { key: 'confidenceLevel', label: 'Confidence level', expected: false },
+  { key: 'answerJustification', label: 'Enable answer justification', expected: true },
+  { key: 'burningQuestions', label: 'Enable burning questions', expected: false },
+  { key: 'focusTracking', label: 'Enable focus tracking', expected: false },
+  { key: 'discussionNotepad', label: 'Include discussion notepad for questions', expected: false },
+  { key: 'discussionSentimentVoting', label: 'Enable discussion sentiment voting', expected: true },
+  { key: 'confidenceLevel', label: 'Enable confidence level', expected: false },
   { key: 'useSelectLeaderToolLeaders', label: 'Use leaders from Select Leader tool', expected: true }
 ]);
 
@@ -102,7 +106,7 @@ async function findUniqueCheckbox(
   do {
     const matches: Array<{ locator: Locator; frame: Frame }> = [];
     for (const frame of page.frames()) {
-      const locator = frame.getByLabel(label, { exact: true });
+      const locator = frame.getByLabel(label, { exact: false });
       for (let index = 0; index < (await locator.count()); index += 1) {
         const candidate = locator.nth(index);
         const type = await candidate.getAttribute('type');

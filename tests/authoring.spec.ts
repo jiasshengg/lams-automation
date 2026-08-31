@@ -92,25 +92,21 @@ test('extracts SVG nodes, grouping associations, and transition endpoints', asyn
   ]);
 });
 
-test('opens one exact AE activity through its SVG node and configured semantic control', async ({ page }) => {
+test('opens one exact AE activity by double-clicking its SVG node', async ({ page }) => {
   await page.setContent(`
     <div id="canvas">
       <svg width="500" height="300">
-        <g class="svg-activity svg-activity-tool" uiid="21" onclick="document.querySelector('#properties').hidden = false">
+        <g class="svg-activity svg-activity-tool" uiid="21" ondblclick="document.querySelector('#ae-editor').hidden = false">
           <rect width="120" height="50"></rect>
           <text class="svg-activity-title-label" x="5" y="20">AE Case 1</text>
         </g>
       </svg>
     </div>
-    <section id="properties" hidden>
-      <h2>AE Case 1</h2>
-      <button data-testid="open-ae" onclick="document.querySelector('#ae-editor').hidden = false">Open</button>
-    </section>
     <section id="ae-editor" hidden><h1>Assessment editor</h1></section>
   `);
   const config = {
     browser: { actionTimeoutMs: 2_000 },
-    selectors: { aeOpenActivity: { by: 'testId', testId: 'open-ae' } }
+    selectors: {}
   } as LamsConfig;
 
   const activityPage = await openExactAEActivity(page, 'AE Case 1', config);

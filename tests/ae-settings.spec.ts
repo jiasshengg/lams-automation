@@ -4,7 +4,7 @@ import { AE_ACTIVITY_CHECKBOXES, applyAEActivitySettings } from '../src/lams/ae-
 function settingsMarkup(): string {
   return AE_ACTIVITY_CHECKBOXES.map(
     ({ label, expected }, index) =>
-      `<label><input id="setting-${index}" type="checkbox" ${expected ? '' : 'checked'}>${label}</label>`
+      `<label><input id="setting-${index}" type="checkbox" ${expected ? '' : 'checked'}>${label}<span>Detailed help for this setting.</span></label>`
   ).join('\n');
 }
 
@@ -27,7 +27,7 @@ test('AE settings commit applies and verifies the canonical checkbox state', asy
   expect(report.passed).toBe(true);
   expect(report.changesApplied).toBe(AE_ACTIVITY_CHECKBOXES.length);
   for (const { label, expected } of AE_ACTIVITY_CHECKBOXES) {
-    expect(await page.getByLabel(label, { exact: true }).isChecked()).toBe(expected);
+    expect(await page.getByLabel(label, { exact: false }).isChecked()).toBe(expected);
   }
 });
 
