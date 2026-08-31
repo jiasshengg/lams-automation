@@ -84,6 +84,54 @@ Gate settings can also be validated without opening or changing the gate propert
 
 Each property is optional, so different lessons can validate only the settings they require. A mismatch is reported as a validation failure; the script never corrects or saves the gate automatically.
 
+## Lesson index and monitoring
+
+Run these with `npx tsx` directly, not `npm run -- --flag`: npm strips the flag *names*
+from forwarded arguments on Windows, so `--config X` arrives as a bare `X` and the run
+falls back to `configs/example.json`.
+
+Create the lesson from the design the authoring workflow just saved, then read back its
+monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
+
+```bash
+npx tsx src/index-monitoring.ts --config configs/local.json --request-json '{"lessonIndex":{"endDate":"2026-09-03"}}'
+```
+
+The run is a dry run by default: it selects the top entry of "Recently used designs",
+opens the Advanced tab, turns *Display activity scores on completion* off, turns
+*Enable scheduling* on, sets the end date/time, advances to Course groupings and selects
+the preset — then stops without clicking **Add now**. Add `--commit` to create the lesson
+and continue into monitoring.
+
+`lessonIndex` fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `courseGrouping` | no | Exact preset name, only needed when a course offers more than one. Normally omit it. |
+| `endDate` | yes | `YYYY-MM-DD`. |
+| `endTime` | no | `HH:MM`, defaults to `23:59`. |
+| `displayScoresOnCompletion` | no | Defaults to `false`. |
+| `enableScheduling` | no | Defaults to `true`. |
+
+Course grouping needs no configuration. Y1 and Y2 run as a whole class, so a design that
+uses groupings offers exactly one preset besides `None` and it is selected automatically.
+A design with no grouping activities gets no Course groupings step at all — LAMS keeps
+Next hidden and commits straight from Add now — and the run publishes as-is, reporting
+`None`. If a course ever offers more than one preset the run stops and lists them rather
+than guessing; set `courseGrouping` to pick one.
+
+Monitoring resolves the lesson by exact title on the course page (each row is
+`div.j-single-lesson` carrying `data-name` and the lesson ID as its element `id`), opens
+`/lams/home/monitorLesson.do?lessonID=...`, and confirms the ID against the resulting URL
+before printing it. To read the ID for a lesson that already exists, skip the index
+steps:
+
+```bash
+npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
+```
+
+The ID is printed only; nothing downstream consumes it yet.
+
 ## Selector discovery workflow
 
 No LAMS-specific selector has been guessed. The example config only uses the supplied visible cohort and TBL text. Selectors use one of these forms:

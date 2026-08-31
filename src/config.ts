@@ -31,6 +31,21 @@ export interface ExpectedGateProperties {
   rotationSeconds?: number;
 }
 
+export interface LessonIndexSettings {
+  /**
+   * Optional exact name of the course grouping preset to apply. Leave unset for the
+   * normal case: Y1 and Y2 have a single whole-class grouping, so the only preset on
+   * offer besides "None" is selected automatically.
+   */
+  courseGrouping?: string;
+  /** Lesson end date as YYYY-MM-DD. */
+  endDate: string;
+  /** Lesson end time as HH:MM; the TBL convention is 23:59. */
+  endTime?: string;
+  displayScoresOnCompletion?: boolean;
+  enableScheduling?: boolean;
+}
+
 export interface LamsConfig {
   baseUrl: string;
   workspaceCourse: string;
@@ -47,6 +62,7 @@ export interface LamsConfig {
   expectedAEGates: number;
   expectedFlow: string[];
   expectedGateProperties?: ExpectedGateProperties[];
+  lessonIndex?: LessonIndexSettings;
   browser: {
     headless: boolean;
     userDataDir: string;
@@ -60,6 +76,8 @@ export interface LamsConfig {
     openAuthoring?: LocatorSpec;
     authoringRoot?: LocatorSpec;
     authoringNode?: AuthoringNodeSelector;
+    openAddLesson?: LocatorSpec;
+    openMonitoring?: LocatorSpec;
   };
 }
 
@@ -88,7 +106,8 @@ const requestOverrideKeys = [
   'expectedAENodes',
   'expectedAEGates',
   'expectedFlow',
-  'expectedGateProperties'
+  'expectedGateProperties',
+  'lessonIndex'
 ] as const;
 
 export async function loadConfig(configPath: string, overrides: Partial<LamsConfig> = {}): Promise<LamsConfig> {
@@ -116,6 +135,7 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
   }
   validateExpectedGateProperties(merged.expectedGateProperties);
+  validateLessonIndex(merged.lessonIndex);
 
   const config = merged as unknown as LamsConfig;
   config.browser = {
@@ -180,6 +200,25 @@ function validateExpectedGateProperties(value: unknown): void {
   });
 }
 
+function validateLessonIndex(value: unknown): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) throw new Error('Configuration field "lessonIndex" must be an object.');
+  if (value.courseGrouping !== undefined && (typeof value.courseGrouping !== 'string' || value.courseGrouping.trim() === '')) {
+    throw new Error('lessonIndex.courseGrouping must be a non-empty string when provided.');
+  }
+  if (typeof value.endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.endDate)) {
+    throw new Error('lessonIndex.endDate must be a date formatted as YYYY-MM-DD.');
+  }
+  if (value.endTime !== undefined && (typeof value.endTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.endTime))) {
+    throw new Error('lessonIndex.endTime must be a 24-hour time formatted as HH:MM.');
+  }
+  for (const key of ['displayScoresOnCompletion', 'enableScheduling'] as const) {
+    if (value[key] !== undefined && typeof value[key] !== 'boolean') {
+      throw new Error(`lessonIndex.${key} must be a boolean.`);
+    }
+  }
+}
+
 export function interpolate(value: string, config: LamsConfig): string {
   return value.replace(/\{\{(\w+)\}\}/g, (match, key: keyof LamsConfig) => {
     const replacement = config[key];
@@ -194,7 +233,9 @@ function validateLocatorSpecs(selectors: LamsConfig['selectors']): void {
     selectors.openLesson,
     selectors.openAuthoring,
     selectors.authoringRoot,
-    selectors.authoringNode?.locator
+    selectors.authoringNode?.locator,
+    selectors.openAddLesson,
+    selectors.openMonitoring
   ];
   for (const spec of specs) {
     if (spec === undefined) continue;
