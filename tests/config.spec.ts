@@ -94,3 +94,26 @@ test('rejects iRAT correct-answer weights that do not total 100', async () => {
   base.irat.questions[0].answers[0].weight = 80;
   await expect(loadConfig('configs/example.json', { irat: base.irat })).rejects.toThrow('Correct answer weights must total 100');
 });
+
+test('requires the iRAT advanced toggles the deployment guide mandates', async () => {
+  const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
+  expect(base.irat.advanced.shuffleQuestions).toBe(true);
+  expect(base.irat.advanced.questionsNumbering).toBe(true);
+
+  const missing = { ...base.irat, advanced: { ...base.irat.advanced } };
+  delete missing.advanced.shuffleQuestions;
+  await expect(loadConfig('configs/example.json', { irat: missing })).rejects.toThrow(
+    'irat.advanced.shuffleQuestions must be a boolean.'
+  );
+});
+
+test('defaults iRAT question marks to 1 and rejects a non-positive mark', async () => {
+  const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
+  const config = await loadConfig('configs/example.json', { irat: base.irat });
+  expect(config.irat?.questions[0]?.marks).toBe(1);
+
+  const bad = { ...base.irat, questions: [{ ...base.irat.questions[0], marks: 0 }] };
+  await expect(loadConfig('configs/example.json', { irat: bad })).rejects.toThrow(
+    'irat.questions[0].marks must be a positive integer.'
+  );
+});

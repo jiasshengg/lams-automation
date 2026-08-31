@@ -153,3 +153,17 @@ test('formats a preflight summary with counts, marks, nodes, and gates', () => {
   expect(formatAEPlanSummary(plan)).toContain('AE Case 1: questions 1–2');
   expect(formatAEPlanSummary(plan)).toContain('AE Gate Case 1 to Case 2 Question 3');
 });
+
+test('rejects an AE gate that precedes the first AE node', () => {
+  // Documented process: the number of AE gates equals the number of SoT breaks and the
+  // number of AE nodes is breaks + 1, so the first AE node is never gated. A lesson
+  // with a leading gate is non-conforming and must be reported, not accepted.
+  const input = validInput() as Record<string, unknown>;
+  const gates = input.gates as Array<Record<string, unknown>>;
+  input.gates = [
+    { title: 'AE Gate AE Case 1', beforeNodeTitle: 'AE Case 1', beforeQuestionNumber: 1 },
+    ...gates
+  ];
+
+  expect(() => buildAEPlan(input)).toThrow(/requires 1 AE gates; found 2|afterNodeTitle/i);
+});

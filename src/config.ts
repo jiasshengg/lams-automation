@@ -31,6 +31,7 @@ export interface ExpectedGateProperties {
   description?: string;
   dynamicPassword?: boolean;
   rotationSeconds?: number;
+  stopAtPrecedingActivity?: boolean;
 }
 
 export interface LessonIndexSettings {
@@ -49,6 +50,8 @@ export interface IratAnswerRequest {
 
 export interface IratQuestionRequest {
   title: string;
+  /** Deployment guide: iRAT questions carry 1 mark each unless stated otherwise. */
+  marks: number;
   type: string;
   content: string;
   mandatory: boolean;
@@ -69,7 +72,9 @@ export interface IratRequest {
   teamSetupName: string;
   questions: IratQuestionRequest[];
   advanced: {
+    shuffleQuestions: boolean;
     shuffleAnswers: boolean;
+    questionsNumbering: boolean;
     displayAllQuestions: boolean;
     answerJustification: boolean;
     confidenceLevels: boolean;
@@ -95,6 +100,8 @@ export interface LamsConfig {
   expectedAEGates: number;
   expectedFlow: string[];
   expectedGateProperties?: ExpectedGateProperties[];
+  /** Deployment guide: every tool activity reports "Last total score" to the gradebook. */
+  expectedGradebookOutput?: string;
   lessonIndex?: LessonIndexSettings;
   irat?: IratRequest;
   browser: {
@@ -102,6 +109,7 @@ export interface LamsConfig {
     userDataDir: string;
     manualLoginTimeoutMs: number;
     actionTimeoutMs: number;
+    readyTimeoutMs: number;
   };
   selectors: {
     previousCohort?: LocatorSpec;
@@ -145,6 +153,7 @@ const requestOverrideKeys = [
   'expectedAEGates',
   'expectedFlow',
   'expectedGateProperties',
+  'expectedGradebookOutput',
   'lessonIndex',
   'irat'
 ] as const;
@@ -209,7 +218,10 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     headless: config.browser?.headless ?? false,
     userDataDir: config.browser?.userDataDir ?? '.playwright/lams-profile',
     manualLoginTimeoutMs: config.browser?.manualLoginTimeoutMs ?? 120_000,
-    actionTimeoutMs: config.browser?.actionTimeoutMs ?? 15_000
+    actionTimeoutMs: config.browser?.actionTimeoutMs ?? 15_000,
+    // LAMS initialises the authoring canvas well after the toolbar paints, so surface
+    // readiness needs a longer budget than an ordinary action.
+    readyTimeoutMs: config.browser?.readyTimeoutMs ?? 60_000
   };
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);
@@ -250,6 +262,12 @@ function validateIratRequest(value: unknown): void {
     }
     if (titles.has(question.title)) throw new Error(`Duplicate iRAT question title: "${question.title}".`);
     titles.add(question.title);
+    if (question.marks === undefined) {
+      // The deployment guide sets iRAT questions to 1 mark each unless stated otherwise.
+      question.marks = 1;
+    } else if (!Number.isInteger(question.marks) || Number(question.marks) <= 0) {
+      throw new Error(`irat.questions[${questionIndex}].marks must be a positive integer.`);
+    }
     if (typeof question.mandatory !== 'boolean') {
       throw new Error(`irat.questions[${questionIndex}].mandatory must be a boolean.`);
     }
@@ -280,7 +298,14 @@ function validateIratRequest(value: unknown): void {
     }
   });
   if (!isRecord(value.advanced)) throw new Error('irat.advanced must be an object.');
-  for (const key of ['shuffleAnswers', 'displayAllQuestions', 'answerJustification', 'confidenceLevels'] as const) {
+  for (const key of [
+    'shuffleQuestions',
+    'shuffleAnswers',
+    'questionsNumbering',
+    'displayAllQuestions',
+    'answerJustification',
+    'confidenceLevels'
+  ] as const) {
     if (typeof value.advanced[key] !== 'boolean') throw new Error(`irat.advanced.${key} must be a boolean.`);
   }
 }
@@ -332,6 +357,9 @@ function validateExpectedGateProperties(value: unknown): void {
     }
     if (rule.rotationSeconds !== undefined && (!Number.isInteger(rule.rotationSeconds) || Number(rule.rotationSeconds) <= 0)) {
       throw new Error(`expectedGateProperties[${index}].rotationSeconds must be a positive integer.`);
+    }
+    if (rule.stopAtPrecedingActivity !== undefined && typeof rule.stopAtPrecedingActivity !== 'boolean') {
+      throw new Error(`expectedGateProperties[${index}].stopAtPrecedingActivity must be a boolean.`);
     }
   });
 }

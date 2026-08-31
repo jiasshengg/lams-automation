@@ -113,13 +113,13 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
     steps.push({
       phase: 'question',
       questionTitle: question.title,
-      action: `Update ${question.type} question; mandatory=${question.mandatory}; font=${question.fontFamily} ${question.fontSize}; correct weights total 100; save as a new version`
+      action: `Update ${question.type} question; mandatory=${question.mandatory}; marks=${question.marks}; font=${question.fontFamily} ${question.fontSize}; correct weights total 100; save as a new version`
     });
   });
   steps.push(
     {
       phase: 'advanced',
-      action: `Set shuffle answers=${request.advanced.shuffleAnswers}, display all questions=${request.advanced.displayAllQuestions}, answer justification=${request.advanced.answerJustification}, confidence levels=${request.advanced.confidenceLevels}`
+      action: `Set shuffle questions=${request.advanced.shuffleQuestions}, shuffle answers=${request.advanced.shuffleAnswers}, questions' numbering=${request.advanced.questionsNumbering}, display all questions=${request.advanced.displayAllQuestions}, answer justification=${request.advanced.answerJustification}, confidence levels=${request.advanced.confidenceLevels}`
     },
     { phase: 'verification', action: 'Open Print View and compare every question and correct answer with the supplied request' },
     { phase: 'verification', action: 'Save iRAT and re-inspect the resulting state' }

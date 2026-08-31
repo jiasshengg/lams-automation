@@ -399,3 +399,36 @@ function renameConfig(): LamsConfig {
     browser: { actionTimeoutMs: 2_000 }
   } as LamsConfig;
 }
+
+test('waits for the authoring loading overlay to clear before using the toolbar', async ({ page }) => {
+  // Mirrors the live authoring surface: the toolbar renders visible and enabled
+  // underneath a full-page spinner that outlives the ordinary action timeout.
+  await page.setContent(`
+    <style>#loadingOverlay { position: fixed; inset: 0; background: #fff; z-index: 10; }</style>
+    <div id="loadingOverlay"></div>
+    <button id="openButton" onclick="document.querySelector('[role=dialog]').hidden = false">Open</button>
+    <div role="dialog" aria-label="Open design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">[Jss] TEST LESSON A 280826</div>
+      </div>
+      <button id="ldStoreDialogOpenButton" onclick="this.closest('[role=dialog]').hidden = true; document.querySelector('h1').hidden = false">Open</button>
+    </div>
+    <h1 hidden>[Jss] TEST LESSON A 280826</h1>
+    <script>
+      setTimeout(function () { document.querySelector('#loadingOverlay').style.display = 'none'; }, 2000);
+    </script>
+  `);
+
+  const config = {
+    sourceLessonTitle: '[Jss] TEST LESSON A 280826',
+    sourceFolderPath: ['Courses'],
+    browser: { actionTimeoutMs: 1_000, readyTimeoutMs: 10_000 }
+  } as LamsConfig;
+  // The live runner applies the action timeout to every click via
+  // context.setDefaultTimeout, so the click cannot simply outwait the overlay.
+  page.setDefaultTimeout(config.browser.actionTimeoutMs);
+
+  await openSourceLesson(page, config);
+  await expect(page.getByRole('heading', { name: config.sourceLessonTitle })).toBeVisible();
+});

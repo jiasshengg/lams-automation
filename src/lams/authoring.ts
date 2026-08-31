@@ -23,6 +23,10 @@ export interface GraphNode {
   description: string | null;
   dynamicPassword: boolean | null;
   rotationSeconds: number | null;
+  /** Gates only: "Stop students at preceding activity?" in the properties dialog. */
+  stopAtPrecedingActivity: boolean | null;
+  /** Tool activities only: the configured Gradebook output, e.g. "Last total score". */
+  gradebookOutput: string | null;
 }
 
 export interface GraphTransition {
@@ -46,8 +50,30 @@ export async function openAuthoring(page: Page, config: LamsConfig): Promise<Pag
   const authoringPage = (await popupPromise) ?? page;
   await authoringPage.waitForLoadState('domcontentloaded').catch(() => undefined);
   await authoringPage.locator('#openButton').waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+  await waitForAuthoringReady(authoringPage, config);
   console.log(`Authoring surface opened${authoringPage === page ? '' : ' in a new page'}.`);
   return authoringPage;
+}
+
+/**
+ * LAMS paints the authoring toolbar and canvas behind a full-page spinner and only
+ * hides #loadingOverlay once the design and tool palette have finished initialising.
+ * Every toolbar button is visible and enabled underneath it for that whole period, so
+ * waiting for a button is not proof that it can be clicked: the overlay swallows the
+ * pointer event and the click times out.
+ */
+export async function waitForAuthoringReady(page: Page, config: LamsConfig): Promise<void> {
+  const timeout = config.browser.readyTimeoutMs ?? config.browser.actionTimeoutMs;
+  try {
+    // A detached overlay also counts as hidden, so this is a no-op once LAMS removes it.
+    await page.locator('#loadingOverlay').waitFor({ state: 'hidden', timeout });
+  } catch (error) {
+    const directory = await saveDiagnostics(page, 'authoring-loading-overlay-stuck');
+    throw new Error(
+      `The LAMS authoring loading overlay did not clear within ${timeout}ms. Diagnostics: ${directory}`,
+      { cause: error }
+    );
+  }
 }
 
 export async function listAuthoringNodes(page: Page, config: LamsConfig): Promise<AuthoringNode[]> {
@@ -81,6 +107,8 @@ export async function inspectAuthoringGraph(page: Page): Promise<AuthoringGraph>
       toolID?: number;
       gateType?: string;
       description?: string;
+      gateStopAtPrecedingActivity?: boolean;
+      gradebookToolOutputDefinitionDescription?: string;
       passwordDynamic?: boolean | number | null;
       passwordDynamicSeconds?: number;
       grouping?: { uiid?: number; groupingUIID?: number };
@@ -127,6 +155,14 @@ export async function inspectAuthoringGraph(page: Page): Promise<AuthoringGraph>
         rotationSeconds:
           model?.gateType === 'password' && Number.isFinite(model.passwordDynamicSeconds)
             ? Number(model.passwordDynamicSeconds)
+            : null,
+        stopAtPrecedingActivity:
+          type === 'gate' && typeof model?.gateStopAtPrecedingActivity === 'boolean'
+            ? model.gateStopAtPrecedingActivity
+            : null,
+        gradebookOutput:
+          typeof model?.gradebookToolOutputDefinitionDescription === 'string'
+            ? model.gradebookToolOutputDefinitionDescription.trim()
             : null
       };
     });
@@ -182,4 +218,50 @@ function deduplicate(nodes: AuthoringNode[]): AuthoringNode[] {
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * The observed LAMS properties dialog has no close control - the only button in its
+ * header deletes the activity - it ignores Escape, and it lingers over neighbouring
+ * activities while still intercepting pointer events. A real pointer click on the next
+ * activity is therefore swallowed by the dialog, so the click is dispatched straight to
+ * the SVG activity instead, and the switch is confirmed from the dialog's own title
+ * field rather than assumed.
+ */
+export async function openActivityProperties(
+  page: Page,
+  uiid: number,
+  expectedTitle: string,
+  config: LamsConfig
+): Promise<void> {
+  const node = page.locator(`#canvas > svg > g.svg-activity[uiid="${uiid}"]`);
+  if ((await node.count()) !== 1) {
+    throw new Error(`Runtime UIID ${uiid} did not resolve to one SVG activity.`);
+  }
+  await node.dispatchEvent('click');
+  try {
+    // Two things make this read awkward. The dialog holds one title field per activity
+    // and renders only the active one, so a field that is not laid out is a stale
+    // sibling. And the field is an <input> carrying .value for a gate but a <span>
+    // carrying text for a tool activity, so both shapes have to be read.
+    await page.waitForFunction(
+      ([selector, title]) => {
+        const fields = Array.from(document.querySelectorAll<HTMLElement>(selector!));
+        return fields.some((field) => {
+          if (field.getClientRects().length === 0) return false;
+          const value = (field as HTMLInputElement).value;
+          const label = typeof value === 'string' ? value : (field.textContent ?? '');
+          return label.trim() === title;
+        });
+      },
+      ['#propertiesDialog .propertiesContentFieldTitle', expectedTitle] as const,
+      { timeout: config.browser.actionTimeoutMs }
+    );
+  } catch (error) {
+    const directory = await saveDiagnostics(page, 'properties-dialog-not-switched');
+    throw new Error(
+      `The properties dialog did not switch to "${expectedTitle}". Diagnostics: ${directory}`,
+      { cause: error }
+    );
+  }
 }

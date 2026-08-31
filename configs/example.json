@@ -41,12 +41,14 @@
     {
       "name": "tRAT Gate",
       "type": "permission",
-      "description": "tRAT Gate"
+      "description": "tRAT Gate",
+      "stopAtPrecedingActivity": true
     },
     {
       "name": "AE Gate Application Exercise 1",
       "type": "permission",
-      "description": "AE Gate Application Exercise 1"
+      "description": "AE Gate Application Exercise 1",
+      "stopAtPrecedingActivity": true
     }
   ],
   "lessonIndex": {
@@ -72,13 +74,24 @@
         "fontFamily": "Arial",
         "fontSize": 12,
         "answers": [
-          { "text": "REPLACE WITH CORRECT ANSWER", "correct": true, "weight": 100 },
-          { "text": "REPLACE WITH INCORRECT ANSWER", "correct": false, "weight": 0 }
-        ]
+          {
+            "text": "REPLACE WITH CORRECT ANSWER",
+            "correct": true,
+            "weight": 100
+          },
+          {
+            "text": "REPLACE WITH INCORRECT ANSWER",
+            "correct": false,
+            "weight": 0
+          }
+        ],
+        "marks": 1
       }
     ],
     "advanced": {
+      "shuffleQuestions": true,
       "shuffleAnswers": true,
+      "questionsNumbering": true,
       "displayAllQuestions": true,
       "answerJustification": true,
       "confidenceLevels": true
@@ -113,5 +126,6 @@
       "name": "Monitor",
       "exact": false
     }
-  }
+  },
+  "expectedGradebookOutput": "Last total score"
 }

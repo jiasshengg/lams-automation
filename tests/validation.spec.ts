@@ -28,7 +28,9 @@ test('passes the observed reference lesson flow', () => {
     gateType: /Gate/.test(name) ? (name === 'iRAT Gate' ? 'password' : 'permission') : null,
     description: /Gate/.test(name) ? name : null,
     dynamicPassword: name === 'iRAT Gate' ? true : null,
-    rotationSeconds: name === 'iRAT Gate' ? 10 : null
+    rotationSeconds: name === 'iRAT Gate' ? 10 : null,
+    stopAtPrecedingActivity: null,
+    gradebookOutput: null
   }));
   const graph: AuthoringGraph = {
     rendering: 'svg',
@@ -71,7 +73,9 @@ test('reports an incorrect iRAT Gate rotation time', () => {
     gateType: name === 'iRAT Gate' ? 'password' : /Gate/.test(name) ? 'permission' : null,
     description: /Gate/.test(name) ? name : null,
     dynamicPassword: name === 'iRAT Gate' ? true : null,
-    rotationSeconds: name === 'iRAT Gate' ? 15 : null
+    rotationSeconds: name === 'iRAT Gate' ? 15 : null,
+    stopAtPrecedingActivity: null,
+    gradebookOutput: null
   }));
   const graph: AuthoringGraph = {
     rendering: 'svg',
@@ -187,6 +191,62 @@ function graphNode(uiid: number, name: string, type: GraphNode['type']): GraphNo
     gateType: type === 'gate' ? 'permission' : null,
     description: type === 'gate' ? name : null,
     dynamicPassword: null,
-    rotationSeconds: null
+    rotationSeconds: null,
+    stopAtPrecedingActivity: null,
+    gradebookOutput: null
   };
 }
+
+test('reports an AE gate that does not stop students at the preceding activity', () => {
+  const graph: AuthoringGraph = {
+    rendering: 'svg',
+    modelAvailable: true,
+    nodes: [
+      {
+        uiid: 7, name: 'AE Gate AE Case 3 Q3-6', type: 'gate', grouped: false, groupingUiid: null,
+        x: null, y: null, toolId: null, gateType: 'permission', description: 'AE Gate AE Case 3 Q3-6',
+        dynamicPassword: null, rotationSeconds: null, stopAtPrecedingActivity: false, gradebookOutput: null
+      }
+    ],
+    transitions: []
+  };
+  const config = {
+    expectedFlow: ['AE Gate AE Case 3 Q3-6'],
+    expectedAENodes: 0,
+    expectedAEGates: 1,
+    expectedGateProperties: [
+      { name: 'AE Gate AE Case 3 Q3-6', type: 'permission', stopAtPrecedingActivity: true }
+    ]
+  } as LamsConfig;
+
+  const report = validateAuthoringGraph(graph, config);
+  const check = report.checks.find((item) => item.label === 'Gate properties — AE Gate AE Case 3 Q3-6');
+  expect(check?.passed).toBe(false);
+  expect(check?.detail).toContain('stop at preceding activity expected true; found false');
+});
+
+test('reports a tool activity whose gradebook output is not the expected one', () => {
+  const graph: AuthoringGraph = {
+    rendering: 'svg',
+    modelAvailable: true,
+    nodes: [
+      {
+        uiid: 8, name: 'AE Case 3 Q3-6', type: 'tool', grouped: true, groupingUiid: 6, x: null, y: null,
+        toolId: 19, gateType: null, description: null, dynamicPassword: null, rotationSeconds: null,
+        stopAtPrecedingActivity: null, gradebookOutput: 'First total score'
+      }
+    ],
+    transitions: []
+  };
+  const config = {
+    expectedFlow: ['AE Case 3 Q3-6'],
+    expectedAENodes: 1,
+    expectedAEGates: 0,
+    expectedGradebookOutput: 'Last total score'
+  } as LamsConfig;
+
+  const report = validateAuthoringGraph(graph, config);
+  const check = report.checks.find((item) => item.label === 'Gradebook output');
+  expect(check?.passed).toBe(false);
+  expect(check?.detail).toContain('AE Case 3 Q3-6');
+});

@@ -22,6 +22,7 @@ const request: IratRequest = {
   questions: [
     {
       title: 'Question 1',
+      marks: 1,
       type: 'multiple-choice',
       content: 'Question content',
       mandatory: true,
@@ -34,6 +35,8 @@ const request: IratRequest = {
     }
   ],
   advanced: {
+    shuffleQuestions: true,
+    questionsNumbering: true,
     shuffleAnswers: true,
     displayAllQuestions: true,
     answerJustification: true,
@@ -159,6 +162,8 @@ function graphNode(uiid: number, name: string, type: GraphNode['type']): GraphNo
     gateType: type === 'gate' ? 'password' : null,
     description: type === 'gate' ? name : null,
     dynamicPassword: type === 'gate',
-    rotationSeconds: type === 'gate' ? 10 : null
+    rotationSeconds: type === 'gate' ? 10 : null,
+    stopAtPrecedingActivity: null,
+    gradebookOutput: null
   };
 }

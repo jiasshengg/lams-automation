@@ -2,6 +2,7 @@ import type { Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, type AuthoringGraph, type GraphNode } from './authoring.js';
 import type { IratEditor, IratObservedQuestion, IratObservedState } from './irat.js';
+import { findUniqueCheckbox } from './ae-settings.js';
 
 /**
  * Live adapter for the LAMS Assessment authoring UI.
@@ -105,6 +106,13 @@ export class LamsIratEditor implements IratEditor {
       await setHiddenValue(questionFrame.locator(`#optionMaxMark${index}`), answer.weight / 100);
     }
 
+    // The guide checks "Default question grade" per question (1 for iRAT). No stable id
+    // was observed, so it is matched by its visible label and read back.
+    const gradeField = questionFrame.getByLabel('Default question grade', { exact: false }).first();
+    await gradeField.fill(String(question.marks));
+    if ((await gradeField.inputValue()).trim() !== String(question.marks)) {
+      throw new Error(`Default question grade for "${question.title}" did not accept ${question.marks}.`);
+    }
     await questionFrame.locator('#saveAsButton').click();
     await frame.locator('#TB_iframeContent').waitFor({ state: 'detached', timeout: this.timeoutMs });
     const updatedRow = await exactQuestionRow(frame, question.title);
@@ -126,6 +134,19 @@ export class LamsIratEditor implements IratEditor {
     }
     await setCheckbox(frame.locator('#allowAnswerJustification'), settings.answerJustification);
     await setCheckbox(frame.locator('#enable-confidence-levels'), settings.confidenceLevels);
+    // The deployment guide turns these two on for iRAT (the inverse of AE). No stable id
+    // was observed for them, so they are matched by their visible label, like the AE
+    // activity settings, and read back rather than assumed.
+    await this.setLabelledToggle('Shuffle questions', settings.shuffleQuestions);
+    await this.setLabelledToggle("Enable questions' numbering", settings.questionsNumbering);
+  }
+
+  private async setLabelledToggle(label: string, expected: boolean): Promise<void> {
+    const { locator } = await findUniqueCheckbox(this.page, label, this.timeoutMs);
+    await setCheckbox(locator, expected);
+    if ((await locator.isChecked()) !== expected) {
+      throw new Error(`Checkbox "${label}" did not remain ${expected ? 'enabled' : 'disabled'}.`);
+    }
   }
 
   async verifyPrintView(request: IratRequest): Promise<void> {

@@ -113,9 +113,12 @@ export function buildAEPlan(value: unknown): AEPlan {
       `breakMarkerCount ${input.breakMarkerCount} requires ${requiredAENodes} AE nodes; found ${input.nodes.length}`
     );
   }
-  if (input.gates.length !== input.breakMarkerCount) {
+  // Documented process: AE gates equal the number of SoT breaks while AE nodes are
+  // breaks + 1, so every gate sits between two AE nodes and the first is never gated.
+  const requiredAEGates = input.breakMarkerCount;
+  if (input.gates.length !== requiredAEGates) {
     throw new Error(
-      `breakMarkerCount ${input.breakMarkerCount} requires ${input.breakMarkerCount} AE gates; found ${input.gates.length}`
+      `breakMarkerCount ${input.breakMarkerCount} requires ${requiredAEGates} AE gates; found ${input.gates.length}`
     );
   }
 
@@ -150,7 +153,7 @@ export function buildAEPlan(value: unknown): AEPlan {
     sourceLabel: input.sourceLabel,
     breakMarkerCount: input.breakMarkerCount,
     requiredAENodes,
-    requiredAEGates: input.breakMarkerCount,
+    requiredAEGates,
     totalMarks,
     nodes,
     gates: input.gates,
@@ -259,10 +262,32 @@ function stripOptionPrefix(value: string): string {
   return value.replace(/^\s*[A-Z]\s*[).:-]\s*/i, '').trim();
 }
 
+/** A leading gate is the first gate and declares no preceding AE node. */
+function hasLeadingGate(input: AEPlanInput): boolean {
+  const [first] = input.gates;
+  return first !== undefined && first.afterNodeTitle === undefined;
+}
+
 function validateGateAdjacency(input: AEPlanInput): void {
-  input.gates.forEach((gate, index) => {
+  const leading = hasLeadingGate(input);
+  if (leading) {
+    const firstNode = input.nodes[0]!;
+    const firstQuestion = firstNode.questions[0];
+    const gate = input.gates[0]!;
+    if (gate.beforeNodeTitle !== firstNode.title || !firstQuestion || gate.beforeQuestionNumber !== firstQuestion.number) {
+      throw new Error(
+        `A leading gate must point at the first AE node "${firstNode.title}" and its first question (${firstQuestion?.number ?? 'missing'})`
+      );
+    }
+  }
+
+  const betweenGates = leading ? input.gates.slice(1) : input.gates;
+  betweenGates.forEach((gate, index) => {
     const after = input.nodes[index]!;
     const before = input.nodes[index + 1]!;
+    if (gate.afterNodeTitle === undefined) {
+      throw new Error(`Only the first gate may omit afterNodeTitle as a leading gate; gate "${gate.title}" does not`);
+    }
     if (gate.afterNodeTitle !== after.title || gate.beforeNodeTitle !== before.title) {
       throw new Error(`Gate ${index + 1} must connect "${after.title}" to "${before.title}"`);
     }
