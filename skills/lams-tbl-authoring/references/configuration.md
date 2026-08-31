@@ -27,6 +27,10 @@ The scripts merge these permitted request values in memory and derive `destinati
 
 Folder paths are variable-length arrays. Do not assume a fixed number of folders.
 
+## Existing-lesson rename fields
+
+Use `sourceFolderPath` for the exact folder containing the existing lesson, `sourceLessonTitle` for its exact current title, and `lessonTitle` for the exact new title. A rename stays in the same folder and does not use `destinationFolderPath`.
+
 ## Validation fields
 
 `expectedFlow` contains the exact node names in their expected linear order. Do not populate it from the observed graph merely to make validation pass.
@@ -62,7 +66,7 @@ Keep `headless` false during development. Store the persistent profile only unde
 
 ## Configuration checks
 
-Before running a committed copy, reject the merged request when:
+Before running a committed copy or rename, reject the merged request when:
 
 - the new title equals the source title;
 - the new title contains a placeholder;
@@ -70,3 +74,5 @@ Before running a committed copy, reject the merged request when:
 - the source lesson or destination is not exact;
 - the destination already contains the new title;
 - the workspace course differs from the approved playground.
+
+For a rename, also reject the operation when the same folder already contains the new title. After saving, verify that the new title exists and the old title is absent.
