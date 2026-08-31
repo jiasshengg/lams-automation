@@ -1,0 +1,43 @@
+{
+  "baseUrl": "https://replace-with-your-lams-host.example/lams/",
+  "workspaceCourse": "DL Playground 2026/2027 [internal]",
+  "previousCohort": "Cohort_2025Y1",
+  "currentCohort": "Cohort_2026Y1",
+  "module": "FOM",
+  "tbl": "TBL06",
+  "lessonTitle": "FOM TBL06 030926 2026Y1",
+  "sourceLessonTitle": "FOM TBL06 PREVIOUS-YEAR TITLE",
+  "sourceFolderPath": ["Courses", "! My Courses", "! Sample & Orientation Lessons"],
+  "destinationFolder": "Cohort_2026Y1/FOM",
+  "destinationFolderPath": ["Courses", "! My Courses", "DL Playground 2026/2027 [internal]"],
+  "expectedAENodes": 5,
+  "expectedAEGates": 4,
+  "expectedFlow": [
+    "Team Setup",
+    "iRAT Gate",
+    "iRAT",
+    "Leader Selection",
+    "tRAT Gate",
+    "tRAT",
+    "AE Gate Application Exercise 1",
+    "AE Test Qns"
+  ],
+  "browser": {
+    "headless": false,
+    "userDataDir": ".playwright/lams-profile",
+    "manualLoginTimeoutMs": 120000,
+    "actionTimeoutMs": 15000
+  },
+  "selectors": {
+    "previousCohort": {
+      "by": "text",
+      "text": "{{previousCohort}}",
+      "exact": true
+    },
+    "tbl": {
+      "by": "text",
+      "text": "{{tbl}}",
+      "exact": false
+    }
+  }
+}

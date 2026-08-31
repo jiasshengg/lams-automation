@@ -1,0 +1,22 @@
+{
+  "name": "lams-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable Playwright automation for LAMS TBL authoring workflows",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "milestone1": "tsx src/main.ts",
+    "copy:lesson": "tsx src/main.ts",
+    "inspect:authoring": "tsx src/inspect-authoring.ts",
+    "validate:authoring": "tsx src/inspect-authoring.ts --validate",
+    "test": "playwright test",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.18.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
