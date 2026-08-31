@@ -205,3 +205,43 @@ function deduplicate(nodes: AuthoringNode[]): AuthoringNode[] {
     return true;
   });
 }
+
+/**
+ * The observed LAMS properties dialog has no close control - the only button in its
+ * header deletes the activity - it ignores Escape, and it lingers over neighbouring
+ * activities while still intercepting pointer events. A real pointer click on the next
+ * activity is therefore swallowed by the dialog, so the click is dispatched straight to
+ * the SVG activity instead, and the switch is confirmed from the dialog's own title
+ * field rather than assumed.
+ */
+export async function openActivityProperties(
+  page: Page,
+  uiid: number,
+  expectedTitle: string,
+  config: LamsConfig
+): Promise<void> {
+  const node = page.locator(`#canvas > svg > g.svg-activity[uiid="${uiid}"]`);
+  if ((await node.count()) !== 1) {
+    throw new Error(`Runtime UIID ${uiid} did not resolve to one SVG activity.`);
+  }
+  await node.dispatchEvent('click');
+  try {
+    // The dialog holds one hidden title field per activity and renders only the
+    // active one, so the value must be read from a field that is actually laid out;
+    // querying the first match reads a stale sibling.
+    await page.waitForFunction(
+      ([selector, title]) => {
+        const fields = Array.from(document.querySelectorAll<HTMLInputElement>(selector!));
+        return fields.some((field) => field.value === title && field.getClientRects().length > 0);
+      },
+      ['#propertiesDialog .propertiesContentFieldTitle', expectedTitle] as const,
+      { timeout: config.browser.actionTimeoutMs }
+    );
+  } catch (error) {
+    const directory = await saveDiagnostics(page, 'properties-dialog-not-switched');
+    throw new Error(
+      `The properties dialog did not switch to "${expectedTitle}". Diagnostics: ${directory}`,
+      { cause: error }
+    );
+  }
+}

@@ -153,3 +153,32 @@ test('formats a preflight summary with counts, marks, nodes, and gates', () => {
   expect(formatAEPlanSummary(plan)).toContain('AE Case 1: questions 1–2');
   expect(formatAEPlanSummary(plan)).toContain('AE Gate Case 1 to Case 2 Question 3');
 });
+
+test('accepts a leading AE gate that precedes the first AE node', () => {
+  // Observed live: a TBL lesson can gate entry to its first AE node (the gate sits
+  // after tRAT), which the strictly-between-nodes model could not express.
+  const input = validInput() as Record<string, unknown>;
+  const gates = input.gates as Array<Record<string, unknown>>;
+  input.gates = [
+    { title: 'AE Gate AE Case 1', beforeNodeTitle: 'AE Case 1', beforeQuestionNumber: 1 },
+    ...gates
+  ];
+
+  const plan = buildAEPlan(input);
+  expect(plan.requiredAENodes).toBe(2);
+  expect(plan.requiredAEGates).toBe(2);
+  expect(plan.gates.map((gate) => gate.title)).toEqual(['AE Gate AE Case 1', 'AE Gate Case 1 to Case 2 Question 3']);
+  expect(plan.gates[0]?.afterNodeTitle ?? null).toBeNull();
+  expect(formatAEPlanSummary(plan)).toContain('AE Gate AE Case 1: (lesson entry) -> AE Case 1 (question 1)');
+});
+
+test('rejects a leading AE gate that does not point at the first AE node', () => {
+  const input = validInput() as Record<string, unknown>;
+  const gates = input.gates as Array<Record<string, unknown>>;
+  input.gates = [
+    { title: 'AE Gate wrong', beforeNodeTitle: 'AE Case 2', beforeQuestionNumber: 3 },
+    ...gates
+  ];
+
+  expect(() => buildAEPlan(input)).toThrow(/leading gate/i);
+});

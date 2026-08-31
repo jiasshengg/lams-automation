@@ -164,9 +164,15 @@ export function validateAEPlanGraph(graph: AuthoringGraph, plan: AEPlan): Valida
   checks.push(countCheck('AE plan gate count', plan.requiredAEGates, aeGates.length));
 
   const expectedChain: string[] = [];
+  // A leading gate declares no preceding AE node, so it opens the chain rather than
+  // following the AE node at its index.
+  const [firstGate] = plan.gates;
+  const leadingGate = firstGate !== undefined && firstGate.afterNodeTitle === undefined ? firstGate : undefined;
+  if (leadingGate) expectedChain.push(leadingGate.title);
+  const betweenGates = leadingGate ? plan.gates.slice(1) : plan.gates;
   plan.nodes.forEach((node, index) => {
     expectedChain.push(node.title);
-    const gate = plan.gates[index];
+    const gate = betweenGates[index];
     if (gate) expectedChain.push(gate.title);
   });
   const transitionKeys = new Set(

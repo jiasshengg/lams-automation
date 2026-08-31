@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { chromium, type Locator, type Page } from '@playwright/test';
-import { loadConfig } from './config.js';
-import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
+import { loadConfig, type LamsConfig } from './config.js';
+import { inspectAuthoringGraph, openActivityProperties, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { traverseFolderPath } from './lams/lesson-copy.js';
 import { openLams, verifyWorkspaceCourse, waitForUniqueVisible } from './lams/navigation.js';
@@ -48,8 +48,8 @@ async function main(): Promise<void> {
     const graph = await inspectAuthoringGraph(activePage);
     console.log(`Representative lesson: ${lessonTitle}`);
     console.log(`Graph nodes: ${graph.nodes.map((node) => node.name).join(' -> ')}`);
-    const gateDirectory = await inspectNodeControls(activePage, graph, 'iRAT Gate', 'irat-gate-controls', config.browser.actionTimeoutMs);
-    const activityDirectory = await inspectNodeControls(activePage, graph, 'iRAT', 'irat-activity-controls', config.browser.actionTimeoutMs);
+    const gateDirectory = await inspectNodeControls(activePage, graph, 'iRAT Gate', 'irat-gate-controls', config);
+    const activityDirectory = await inspectNodeControls(activePage, graph, 'iRAT', 'irat-activity-controls', config);
     console.log(`iRAT Gate diagnostics: ${gateDirectory}`);
     console.log(`iRAT activity diagnostics: ${activityDirectory}`);
     console.log('Read-only discovery complete; no Save action was used.');
@@ -83,17 +83,14 @@ async function inspectNodeControls(
   graph: Awaited<ReturnType<typeof inspectAuthoringGraph>>,
   nodeName: string,
   label: string,
-  timeoutMs: number
+  config: LamsConfig
 ): Promise<string> {
   const matches = graph.nodes.filter((node) => node.name === nodeName);
   if (matches.length !== 1) {
     const directory = await saveDiagnostics(page, `${label}-node-not-unique`);
     throw new Error(`Expected one ${nodeName} runtime node; found ${matches.length}. Diagnostics: ${directory}`);
   }
-  const node = page.locator(`#canvas > svg > g.svg-activity[uiid="${matches[0]!.uiid}"]`);
-  if ((await node.count()) !== 1) throw new Error(`Runtime UIID ${matches[0]!.uiid} did not resolve to one SVG activity.`);
-  await node.click();
-  await page.waitForTimeout(Math.min(timeoutMs, 1_000));
+  await openActivityProperties(page, matches[0]!.uiid, nodeName, config);
   return saveDiagnostics(page, label);
 }
 
