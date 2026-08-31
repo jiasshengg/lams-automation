@@ -240,13 +240,19 @@ export async function openActivityProperties(
   }
   await node.dispatchEvent('click');
   try {
-    // The dialog holds one hidden title field per activity and renders only the
-    // active one, so the value must be read from a field that is actually laid out;
-    // querying the first match reads a stale sibling.
+    // Two things make this read awkward. The dialog holds one title field per activity
+    // and renders only the active one, so a field that is not laid out is a stale
+    // sibling. And the field is an <input> carrying .value for a gate but a <span>
+    // carrying text for a tool activity, so both shapes have to be read.
     await page.waitForFunction(
       ([selector, title]) => {
-        const fields = Array.from(document.querySelectorAll<HTMLInputElement>(selector!));
-        return fields.some((field) => field.value === title && field.getClientRects().length > 0);
+        const fields = Array.from(document.querySelectorAll<HTMLElement>(selector!));
+        return fields.some((field) => {
+          if (field.getClientRects().length === 0) return false;
+          const value = (field as HTMLInputElement).value;
+          const label = typeof value === 'string' ? value : (field.textContent ?? '');
+          return label.trim() === title;
+        });
       },
       ['#propertiesDialog .propertiesContentFieldTitle', expectedTitle] as const,
       { timeout: config.browser.actionTimeoutMs }

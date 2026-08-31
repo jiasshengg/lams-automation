@@ -189,3 +189,20 @@ test('exposes gate stop-at-preceding and tool gradebook output from the runtime 
   expect(graph.nodes.find((node) => node.uiid === 7)?.stopAtPrecedingActivity).toBe(true);
   expect(graph.nodes.find((node) => node.uiid === 8)?.gradebookOutput).toBe('Last total score');
 });
+
+test('confirms a tool activity whose dialog title is a span, not an input', async ({ page }) => {
+  // Observed live: a gate's properties title is an <input> carrying .value, but a tool
+  // activity's is a <span> whose text is the title, so reading .value alone never matches.
+  await page.setContent(`
+    <div id="canvas"><svg><g class="svg-activity" uiid="8"></g></svg></div>
+    <div id="propertiesDialog"><span class="propertiesContentFieldTitle">Team Setup</span></div>
+    <script>
+      document.querySelector('g.svg-activity').addEventListener('click', function () {
+        document.querySelector('.propertiesContentFieldTitle').textContent = 'iRAT';
+      });
+    </script>
+  `);
+
+  await openActivityProperties(page, 8, 'iRAT', { browser: { actionTimeoutMs: 2_000 } } as LamsConfig);
+  await expect(page.locator('.propertiesContentFieldTitle')).toHaveText('iRAT');
+});
