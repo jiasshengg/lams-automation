@@ -86,11 +86,15 @@ Each property is optional, so different lessons can validate only the settings t
 
 ## Lesson index and monitoring
 
+Run these with `npx tsx` directly, not `npm run -- --flag`: npm strips the flag *names*
+from forwarded arguments on Windows, so `--config X` arrives as a bare `X` and the run
+falls back to `configs/example.json`.
+
 Create the lesson from the design the authoring workflow just saved, then read back its
 monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
 
 ```bash
-npm run lesson:index -- --config configs/local.json --request-json '{"lessonIndex":{"courseGrouping":"Y1 ALL","endDate":"2026-09-03","expectedDesignTitle":"FOM TBL06 030926 2026Y1"}}'
+npx tsx src/index-monitoring.ts --config configs/local.json --request-json '{"lessonIndex":{"courseGrouping":"Y1 ALL","endDate":"2026-09-03","expectedDesignTitle":"FOM TBL06 030926 2026Y1"}}'
 ```
 
 The run is a dry run by default: it selects the top entry of "Recently used designs",
@@ -124,7 +128,7 @@ before printing it. To read the ID for a lesson that already exists, skip the in
 steps:
 
 ```bash
-npm run lesson:monitor -- --config configs/local.json
+npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
 ```
 
 The ID is printed only; nothing downstream consumes it yet.
