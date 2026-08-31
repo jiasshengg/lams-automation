@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { buildAEPlan } from '../src/ae/plan.js';
+import { buildAEPlan, formatAEPlanSummary } from '../src/ae/plan.js';
 
 function validInput() {
   return {
@@ -144,4 +144,12 @@ test('rejects a gate that does not describe the adjacent AE nodes', () => {
   const input = validInput();
   input.gates[0]!.beforeNodeTitle = 'AE Case 99';
   expect(() => buildAEPlan(input)).toThrow('Gate 1 must connect "AE Case 1" to "AE Case 2"');
+});
+
+test('formats a preflight summary with counts, marks, nodes, and gates', () => {
+  const plan = buildAEPlan(validInput());
+  expect(formatAEPlanSummary(plan)).toContain('AE preflight: PASS');
+  expect(formatAEPlanSummary(plan)).toContain('Nodes: 2 | Gates: 1 | Questions: 3 | Marks: 16');
+  expect(formatAEPlanSummary(plan)).toContain('AE Case 1: questions 1–2');
+  expect(formatAEPlanSummary(plan)).toContain('AE Gate Case 1 to Case 2 Question 3');
 });

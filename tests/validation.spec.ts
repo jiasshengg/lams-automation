@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
 import type { AuthoringGraph, GraphNode } from '../src/lams/authoring.js';
-import { validateAuthoringGraph } from '../src/lams/validation.js';
+import { buildAEPlan } from '../src/ae/plan.js';
+import { validateAEPlanGraph, validateAuthoringGraph } from '../src/lams/validation.js';
 
 const expectedFlow = [
   'Team Setup',
@@ -109,3 +110,83 @@ test('reports a missing AE node and broken connection', () => {
   expect(report.checks.find((check) => check.label === 'AE Nodes')?.detail).toBe('Expected: 1; Found: 0');
   expect(report.checks.find((check) => check.label === 'Connectivity')?.passed).toBe(false);
 });
+
+test('validates exact AE node and gate titles plus their graph connections', () => {
+  const plan = buildAEPlan({
+    sourceLabel: 'Fixture',
+    breakMarkerCount: 1,
+    nodes: [
+      {
+        title: 'AE Case 1',
+        questions: [
+          {
+            number: 1,
+            type: 'mcq',
+            prompt: 'QUESTION 1\nChoose.',
+            options: [{ text: 'A) Yes', correct: true }, { text: 'B) No' }]
+          }
+        ]
+      },
+      {
+        title: 'AE Case 2',
+        questions: [
+          {
+            number: 2,
+            type: 'essay',
+            prompt: 'QUESTION 2\nExplain.'
+          }
+        ]
+      }
+    ],
+    gates: [
+      {
+        title: 'AE Gate Case 1 to Case 2 Question 2',
+        afterNodeTitle: 'AE Case 1',
+        beforeNodeTitle: 'AE Case 2',
+        beforeQuestionNumber: 2
+      }
+    ]
+  });
+  const nodes = [
+    graphNode(1, 'AE Case 1', 'tool'),
+    graphNode(2, 'AE Gate Case 1 to Case 2 Question 2', 'gate'),
+    graphNode(3, 'AE Case 2', 'tool')
+  ];
+  const graph: AuthoringGraph = {
+    rendering: 'svg',
+    modelAvailable: true,
+    nodes,
+    transitions: [
+      { uiid: 10, fromUiid: 1, toUiid: 2 },
+      { uiid: 11, fromUiid: 2, toUiid: 3 }
+    ]
+  };
+
+  const report = validateAEPlanGraph(graph, plan);
+  expect(report.passed).toBe(true);
+  expect(report.checks.find((check) => check.label === 'AE plan connectivity')?.passed).toBe(true);
+
+  graph.transitions.pop();
+  const failed = validateAEPlanGraph(graph, plan);
+  expect(failed.passed).toBe(false);
+  expect(failed.checks.find((check) => check.label === 'AE plan connectivity')?.detail).toContain(
+    'AE Gate Case 1 to Case 2 Question 2 -> AE Case 2'
+  );
+});
+
+function graphNode(uiid: number, name: string, type: GraphNode['type']): GraphNode {
+  return {
+    uiid,
+    name,
+    type,
+    grouped: type === 'tool',
+    groupingUiid: type === 'tool' ? 99 : null,
+    x: null,
+    y: null,
+    toolId: null,
+    gateType: type === 'gate' ? 'permission' : null,
+    description: type === 'gate' ? name : null,
+    dynamicPassword: null,
+    rotationSeconds: null
+  };
+}
