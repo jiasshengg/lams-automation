@@ -103,7 +103,7 @@ and continue into monitoring.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `courseGrouping` | yes | Preset to apply; `"None"` applies no preset. |
+| `courseGrouping` | yes | Preset to apply; `"None"` applies no preset. Supports `{{cohortYear}}`, resolved from the design title's cohort token (`FOM TBL06 030926 2026Y1` -> `Y1`), so `"Y{{cohortYear}} ALL"` picks the right year. |
 | `endDate` | yes | `YYYY-MM-DD`. |
 | `endTime` | no | `HH:MM`, defaults to `23:59`. |
 | `expectedDesignTitle` | no | Aborts if the most recent design is not this exact title. |
@@ -113,8 +113,14 @@ and continue into monitoring.
 Setting `expectedDesignTitle` is strongly recommended once the upstream AE step is
 automated, because "most recent" is otherwise whatever the workspace last touched.
 
-Monitoring opens Monitor for the lesson in view and prints the 5-digit lesson ID parsed
-from the monitoring URL. To read the ID for a lesson that already exists, skip the index
+The Course groupings step only exists for designs that contain grouping activities. When
+a design has none, LAMS hides Next and commits straight from Add now; the run reports
+`None`, and asking for a real preset in that case is an error rather than a silent skip.
+
+Monitoring resolves the lesson by exact title on the course page (each row is
+`div.j-single-lesson` carrying `data-name` and the lesson ID as its element `id`), opens
+`/lams/home/monitorLesson.do?lessonID=...`, and confirms the ID against the resulting URL
+before printing it. To read the ID for a lesson that already exists, skip the index
 steps:
 
 ```bash

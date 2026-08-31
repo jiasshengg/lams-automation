@@ -1,10 +1,10 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { loadConfig, parseRequestOverrides } from './config.js';
-import { inspectPageSurface, saveDiagnostics } from './lams/diagnostics.js';
-import { createLessonFromMostRecentDesign } from './lams/lesson-index.js';
+import { saveDiagnostics } from './lams/diagnostics.js';
+import { createLessonFromMostRecentDesign, openAddLesson } from './lams/lesson-index.js';
 import { openMonitoring } from './lams/monitoring.js';
-import { clickConfigured, openLams, SelectorRequiredError, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/example.json';
@@ -26,34 +26,33 @@ async function main(): Promise<void> {
     await openLams(page, config);
     await verifyWorkspaceCourse(page, config);
 
-    if (!monitorOnly) {
-      await clickConfigured(page, config, 'openAddLesson', config.selectors.openAddLesson, false);
-      const result = await createLessonFromMostRecentDesign(page, config, { commit });
-      console.log(`\nIndex workflow: ${result.committed ? 'LESSON CREATED' : 'DRY RUN PASS'}`);
-      console.log(`Design: ${result.designTitle}`);
-      console.log(`Lesson title: ${result.lessonTitle}`);
-      console.log(`Ends: ${result.endDateTime}`);
-      console.log(`Course grouping: ${result.courseGrouping}`);
-      if (!result.committed) {
-        console.log('\nSkipping monitoring: no lesson was created in this dry run. Re-run with --commit.');
-        return;
-      }
+    if (monitorOnly) {
+      const monitoring = await openMonitoring(page, config.lessonTitle, config);
+      console.log('\nMonitoring workflow: OK');
+      console.log(`Lesson ID: ${monitoring.lessonId}`);
+      return;
     }
 
-    const monitoring = await openMonitoring(page, config);
-    console.log(`\nMonitoring workflow: OK`);
-    console.log(`Lesson ID (5 digits): ${monitoring.lessonId}`);
-  } catch (error) {
-    if (error instanceof SelectorRequiredError) {
-      console.error(`\nIndex workflow paused: ${error.message}`);
-      console.error('Inspect page.png, page.html, and dom-summary.json, then add the selector to your config.');
-      console.error(JSON.stringify(await inspectPageSurface(page), null, 2));
-      process.exitCode = 2;
-    } else {
-      const directory = await saveDiagnostics(page, 'index-monitoring-failure').catch(() => undefined);
-      if (directory) console.error(`Live failure diagnostics: ${directory}`);
-      throw error;
+    await openAddLesson(page, config);
+    const result = await createLessonFromMostRecentDesign(page, config, { commit });
+    console.log(`\nIndex workflow: ${result.committed ? 'LESSON CREATED' : 'DRY RUN PASS'}`);
+    console.log(`Design: ${result.designTitle}`);
+    console.log(`Lesson title: ${result.lessonTitle}`);
+    console.log(`Ends: ${result.endDateTime}`);
+    console.log(`Course grouping: ${result.courseGrouping}`);
+    if (!result.committed) {
+      console.log('\nSkipping monitoring: no lesson was created in this dry run. Re-run with --commit.');
+      return;
     }
+
+    await openLams(page, config);
+    const monitoring = await openMonitoring(page, result.lessonTitle, config);
+    console.log('\nMonitoring workflow: OK');
+    console.log(`Lesson ID: ${monitoring.lessonId}`);
+  } catch (error) {
+    const directory = await saveDiagnostics(page, 'index-monitoring-failure').catch(() => undefined);
+    if (directory) console.error(`Live failure diagnostics: ${directory}`);
+    throw error;
   } finally {
     await context.close();
   }
