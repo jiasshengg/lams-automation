@@ -32,14 +32,16 @@ export interface ExpectedGateProperties {
 }
 
 export interface LessonIndexSettings {
-  /** Preset course grouping to apply, or "None" to skip applying a preset. */
-  courseGrouping: string;
+  /**
+   * Optional exact name of the course grouping preset to apply. Leave unset for the
+   * normal case: Y1 and Y2 have a single whole-class grouping, so the only preset on
+   * offer besides "None" is selected automatically.
+   */
+  courseGrouping?: string;
   /** Lesson end date as YYYY-MM-DD. */
   endDate: string;
   /** Lesson end time as HH:MM; the TBL convention is 23:59. */
   endTime?: string;
-  /** Expected title of the most recent design, verified before anything is committed. */
-  expectedDesignTitle?: string;
   displayScoresOnCompletion?: boolean;
   enableScheduling?: boolean;
 }
@@ -201,17 +203,14 @@ function validateExpectedGateProperties(value: unknown): void {
 function validateLessonIndex(value: unknown): void {
   if (value === undefined) return;
   if (!isRecord(value)) throw new Error('Configuration field "lessonIndex" must be an object.');
-  if (typeof value.courseGrouping !== 'string' || value.courseGrouping.trim() === '') {
-    throw new Error('lessonIndex.courseGrouping must be a non-empty string ("None" applies no preset).');
+  if (value.courseGrouping !== undefined && (typeof value.courseGrouping !== 'string' || value.courseGrouping.trim() === '')) {
+    throw new Error('lessonIndex.courseGrouping must be a non-empty string when provided.');
   }
   if (typeof value.endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.endDate)) {
     throw new Error('lessonIndex.endDate must be a date formatted as YYYY-MM-DD.');
   }
   if (value.endTime !== undefined && (typeof value.endTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.endTime))) {
     throw new Error('lessonIndex.endTime must be a 24-hour time formatted as HH:MM.');
-  }
-  if (value.expectedDesignTitle !== undefined && (typeof value.expectedDesignTitle !== 'string' || value.expectedDesignTitle.trim() === '')) {
-    throw new Error('lessonIndex.expectedDesignTitle must be a non-empty string when provided.');
   }
   for (const key of ['displayScoresOnCompletion', 'enableScheduling'] as const) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') {

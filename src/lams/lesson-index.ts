@@ -35,20 +35,19 @@ const SELECTORS = {
 } as const;
 
 export type ResolvedLessonIndexSettings = Required<
-  Pick<LessonIndexSettings, 'courseGrouping' | 'endDate' | 'endTime' | 'displayScoresOnCompletion' | 'enableScheduling'>
-> & { expectedDesignTitle?: string };
+  Pick<LessonIndexSettings, 'endDate' | 'endTime' | 'displayScoresOnCompletion' | 'enableScheduling'>
+> & { courseGrouping?: string };
 
 export function resolveLessonIndexSettings(config: LamsConfig): ResolvedLessonIndexSettings {
   const settings = config.lessonIndex;
   if (!settings) throw new Error('Configuration field "lessonIndex" is required for the index workflow.');
   return {
-    courseGrouping: settings.courseGrouping,
+    ...(settings.courseGrouping ? { courseGrouping: settings.courseGrouping } : {}),
     endDate: settings.endDate,
     endTime: settings.endTime ?? '23:59',
     // TBL convention: hide per-activity scores, and time-box the lesson.
     displayScoresOnCompletion: settings.displayScoresOnCompletion ?? false,
-    enableScheduling: settings.enableScheduling ?? true,
-    ...(settings.expectedDesignTitle ? { expectedDesignTitle: settings.expectedDesignTitle } : {})
+    enableScheduling: settings.enableScheduling ?? true
   };
 }
 
@@ -67,8 +66,6 @@ export async function openAddLesson(page: Page, config: LamsConfig): Promise<voi
  * workflow saved most recently. The panel can start collapsed, so it is expanded first.
  */
 export async function selectMostRecentDesign(page: Page, config: LamsConfig): Promise<string> {
-  const settings = resolveLessonIndexSettings(config);
-
   const toggle = page.locator(SELECTORS.recentToggle);
   await toggle.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') {
@@ -87,12 +84,6 @@ export async function selectMostRecentDesign(page: Page, config: LamsConfig): Pr
   const mostRecent = entries.first();
   const designTitle = normalise(await mostRecent.innerText());
   if (designTitle === '') throw new Error('The most recent design entry has no readable title.');
-
-  if (settings.expectedDesignTitle && designTitle !== settings.expectedDesignTitle) {
-    throw new Error(
-      `Refusing to continue: most recent design is "${designTitle}" but lessonIndex.expectedDesignTitle is "${settings.expectedDesignTitle}".`
-    );
-  }
 
   await mostRecent.click();
 
@@ -117,64 +108,66 @@ export async function configureAdvancedOptions(page: Page, config: LamsConfig): 
 }
 
 /**
- * Lesson titles carry the cohort year as a trailing token such as "2026Y1", and the
- * course grouping to apply is the one for that year. Callers write the grouping as a
- * template — "Y{{cohortYear}} ALL" — which is resolved from the selected design title.
+ * Applies the course grouping for a lesson.
+ *
+ * Y1 and Y2 run as a whole class, so a design that uses groupings offers exactly one
+ * preset besides "None" and it is simply selected. A design without grouping activities
+ * gets no Course groupings step at all — LAMS keeps Next hidden and commits straight
+ * from Add now — so that case publishes as-is.
+ *
+ * lessonIndex.courseGrouping overrides the automatic choice by exact preset name, for
+ * the rare course that offers more than one.
  */
-export function resolveCourseGrouping(template: string, designTitle: string): string {
-  if (!template.includes('{{cohortYear}}')) return template;
-  const match = /\b\d{2,4}Y(\d)\b/.exec(designTitle);
-  if (!match) {
-    throw new Error(
-      `Cannot resolve {{cohortYear}}: design title "${designTitle}" has no cohort-year token such as "2026Y1".`
-    );
-  }
-  return template.replaceAll('{{cohortYear}}', match[1]!);
-}
-
-export async function selectCourseGrouping(page: Page, config: LamsConfig, designTitle: string): Promise<string> {
+export async function selectCourseGrouping(page: Page, config: LamsConfig): Promise<string> {
   const settings = resolveLessonIndexSettings(config);
-  const wanted = resolveCourseGrouping(settings.courseGrouping, designTitle);
 
-  // LAMS only offers the Course groupings step for designs that contain grouping
-  // activities; otherwise Next stays hidden and the footer commits straight from Add now.
   const next = page.locator(SELECTORS.next);
   if (!(await next.isVisible())) {
-    if (wanted !== NO_PRESET) {
-      throw new Error(
-        `Design "${designTitle}" has no grouping activities, so the Course groupings step is not offered, but "${wanted}" was requested.`
-      );
-    }
-    console.log('No Course groupings step for this design; no preset applied.');
+    console.log('No Course groupings step for this design; publishing without a preset.');
     return NO_PRESET;
   }
-
   await next.click();
 
   const radios = page.locator(SELECTORS.groupingRadio);
   await radios.first().waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
 
-  const available: string[] = [];
-  let target: Locator | undefined;
+  const presets: Array<{ label: string; radio: Locator }> = [];
   for (let index = 0; index < (await radios.count()); index += 1) {
     const radio = radios.nth(index);
-    const label = normalise(await radioLabel(radio));
-    available.push(label);
-    if (label === wanted) target = radio;
+    presets.push({ label: normalise(await radioLabel(radio)), radio });
   }
-  if (!target) {
-    throw new Error(
-      `Course grouping "${wanted}" is not offered for "${designTitle}". Available presets: ${available.join(', ') || '(none)'}.`
-    );
+  const labels = presets.map((preset) => preset.label);
+
+  let chosen: { label: string; radio: Locator } | undefined;
+  if (settings.courseGrouping) {
+    chosen = presets.find((preset) => preset.label === settings.courseGrouping);
+    if (!chosen) {
+      throw new Error(
+        `Course grouping "${settings.courseGrouping}" is not offered. Available presets: ${labels.join(', ') || '(none)'}.`
+      );
+    }
+  } else {
+    const selectable = presets.filter((preset) => preset.label !== NO_PRESET);
+    if (selectable.length === 0) {
+      console.log('Only "None" is offered; publishing without a preset.');
+      return NO_PRESET;
+    }
+    if (selectable.length > 1) {
+      throw new Error(
+        `Expected one course grouping besides "None" but found ${selectable.length} (${selectable
+          .map((preset) => preset.label)
+          .join(', ')}). Set lessonIndex.courseGrouping to choose.`
+      );
+    }
+    chosen = selectable[0]!;
   }
 
-  await target.check();
-  if (!(await target.isChecked())) {
-    throw new Error(`Course grouping "${wanted}" did not stay selected.`);
+  await chosen.radio.check();
+  if (!(await chosen.radio.isChecked())) {
+    throw new Error(`Course grouping "${chosen.label}" did not stay selected.`);
   }
-  const suffix = wanted === NO_PRESET ? ' (no preset applied)' : '';
-  console.log(`Selected course grouping: ${wanted}${suffix}`);
-  return wanted;
+  console.log(`Selected course grouping: ${chosen.label}`);
+  return chosen.label;
 }
 
 export async function addLessonNow(page: Page, config: LamsConfig, options: LessonIndexOptions): Promise<void> {
@@ -198,7 +191,7 @@ export async function createLessonFromMostRecentDesign(
   const designTitle = await selectMostRecentDesign(page, config);
   const lessonTitle = normalise(await page.locator(SELECTORS.lessonName).inputValue());
   const endDateTime = await configureAdvancedOptions(page, config);
-  const courseGrouping = await selectCourseGrouping(page, config, designTitle);
+  const courseGrouping = await selectCourseGrouping(page, config);
   await addLessonNow(page, config, options);
   return { designTitle, lessonTitle, endDateTime, courseGrouping, committed: options.commit };
 }

@@ -50,11 +50,8 @@
     }
   ],
   "lessonIndex": {
-    "courseGrouping": "Y1 ALL",
     "endDate": "2026-09-03",
-    "endTime": "23:59",
-    "displayScoresOnCompletion": false,
-    "enableScheduling": true
+    "endTime": "23:59"
   },
   "browser": {
     "headless": false,

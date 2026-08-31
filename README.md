@@ -94,7 +94,7 @@ Create the lesson from the design the authoring workflow just saved, then read b
 monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
 
 ```bash
-npx tsx src/index-monitoring.ts --config configs/local.json --request-json '{"lessonIndex":{"courseGrouping":"Y1 ALL","endDate":"2026-09-03","expectedDesignTitle":"FOM TBL06 030926 2026Y1"}}'
+npx tsx src/index-monitoring.ts --config configs/local.json --request-json '{"lessonIndex":{"endDate":"2026-09-03"}}'
 ```
 
 The run is a dry run by default: it selects the top entry of "Recently used designs",
@@ -107,19 +107,18 @@ and continue into monitoring.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `courseGrouping` | yes | Preset to apply; `"None"` applies no preset. Supports `{{cohortYear}}`, resolved from the design title's cohort token (`FOM TBL06 030926 2026Y1` -> `Y1`), so `"Y{{cohortYear}} ALL"` picks the right year. |
+| `courseGrouping` | no | Exact preset name, only needed when a course offers more than one. Normally omit it. |
 | `endDate` | yes | `YYYY-MM-DD`. |
 | `endTime` | no | `HH:MM`, defaults to `23:59`. |
-| `expectedDesignTitle` | no | Aborts if the most recent design is not this exact title. |
 | `displayScoresOnCompletion` | no | Defaults to `false`. |
 | `enableScheduling` | no | Defaults to `true`. |
 
-Setting `expectedDesignTitle` is strongly recommended once the upstream AE step is
-automated, because "most recent" is otherwise whatever the workspace last touched.
-
-The Course groupings step only exists for designs that contain grouping activities. When
-a design has none, LAMS hides Next and commits straight from Add now; the run reports
-`None`, and asking for a real preset in that case is an error rather than a silent skip.
+Course grouping needs no configuration. Y1 and Y2 run as a whole class, so a design that
+uses groupings offers exactly one preset besides `None` and it is selected automatically.
+A design with no grouping activities gets no Course groupings step at all — LAMS keeps
+Next hidden and commits straight from Add now — and the run publishes as-is, reporting
+`None`. If a course ever offers more than one preset the run stops and lists them rather
+than guessing; set `courseGrouping` to pick one.
 
 Monitoring resolves the lesson by exact title on the course page (each row is
 `div.j-single-lesson` carrying `data-name` and the lesson ID as its element `id`), opens

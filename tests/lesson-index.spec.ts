@@ -3,7 +3,6 @@ import type { LamsConfig } from '../src/config.js';
 import {
   configureAdvancedOptions,
   createLessonFromMostRecentDesign,
-  resolveCourseGrouping,
   selectCourseGrouping,
   selectMostRecentDesign
 } from '../src/lams/lesson-index.js';
@@ -38,7 +37,6 @@ const ADD_LESSON_PAGE = `
   <div id="groupings" hidden>
     <label><input type="radio" name="orgGroupingId" id="orgGroupingNone" checked> None</label>
     <label><input type="radio" name="orgGroupingId" id="orgGrouping1"> Y1 ALL</label>
-    <label><input type="radio" name="orgGroupingId" id="orgGrouping2"> Y2 ALL</label>
   </div>
 
   <button id="btnCancel">Back</button>
@@ -56,7 +54,7 @@ const ADD_LESSON_PAGE = `
 
 function baseConfig(overrides: Record<string, unknown> = {}): LamsConfig {
   return {
-    lessonIndex: { courseGrouping: 'Y1 ALL', endDate: '2026-09-03', ...overrides },
+    lessonIndex: { endDate: '2026-09-03', ...overrides },
     browser: { actionTimeoutMs: 3_000 }
   } as unknown as LamsConfig;
 }
@@ -68,15 +66,6 @@ test('expands the collapsed panel and selects the top recently used design', asy
 
   expect(designTitle).toBe('FOM TBL06 030926 2026Y1');
   await expect(page.locator('#lessonNameInput')).toHaveValue('FOM TBL06 030926 2026Y1');
-});
-
-test('refuses to continue when the most recent design is not the expected one', async ({ page }) => {
-  await page.setContent(ADD_LESSON_PAGE);
-
-  const config = baseConfig({ expectedDesignTitle: 'FOM TBL05 310826 2026Y1' });
-
-  await expect(selectMostRecentDesign(page, config)).rejects.toThrow(/most recent design is "FOM TBL06 030926 2026Y1"/);
-  await expect(page.locator('#lessonNameInput')).toHaveValue('');
 });
 
 test('advanced options hide scores, enable scheduling, and set the end time to 23:59', async ({ page }) => {
@@ -108,65 +97,70 @@ test('leaves the end date untouched when scheduling is disabled', async ({ page 
   await expect(page.locator('#schedulingEndDatetimeField')).toHaveValue('');
 });
 
-test('selects the course grouping preset', async ({ page }) => {
+test('selects the single whole-class grouping without being told which', async ({ page }) => {
   await page.setContent(ADD_LESSON_PAGE);
   await selectMostRecentDesign(page, baseConfig());
 
-  const grouping = await selectCourseGrouping(page, baseConfig(), 'FOM TBL06 030926 2026Y1');
+  const grouping = await selectCourseGrouping(page, baseConfig());
 
   expect(grouping).toBe('Y1 ALL');
   await expect(page.locator('#orgGrouping1')).toBeChecked();
 });
 
-test('reports the presets on offer when the wanted grouping is missing', async ({ page }) => {
+test('publishes without a preset when the design has no groupings step', async ({ page }) => {
   await page.setContent(ADD_LESSON_PAGE);
   await selectMostRecentDesign(page, baseConfig());
-
-  const config = baseConfig({ courseGrouping: 'Y9 ALL' });
-
-  await expect(selectCourseGrouping(page, config, 'FOM TBL06 030926 2026Y1')).rejects.toThrow(
-    /Available presets: None, Y1 ALL, Y2 ALL/
-  );
-});
-
-test('resolves the cohort year from the design title', () => {
-  expect(resolveCourseGrouping('Y{{cohortYear}} ALL', 'FOM TBL06 030926 2026Y1')).toBe('Y1 ALL');
-  expect(resolveCourseGrouping('Y{{cohortYear}} ALL', 'GIS TBL01a 100425 2024Y3')).toBe('Y3 ALL');
-  expect(resolveCourseGrouping('Y1 ALL', 'title without a year token')).toBe('Y1 ALL');
-  expect(() => resolveCourseGrouping('Y{{cohortYear}} ALL', 'no year here')).toThrow(/no cohort-year token/);
-});
-
-test('a cohort-year template picks the matching preset', async ({ page }) => {
-  await page.setContent(ADD_LESSON_PAGE);
-  await selectMostRecentDesign(page, baseConfig());
-
-  const config = baseConfig({ courseGrouping: 'Y{{cohortYear}} ALL' });
-  const grouping = await selectCourseGrouping(page, config, 'FOM TBL06 030926 2026Y2');
-
-  expect(grouping).toBe('Y2 ALL');
-  await expect(page.locator('#orgGrouping2')).toBeChecked();
-});
-
-test('skips the groupings step for a design that has no groupings', async ({ page }) => {
-  await page.setContent(ADD_LESSON_PAGE.replace('id="btnNext" hidden', 'id="btnNext" hidden data-never-shown'));
-  await page.locator('#recentToggleBtn').click();
-  await page.locator('#recentList button.access-item').first().click();
   await page.locator('#btnNext').evaluate((el) => { (el as HTMLElement).hidden = true; });
 
-  const grouping = await selectCourseGrouping(page, baseConfig({ courseGrouping: 'None' }), 'FOM TBL06 030926 2026Y1');
+  const grouping = await selectCourseGrouping(page, baseConfig());
 
   expect(grouping).toBe('None');
   await expect(page.locator('#groupings')).toBeHidden();
 });
 
-test('refuses when a preset is wanted but the design offers no groupings', async ({ page }) => {
-  await page.setContent(ADD_LESSON_PAGE);
-  await page.locator('#recentToggleBtn').click();
-  await page.locator('#recentList button.access-item').first().click();
-  await page.locator('#btnNext').evaluate((el) => { (el as HTMLElement).hidden = true; });
+test('publishes without a preset when only None is offered', async ({ page }) => {
+  await page.setContent(ADD_LESSON_PAGE.replace(
+    '<label><input type="radio" name="orgGroupingId" id="orgGrouping1"> Y1 ALL</label>',
+    ''
+  ));
+  await selectMostRecentDesign(page, baseConfig());
 
-  await expect(selectCourseGrouping(page, baseConfig(), 'FOM TBL06 030926 2026Y1')).rejects.toThrow(
-    /no grouping activities/
+  expect(await selectCourseGrouping(page, baseConfig())).toBe('None');
+});
+
+test('refuses to guess when a course offers more than one grouping', async ({ page }) => {
+  await page.setContent(ADD_LESSON_PAGE.replace(
+    '<label><input type="radio" name="orgGroupingId" id="orgGrouping1"> Y1 ALL</label>',
+    '<label><input type="radio" name="orgGroupingId" id="orgGrouping1"> Y1 ALL</label>' +
+      '<label><input type="radio" name="orgGroupingId" id="orgGrouping2"> Y2 ALL</label>'
+  ));
+  await selectMostRecentDesign(page, baseConfig());
+
+  await expect(selectCourseGrouping(page, baseConfig())).rejects.toThrow(
+    /found 2 \(Y1 ALL, Y2 ALL\). Set lessonIndex.courseGrouping/
+  );
+});
+
+test('an explicit courseGrouping overrides the automatic choice', async ({ page }) => {
+  await page.setContent(ADD_LESSON_PAGE.replace(
+    '<label><input type="radio" name="orgGroupingId" id="orgGrouping1"> Y1 ALL</label>',
+    '<label><input type="radio" name="orgGroupingId" id="orgGrouping1"> Y1 ALL</label>' +
+      '<label><input type="radio" name="orgGroupingId" id="orgGrouping2"> Y2 ALL</label>'
+  ));
+  await selectMostRecentDesign(page, baseConfig());
+
+  const grouping = await selectCourseGrouping(page, baseConfig({ courseGrouping: 'Y2 ALL' }));
+
+  expect(grouping).toBe('Y2 ALL');
+  await expect(page.locator('#orgGrouping2')).toBeChecked();
+});
+
+test('reports the presets on offer when an explicit grouping is missing', async ({ page }) => {
+  await page.setContent(ADD_LESSON_PAGE);
+  await selectMostRecentDesign(page, baseConfig());
+
+  await expect(selectCourseGrouping(page, baseConfig({ courseGrouping: 'Y9 ALL' }))).rejects.toThrow(
+    /Available presets: None, Y1 ALL/
   );
 });
 
