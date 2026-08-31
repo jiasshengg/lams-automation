@@ -23,6 +23,10 @@ export interface GraphNode {
   description: string | null;
   dynamicPassword: boolean | null;
   rotationSeconds: number | null;
+  /** Gates only: "Stop students at preceding activity?" in the properties dialog. */
+  stopAtPrecedingActivity: boolean | null;
+  /** Tool activities only: the configured Gradebook output, e.g. "Last total score". */
+  gradebookOutput: string | null;
 }
 
 export interface GraphTransition {
@@ -103,6 +107,8 @@ export async function inspectAuthoringGraph(page: Page): Promise<AuthoringGraph>
       toolID?: number;
       gateType?: string;
       description?: string;
+      gateStopAtPrecedingActivity?: boolean;
+      gradebookToolOutputDefinitionDescription?: string;
       passwordDynamic?: boolean | number | null;
       passwordDynamicSeconds?: number;
       grouping?: { uiid?: number; groupingUIID?: number };
@@ -149,6 +155,14 @@ export async function inspectAuthoringGraph(page: Page): Promise<AuthoringGraph>
         rotationSeconds:
           model?.gateType === 'password' && Number.isFinite(model.passwordDynamicSeconds)
             ? Number(model.passwordDynamicSeconds)
+            : null,
+        stopAtPrecedingActivity:
+          type === 'gate' && typeof model?.gateStopAtPrecedingActivity === 'boolean'
+            ? model.gateStopAtPrecedingActivity
+            : null,
+        gradebookOutput:
+          typeof model?.gradebookToolOutputDefinitionDescription === 'string'
+            ? model.gradebookToolOutputDefinitionDescription.trim()
             : null
       };
     });

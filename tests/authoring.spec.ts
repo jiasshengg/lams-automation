@@ -168,3 +168,24 @@ test('ignores stale hidden title fields from other activities', async ({ page })
   await openActivityProperties(page, 8, 'iRAT', { browser: { actionTimeoutMs: 2_000 } } as LamsConfig);
   await expect(page.locator('.propertiesContentFieldTitle').nth(1)).toHaveValue('iRAT');
 });
+
+test('exposes gate stop-at-preceding and tool gradebook output from the runtime model', async ({ page }) => {
+  // Runtime field names confirmed live: gateStopAtPrecedingActivity and
+  // gradebookToolOutputDefinitionDescription ("Last total score").
+  await page.setContent(`
+    <div id="canvas"><svg>
+      <g class="svg-activity svg-activity-gate" uiid="7"></g>
+      <g class="svg-activity svg-activity-tool" uiid="8"></g>
+    </svg></div>
+    <script>
+      window.layout = { activities: [
+        { uiid: 7, title: 'AE Gate AE Case 3 Q3-6', gateType: 'permission', gateStopAtPrecedingActivity: true },
+        { uiid: 8, title: 'AE Case 3 Q3-6', toolID: 19, gradebookToolOutputDefinitionDescription: 'Last total score' }
+      ] };
+    </script>
+  `);
+
+  const graph = await inspectAuthoringGraph(page);
+  expect(graph.nodes.find((node) => node.uiid === 7)?.stopAtPrecedingActivity).toBe(true);
+  expect(graph.nodes.find((node) => node.uiid === 8)?.gradebookOutput).toBe('Last total score');
+});

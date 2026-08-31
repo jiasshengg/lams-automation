@@ -97,7 +97,7 @@ export async function applyAEActivitySettings(
   };
 }
 
-async function findUniqueCheckbox(
+export async function findUniqueCheckbox(
   page: Page,
   label: string,
   timeoutMs: number

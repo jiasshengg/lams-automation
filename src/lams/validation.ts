@@ -121,11 +121,36 @@ export function validateAuthoringGraph(graph: AuthoringGraph, config: LamsConfig
       if (expected.rotationSeconds !== undefined && gate.rotationSeconds !== expected.rotationSeconds) {
         mismatches.push(`rotation expected ${expected.rotationSeconds}s; found ${gate.rotationSeconds === null ? 'unavailable' : `${gate.rotationSeconds}s`}`);
       }
+      if (
+        expected.stopAtPrecedingActivity !== undefined &&
+        gate.stopAtPrecedingActivity !== expected.stopAtPrecedingActivity
+      ) {
+        mismatches.push(
+          `stop at preceding activity expected ${expected.stopAtPrecedingActivity}; found ${gate.stopAtPrecedingActivity === null ? 'unavailable' : gate.stopAtPrecedingActivity}`
+        );
+      }
     }
     checks.push({
       label: `Gate properties — ${expected.name}`,
       passed: mismatches.length === 0,
       detail: mismatches.length === 0 ? 'Configured properties match' : mismatches.join('; ')
+    });
+  }
+
+  if (config.expectedGradebookOutput !== undefined) {
+    // The deployment guide states the Gradebook output for AE activities; other tools
+    // (Leader Selection, for one) legitimately expose none, so they are not asserted.
+    const wrong = graph.nodes.filter(
+      (node) =>
+        node.type === 'tool' && /^AE\b/i.test(node.name) && node.gradebookOutput !== config.expectedGradebookOutput
+    );
+    checks.push({
+      label: 'Gradebook output',
+      passed: wrong.length === 0,
+      detail:
+        wrong.length === 0
+          ? `Every AE activity reports "${config.expectedGradebookOutput}"`
+          : `Expected "${config.expectedGradebookOutput}"; wrong on ${wrong.map((node) => `${node.name} (${node.gradebookOutput ?? 'unavailable'})`).join(', ')}`
     });
   }
 
