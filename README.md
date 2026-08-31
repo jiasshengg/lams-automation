@@ -2,6 +2,24 @@
 
 This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. The current implementation covers the first-box workflow: verify the safe playground course, open LAMS Authoring, traverse a configurable folder path, open an exact source design, and reach Save As. It does not modify authoring nodes.
 
+## Agent skill
+
+The repository includes one vendor-neutral skill at `skills/lams-tbl-authoring/`. Thin discovery adapters expose the same instructions to both supported coding agents:
+
+- Codex: invoke `$lams-tbl-authoring` or describe a matching LAMS copy/validation request.
+- Claude Code: invoke `/lams-tbl-authoring` or describe a matching request.
+
+For example:
+
+```text
+Copy the exact lesson "FOM TBL06 2025Y1" from Courses > Cohort_2025Y1 > FOM,
+rename it to "FOM TBL06 030926 2026Y1", save it in
+Courses > Cohort_2026Y1 > FOM, then validate the supplied linear flow with
+5 AE nodes and 4 AE gates.
+```
+
+The agent translates the request into ignored `configs/local.json`, runs the safe dry run first, and calls the existing Playwright commands. It requires exact copy targets and explicit authorization before the committed Save action. Automatic Source-of-Truth parsing and automatic node correction remain out of scope.
+
 ## Setup
 
 ```bash

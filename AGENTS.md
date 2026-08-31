@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-Build and verify a reusable Playwright + TypeScript automation layer for the initial LAMS TBL authoring workflow. Do not create a Codex Skill yet. Source-of-Truth parsing is also out of scope until the browser automation is reliable.
+Build and verify a reusable Playwright + TypeScript automation layer for the initial LAMS TBL authoring workflow, with a vendor-neutral Agent Skill that orchestrates the tested scripts. Source-of-Truth parsing remains out of scope until the browser automation is reliable.
 
 ## LAMS safety boundary
 
@@ -38,7 +38,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Determine whether the Authoring surface uses HTML, SVG, canvas, iframes, or another representation.
 - Validate required nodes, counts, connections, Team Setup associations, and gate names.
 - Parse the AE Source of Truth only after the Playwright layer is reliable.
-- Package this workflow as a Codex Skill only after the reusable automation is stable.
+- Extend the vendor-neutral skill only with behavior already supported by the reusable automation.
 
 ## Browser automation rules
 
@@ -71,6 +71,9 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - `src/lams/authoring.ts`: Authoring-page inspection and node extraction.
 - `src/lams/validation.ts`: later validation rules and reporting.
 - `src/lams/diagnostics.ts`: non-mutating DOM and screenshot evidence.
+- `skills/lams-tbl-authoring/`: canonical cross-agent skill and operational references.
+- `.agents/skills/lams-tbl-authoring/`: Codex discovery adapter.
+- `.claude/skills/lams-tbl-authoring/`: Claude Code discovery adapter.
 
 Keep UI mechanics separate from workflow orchestration so later validation and Source-of-Truth parsing can reuse the same browser layer.
 
