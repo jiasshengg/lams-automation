@@ -11,11 +11,15 @@ Run `npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_
 - every configured destination folder;
 - that no copy was saved.
 
+For an explicitly requested missing final destination folder, the dry run instead verifies the exact parent, confirms the final name is absent, and verifies the New Folder control is enabled. It must not open or accept the creation prompt.
+
 If any state is missing or non-unique, stop without mutation.
 
 ## Committed copy
 
 Run `npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` only after a successful dry run and an explicit user request to create the copy. Use the same request JSON for both commands. Report the exact new title and verified destination. Never publish or start the copied lesson.
+
+If the identical request includes `createDestinationFolder: true`, the committed run may create only the exact missing final segment. It must validate LAMS's observed native folder prompt, then reopen the full destination to verify both folder and copied lesson.
 
 ## Inspection and validation
 

@@ -19,6 +19,8 @@ Requirements were derived from the user's AE workflow description and the suppli
 | GREEN — preflight/graph | `ef291ac` | same target, `npm run plan:ae -- --ae-json configs/ae-example.json`, then `npm run build` | 12 tests passed; example preflight passed with 2 nodes, 1 gate, 3 questions, 12 marks; TypeScript passed. |
 | RED — exact AE open | `26f3a25` | `npx playwright test tests/authoring.spec.ts` | Failed because `src/lams/ae.js` did not exist. |
 | GREEN — exact AE open | `e2bb39a` | same target, then `npm run build` | 3 tests passed; TypeScript passed. |
+| RED — destination folder | `2486d03` | `npx playwright test tests/config.spec.ts tests/lesson-copy.spec.ts` | 3 tests failed because the request flag was rejected and the workflow required the final folder to exist. |
+| GREEN — destination folder | `54636f9` | same target, then `npm run build` | 9 tests passed; TypeScript passed. |
 
 ## Test specification
 
@@ -32,13 +34,14 @@ Requirements were derived from the user's AE workflow description and the suppli
 | Missing semantic setting controls stop instead of guessing | `tests/ae-settings.spec.ts` | browser integration | PASS |
 | Exact AE node/gate titles and node→gate→node connections match the plan | `tests/validation.spec.ts` | unit | PASS |
 | One exact SVG AE node opens through a configured semantic control | `tests/authoring.spec.ts` | browser integration | PASS |
+| Dry-run verifies a missing final folder without creating it; commit validates the prompt and verifies folder plus copied lesson | `tests/lesson-copy.spec.ts` | browser integration | PASS |
 
 ## Coverage and known gaps
 
 The project does not define a coverage command or instrumentation, so a numeric coverage percentage is unavailable. Final repository gates passed on this branch:
 
 - `npm run build` — PASS
-- `npm test` — PASS, 24 tests
+- `npm test` — PASS, 27 tests
 - `npm run plan:ae -- --ae-json configs/ae-example.json --json` — PASS
 - `git diff --check` — PASS
 

@@ -47,6 +47,8 @@ npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON
 `--commit` refuses to run when the new title matches the source or still contains a placeholder such as `REPLACE`.
 It also refuses to overwrite an existing destination title and reopens the destination after saving to verify the copy exists.
 
+When the user explicitly requests one missing final destination folder, add `"createDestinationFolder": true` and include that exact folder name as the final `destinationFolderPath` segment. The dry run verifies the parent is writable, the folder is absent, and the live New Folder control is enabled without opening or accepting its prompt. The committed run validates the exact native prompt, creates only that final folder, then verifies the folder and copied lesson by reopening the destination. It refuses an existing final folder or a read-only parent.
+
 Inspect the copied lesson's SVG graph without changing it:
 
 ```bash

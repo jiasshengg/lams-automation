@@ -21,11 +21,14 @@ The scripts merge these permitted request values in memory and derive `destinati
 | `sourceFolderPath` | Ordered folder names leading to the source lesson |
 | `sourceLessonTitle` | Exact existing lesson title |
 | `destinationFolderPath` | Ordered folder names for the new copy |
+| `createDestinationFolder` | Optional explicit permission to create only the missing final path segment |
 | `lessonTitle` | Exact new copy title |
 | `previousCohort`, `currentCohort`, `module`, `tbl` | Optional prompt-derived overrides when the request supplies them |
 | `destinationFolder` | Human-readable destination used in reporting |
 
 Folder paths are variable-length arrays. Do not assume a fixed number of folders.
+
+When `createDestinationFolder` is true, `destinationFolderPath` must contain a parent path and exact final folder name. The workflow refuses to create intermediate folders, refuses an existing final folder, and refuses a read-only parent.
 
 ## Validation fields
 
