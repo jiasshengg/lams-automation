@@ -11,6 +11,7 @@ export interface CopyLessonResult {
   newTitle: string;
   destinationFolderPath: string[];
   committed: boolean;
+  destinationFolderCreated: boolean;
 }
 
 export async function openSourceLesson(page: Page, config: LamsConfig): Promise<void> {
@@ -61,19 +62,22 @@ export async function copyLesson(
     exact: true
   });
   await titleInput.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
-  await traverseFolderPath(dialog, config.destinationFolderPath, page, config);
+  if (options.commit) assertCommitValues(config);
+  const destinationFolderCreated = await prepareDestinationFolder(dialog, page, config, options.commit);
 
   if (!options.commit) {
-    console.log('Dry run complete: Save As dialog and destination folder were verified; no copy was created.');
+    console.log(
+      `Dry run complete: Save As dialog and destination ${config.createDestinationFolder ? 'folder creation controls' : 'folder'} were verified; no folder or copy was created.`
+    );
     return {
       sourceTitle: config.sourceLessonTitle,
       newTitle: config.lessonTitle,
       destinationFolderPath: config.destinationFolderPath,
-      committed: false
+      committed: false,
+      destinationFolderCreated: false
     };
   }
 
-  assertCommitValues(config);
   await assertTitleAbsent(dialog, config.lessonTitle);
   await titleInput.fill(config.lessonTitle);
 
@@ -91,8 +95,60 @@ export async function copyLesson(
     sourceTitle: config.sourceLessonTitle,
     newTitle: config.lessonTitle,
     destinationFolderPath: config.destinationFolderPath,
-    committed: true
+    committed: true,
+    destinationFolderCreated
   };
+}
+
+async function prepareDestinationFolder(
+  dialog: Locator,
+  page: Page,
+  config: LamsConfig,
+  commit: boolean
+): Promise<boolean> {
+  if (!config.createDestinationFolder) {
+    await traverseFolderPath(dialog, config.destinationFolderPath, page, config);
+    return false;
+  }
+
+  const parentPath = config.destinationFolderPath.slice(0, -1);
+  const folderName = config.destinationFolderPath.at(-1)!;
+  await traverseFolderPath(dialog, parentPath, page, config);
+  const existing = exactTreeItem(dialog, folderName);
+  const existingVisible = await visibleCount(existing);
+  if (existingVisible > 0) {
+    throw new Error(`Refusing to create destination folder: "${folderName}" already exists.`);
+  }
+
+  const newFolderButton = dialog.locator('#ldStoreDialogNewFolderButton');
+  await newFolderButton.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+  if (!(await newFolderButton.isEnabled())) {
+    throw new Error(`Cannot create "${folderName}": the selected parent folder is read-only.`);
+  }
+  if (!commit) {
+    console.log(`Verified missing destination folder and enabled New control: ${folderName}`);
+    return false;
+  }
+
+  const promptHandled = new Promise<void>((resolve, reject) => {
+    page.once('dialog', async (prompt) => {
+      try {
+        if (prompt.type() !== 'prompt' || prompt.message() !== 'Please enter the name for a new folder') {
+          await prompt.dismiss();
+          throw new Error(`Unexpected folder creation dialog: ${prompt.type()} ${JSON.stringify(prompt.message())}`);
+        }
+        await prompt.accept(folderName);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+  await Promise.all([newFolderButton.click(), promptHandled]);
+  const created = await waitForUniqueVisible(exactTreeItem(dialog, folderName), page, config, `created folder: ${folderName}`, false);
+  if ((await created.getAttribute('aria-expanded')) !== 'true') await created.click();
+  console.log(`Verified created destination folder: ${folderName}`);
+  return true;
 }
 
 async function verifyCopiedLessonInDestination(page: Page, config: LamsConfig): Promise<void> {
@@ -119,6 +175,14 @@ async function assertTitleAbsent(dialog: Locator, title: string): Promise<void> 
       throw new Error(`Refusing to commit: destination already contains "${title}".`);
     }
   }
+}
+
+async function visibleCount(locator: Locator): Promise<number> {
+  let visible = 0;
+  for (let index = 0; index < (await locator.count()); index += 1) {
+    if (await locator.nth(index).isVisible().catch(() => false)) visible += 1;
+  }
+  return visible;
 }
 
 export async function traverseFolderPath(

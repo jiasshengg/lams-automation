@@ -43,6 +43,7 @@ export interface LamsConfig {
   sourceFolderPath: string[];
   destinationFolder: string;
   destinationFolderPath: string[];
+  createDestinationFolder?: boolean;
   expectedAENodes: number;
   expectedAEGates: number;
   expectedFlow: string[];
@@ -86,6 +87,7 @@ const requestOverrideKeys = [
   'sourceFolderPath',
   'destinationFolder',
   'destinationFolderPath',
+  'createDestinationFolder',
   'expectedAENodes',
   'expectedAEGates',
   'expectedFlow',
@@ -117,6 +119,12 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
   }
   validateExpectedGateProperties(merged.expectedGateProperties);
+  if (merged.createDestinationFolder !== undefined && typeof merged.createDestinationFolder !== 'boolean') {
+    throw new Error('Configuration field "createDestinationFolder" must be a boolean.');
+  }
+  if (merged.createDestinationFolder === true && (merged.destinationFolderPath as unknown[]).length < 2) {
+    throw new Error('createDestinationFolder requires a destinationFolderPath with a parent and final folder name.');
+  }
 
   const config = merged as unknown as LamsConfig;
   config.browser = {

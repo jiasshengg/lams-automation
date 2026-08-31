@@ -176,8 +176,6 @@ test('commit creates only the missing final folder, saves the copy, and verifies
     createDestinationFolder: true,
     browser: { actionTimeoutMs: 2_000 }
   } as LamsConfig;
-  page.on('dialog', async (dialog) => dialog.accept('![Nathanael]'));
-
   const result = await copyLesson(page, config, { commit: true });
 
   expect(result.committed).toBe(true);
