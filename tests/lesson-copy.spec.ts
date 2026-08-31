@@ -254,7 +254,7 @@ test('commit renames the exact folder, preserves its lesson, and saves the new c
       <div role="tree">
         <div role="treeitem">Courses</div>
         <div role="treeitem">DL Playground 2026/2027 [internal]</div>
-        <div id="destination-folder" role="treeitem">![Nathanael]</div>
+        <div id="destination-folder" class="tree-parent" role="treeitem">![Nathanael]</div>
         <div role="treeitem">[Nathanael]</div>
         <div id="new-copy" role="treeitem"></div>
       </div>
@@ -282,7 +282,7 @@ test('commit renames the exact folder, preserves its lesson, and saves the new c
       <div role="tree">
         <div role="treeitem">Courses</div>
         <div role="treeitem">DL Playground 2026/2027 [internal]</div>
-        <div role="treeitem">[Nathanael] MOCK FOM TBL01 AE TEST</div>
+        <div class="tree-parent" role="treeitem">[Nathanael] MOCK FOM TBL01 AE TEST</div>
         <div role="treeitem">[Nathanael]</div>
         <div role="treeitem">[Nathanael] MOCK FOM TBL01 AE TEST</div>
       </div>

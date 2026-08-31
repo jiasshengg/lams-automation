@@ -21,6 +21,8 @@ Requirements were derived from the user's AE workflow description and the suppli
 | GREEN — exact AE open | `e2bb39a` | same target, then `npm run build` | 3 tests passed; TypeScript passed. |
 | RED — destination folder | `2486d03` | `npx playwright test tests/config.spec.ts tests/lesson-copy.spec.ts` | 3 tests failed because the request flag was rejected and the workflow required the final folder to exist. |
 | GREEN — destination folder | `54636f9` | same target, then `npm run build` | 9 tests passed; TypeScript passed. |
+| RED — read-only source/folder rename | `a12c24e` | `npx playwright test tests/config.spec.ts tests/lesson-copy.spec.ts` | 4 tests failed because the request fields were rejected, read-only sources used normal Open, and exact destination-folder rename was unsupported. |
+| GREEN — read-only source/folder rename | pending | same target, then `npm run build` and `npm test` | Focused suite: 13 tests passed; final full-suite evidence is recorded in the GREEN commit. |
 
 ## Test specification
 

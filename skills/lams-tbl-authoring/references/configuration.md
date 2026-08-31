@@ -20,8 +20,10 @@ The scripts merge these permitted request values in memory and derive `destinati
 | `workspaceCourse` | Stable safety boundary; must remain exactly `DL Playground 2026/2027 [internal]` |
 | `sourceFolderPath` | Ordered folder names leading to the source lesson |
 | `sourceLessonTitle` | Exact existing lesson title |
+| `openSourceAsCopy` | Optional explicit instruction to use LAMS's **Open a copy** control for a read-only source |
 | `destinationFolderPath` | Ordered folder names for the new copy |
 | `createDestinationFolder` | Optional explicit permission to create only the missing final path segment |
+| `renameDestinationFolderFrom` | Optional exact current name of the final destination folder to rename before saving |
 | `lessonTitle` | Exact new copy title |
 | `previousCohort`, `currentCohort`, `module`, `tbl` | Optional prompt-derived overrides when the request supplies them |
 | `destinationFolder` | Human-readable destination used in reporting |
@@ -29,6 +31,8 @@ The scripts merge these permitted request values in memory and derive `destinati
 Folder paths are variable-length arrays. Do not assume a fixed number of folders.
 
 When `createDestinationFolder` is true, `destinationFolderPath` must contain a parent path and exact final folder name. The workflow refuses to create intermediate folders, refuses an existing final folder, and refuses a read-only parent.
+
+When `renameDestinationFolderFrom` is supplied, `destinationFolderPath` must contain the same parent path and a different exact final folder name. The workflow refuses an existing target folder, requires one exact current folder and an enabled Rename control, and preserves the folder's contents. Do not combine it with `createDestinationFolder`. Use `openSourceAsCopy: true` only when the exact selected source exposes LAMS's read-only **Open a copy** action.
 
 ## Validation fields
 

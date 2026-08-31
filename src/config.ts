@@ -44,6 +44,8 @@ export interface LamsConfig {
   destinationFolder: string;
   destinationFolderPath: string[];
   createDestinationFolder?: boolean;
+  openSourceAsCopy?: boolean;
+  renameDestinationFolderFrom?: string;
   expectedAENodes: number;
   expectedAEGates: number;
   expectedFlow: string[];
@@ -88,6 +90,8 @@ const requestOverrideKeys = [
   'destinationFolder',
   'destinationFolderPath',
   'createDestinationFolder',
+  'openSourceAsCopy',
+  'renameDestinationFolderFrom',
   'expectedAENodes',
   'expectedAEGates',
   'expectedFlow',
@@ -122,8 +126,26 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
   if (merged.createDestinationFolder !== undefined && typeof merged.createDestinationFolder !== 'boolean') {
     throw new Error('Configuration field "createDestinationFolder" must be a boolean.');
   }
+  if (merged.openSourceAsCopy !== undefined && typeof merged.openSourceAsCopy !== 'boolean') {
+    throw new Error('Configuration field "openSourceAsCopy" must be a boolean.');
+  }
+  if (
+    merged.renameDestinationFolderFrom !== undefined &&
+    (typeof merged.renameDestinationFolderFrom !== 'string' || merged.renameDestinationFolderFrom.trim() === '')
+  ) {
+    throw new Error('Configuration field "renameDestinationFolderFrom" must be a non-empty string.');
+  }
   if (merged.createDestinationFolder === true && (merged.destinationFolderPath as unknown[]).length < 2) {
     throw new Error('createDestinationFolder requires a destinationFolderPath with a parent and final folder name.');
+  }
+  if (merged.renameDestinationFolderFrom !== undefined) {
+    if (merged.createDestinationFolder === true) {
+      throw new Error('renameDestinationFolderFrom cannot be combined with createDestinationFolder.');
+    }
+    const destinationPath = merged.destinationFolderPath as string[];
+    if (destinationPath.length < 2 || destinationPath.at(-1) === merged.renameDestinationFolderFrom) {
+      throw new Error('renameDestinationFolderFrom requires a different final destination folder name.');
+    }
   }
 
   const config = merged as unknown as LamsConfig;

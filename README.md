@@ -49,6 +49,8 @@ It also refuses to overwrite an existing destination title and reopens the desti
 
 When the user explicitly requests one missing final destination folder, add `"createDestinationFolder": true` and include that exact folder name as the final `destinationFolderPath` segment. The dry run verifies the parent is writable, the folder is absent, and the live New Folder control is enabled without opening or accepting its prompt. The committed run validates the exact native prompt, creates only that final folder, then verifies the folder and copied lesson by reopening the destination. It refuses an existing final folder or a read-only parent.
 
+For an explicitly identified read-only source, add `"openSourceAsCopy": true`; the workflow uses LAMS's observed **Open a copy** control and verifies that the writable, unsaved source clone opens. If the same approved operation must rename an existing destination folder, set `"renameDestinationFolderFrom"` to its exact current name and make the final `destinationFolderPath` segment the exact new name. The dry run verifies that the old folder exists, the new name is absent, and Rename is enabled. The committed run renames that folder, preserves its contents, saves the lesson copy inside it, and reopens the destination to verify the lesson. Folder creation and folder rename flags cannot be combined.
+
 Inspect the copied lesson's SVG graph without changing it:
 
 ```bash

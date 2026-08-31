@@ -13,6 +13,8 @@ Run `npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_
 
 For an explicitly requested missing final destination folder, the dry run instead verifies the exact parent, confirms the final name is absent, and verifies the New Folder control is enabled. It must not open or accept the creation prompt.
 
+For an explicitly requested final-folder rename, the dry run verifies the exact parent and old folder, confirms the new folder name is absent, and verifies Rename is enabled. It must not open or confirm the Rename dialog. For an explicitly identified read-only source, it may use **Open a copy** to obtain the unsaved writable authoring clone; this is not a saved library mutation.
+
 If any state is missing or non-unique, stop without mutation.
 
 ## Committed copy
@@ -20,6 +22,8 @@ If any state is missing or non-unique, stop without mutation.
 Run `npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` only after a successful dry run and an explicit user request to create the copy. Use the same request JSON for both commands. Report the exact new title and verified destination. Never publish or start the copied lesson.
 
 If the identical request includes `createDestinationFolder: true`, the committed run may create only the exact missing final segment. It must validate LAMS's observed native folder prompt, then reopen the full destination to verify both folder and copied lesson.
+
+If the identical request includes `renameDestinationFolderFrom`, the committed run may rename only that exact final folder to the final `destinationFolderPath` segment. It must verify the old name disappears, preserve existing lessons, save the requested new copy inside the renamed folder, and reopen it to distinguish and verify the lesson even when the folder and lesson share a title.
 
 ## Inspection and validation
 
