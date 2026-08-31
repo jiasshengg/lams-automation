@@ -41,6 +41,41 @@ export interface LessonIndexSettings {
   enableScheduling?: boolean;
 }
 
+export interface IratAnswerRequest {
+  text: string;
+  correct: boolean;
+  weight: number;
+}
+
+export interface IratQuestionRequest {
+  title: string;
+  type: string;
+  content: string;
+  mandatory: boolean;
+  fontFamily: string;
+  fontSize: number;
+  answers: IratAnswerRequest[];
+}
+
+export interface IratRequest {
+  gate: {
+    name: string;
+    description: string;
+    type: 'password';
+    dynamicPassword: boolean;
+    rotationSeconds: number;
+  };
+  activityName: string;
+  teamSetupName: string;
+  questions: IratQuestionRequest[];
+  advanced: {
+    shuffleAnswers: boolean;
+    displayAllQuestions: boolean;
+    answerJustification: boolean;
+    confidenceLevels: boolean;
+  };
+}
+
 export interface LamsConfig {
   baseUrl: string;
   workspaceCourse: string;
@@ -61,6 +96,7 @@ export interface LamsConfig {
   expectedFlow: string[];
   expectedGateProperties?: ExpectedGateProperties[];
   lessonIndex?: LessonIndexSettings;
+  irat?: IratRequest;
   browser: {
     headless: boolean;
     userDataDir: string;
@@ -109,7 +145,8 @@ const requestOverrideKeys = [
   'expectedAEGates',
   'expectedFlow',
   'expectedGateProperties',
-  'lessonIndex'
+  'lessonIndex',
+  'irat'
 ] as const;
 
 export async function loadConfig(configPath: string, overrides: Partial<LamsConfig> = {}): Promise<LamsConfig> {
@@ -165,6 +202,7 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
       throw new Error('renameDestinationFolderFrom requires a different final destination folder name.');
     }
   }
+  validateIratRequest(merged.irat);
 
   const config = merged as unknown as LamsConfig;
   config.browser = {
@@ -176,6 +214,75 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);
   return config;
+}
+
+function validateIratRequest(value: unknown): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) throw new Error('Configuration field "irat" must be an object.');
+  if (!isRecord(value.gate)) throw new Error('irat.gate must be an object.');
+  for (const key of ['name', 'description'] as const) {
+    if (typeof value.gate[key] !== 'string' || value.gate[key].trim() === '') {
+      throw new Error(`irat.gate.${key} must be a non-empty string.`);
+    }
+  }
+  if (value.gate.type !== 'password') throw new Error('irat.gate.type must be "password".');
+  if (typeof value.gate.dynamicPassword !== 'boolean') {
+    throw new Error('irat.gate.dynamicPassword must be a boolean.');
+  }
+  if (!Number.isInteger(value.gate.rotationSeconds) || Number(value.gate.rotationSeconds) <= 0) {
+    throw new Error('irat.gate.rotationSeconds must be a positive integer.');
+  }
+  for (const key of ['activityName', 'teamSetupName'] as const) {
+    if (typeof value[key] !== 'string' || value[key].trim() === '') {
+      throw new Error(`irat.${key} must be a non-empty string.`);
+    }
+  }
+  if (!Array.isArray(value.questions) || value.questions.length === 0) {
+    throw new Error('irat.questions must be a non-empty array.');
+  }
+  const titles = new Set<string>();
+  value.questions.forEach((question, questionIndex) => {
+    if (!isRecord(question)) throw new Error(`irat.questions[${questionIndex}] must be an object.`);
+    for (const key of ['title', 'type', 'content', 'fontFamily'] as const) {
+      if (typeof question[key] !== 'string' || question[key].trim() === '') {
+        throw new Error(`irat.questions[${questionIndex}].${key} must be a non-empty string.`);
+      }
+    }
+    if (titles.has(question.title)) throw new Error(`Duplicate iRAT question title: "${question.title}".`);
+    titles.add(question.title);
+    if (typeof question.mandatory !== 'boolean') {
+      throw new Error(`irat.questions[${questionIndex}].mandatory must be a boolean.`);
+    }
+    if (!Number.isFinite(question.fontSize) || Number(question.fontSize) <= 0) {
+      throw new Error(`irat.questions[${questionIndex}].fontSize must be positive.`);
+    }
+    if (!Array.isArray(question.answers) || question.answers.length < 2) {
+      throw new Error(`irat.questions[${questionIndex}].answers must contain at least two answers.`);
+    }
+    let correctWeight = 0;
+    question.answers.forEach((answer, answerIndex) => {
+      if (!isRecord(answer) || typeof answer.text !== 'string' || answer.text.trim() === '') {
+        throw new Error(`irat.questions[${questionIndex}].answers[${answerIndex}].text must be non-empty.`);
+      }
+      if (typeof answer.correct !== 'boolean') {
+        throw new Error(`irat.questions[${questionIndex}].answers[${answerIndex}].correct must be a boolean.`);
+      }
+      if (!Number.isFinite(answer.weight) || Number(answer.weight) < 0 || Number(answer.weight) > 100) {
+        throw new Error(`irat.questions[${questionIndex}].answers[${answerIndex}].weight must be between 0 and 100.`);
+      }
+      if (answer.correct) correctWeight += Number(answer.weight);
+      else if (Number(answer.weight) !== 0) {
+        throw new Error(`Incorrect answer weight must be 0 in iRAT question "${question.title}".`);
+      }
+    });
+    if (correctWeight !== 100) {
+      throw new Error(`Correct answer weights must total 100 in iRAT question "${question.title}"; found ${correctWeight}.`);
+    }
+  });
+  if (!isRecord(value.advanced)) throw new Error('irat.advanced must be an object.');
+  for (const key of ['shuffleAnswers', 'displayAllQuestions', 'answerJustification', 'confidenceLevels'] as const) {
+    if (typeof value.advanced[key] !== 'boolean') throw new Error(`irat.advanced.${key} must be a boolean.`);
+  }
 }
 
 export function parseRequestOverrides(raw: string | undefined): Partial<LamsConfig> {

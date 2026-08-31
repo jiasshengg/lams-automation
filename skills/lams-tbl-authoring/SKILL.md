@@ -21,6 +21,7 @@ Choose only the modes requested by the user:
 - **Validate:** compare the graph with manually configured expectations.
 - **AE preflight:** validate already-structured, human-reviewed AE JSON and produce the deterministic execution plan without opening LAMS.
 - **AE inspect:** compare one exact AE activity's graph and checkbox settings without saving.
+- **iRAT preflight:** verify the exact existing iRAT nodes and print the configured changes without writing them.
 
 Do not parse an AE Source of Truth. The AE preflight input must already be structured and reviewed. Do not create, delete, publish, start, move, save, or restructure authoring nodes during AE inspection.
 
@@ -89,6 +90,22 @@ Read [references/configuration.md](references/configuration.md) when preparing p
    ```
 
    The committed command must verify the new exact title in the same folder and that the old title is absent. It must not move, publish, start, or restructure the lesson.
+
+11. Prepare iRAT work only when the request includes the exact structured `irat` data:
+
+   ```bash
+   npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
+   ```
+
+   This command is read-only.
+
+12. Run the continuous copy → iRAT workflow only after the dry run succeeds, the user explicitly requests the copy and iRAT changes, and the identical request contains every exact value:
+
+   ```bash
+   npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+   ```
+
+   The live adapter supports multiple-choice iRAT questions and the `displayAllQuestions=true` distribution. Stop on other question or distribution types rather than approximating them.
 
 Read [references/operations.md](references/operations.md) for command outcomes, stopping conditions, and reporting requirements.
 

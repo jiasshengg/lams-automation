@@ -15,6 +15,10 @@
     "inspect:ae": "tsx src/inspect-ae.ts",
     "lesson:index": "tsx src/index-monitoring.ts",
     "lesson:monitor": "tsx src/index-monitoring.ts --monitor-only",
+    "prepare:irat": "tsx src/prepare-irat.ts",
+    "run:tbl-irat": "tsx src/run-tbl-irat.ts",
+    "discover:lessons": "tsx src/discover-lessons.ts",
+    "discover:irat-ui": "tsx src/discover-irat-ui.ts",
     "test": "playwright test",
     "install:browsers": "playwright install chromium"
   },
