@@ -162,6 +162,28 @@ export function buildAEPlan(value: unknown): AEPlan {
   };
 }
 
+export function formatAEPlanSummary(plan: AEPlan): string {
+  const questionCount = plan.nodes.reduce((sum, node) => sum + node.questions.length, 0);
+  const lines = [
+    'AE preflight: PASS',
+    `Source: ${plan.sourceLabel}`,
+    `Nodes: ${plan.requiredAENodes} | Gates: ${plan.requiredAEGates} | Questions: ${questionCount} | Marks: ${plan.totalMarks}`,
+    '',
+    'Nodes'
+  ];
+  plan.nodes.forEach((node) => {
+    const first = node.questions[0]!.number;
+    const last = node.questions[node.questions.length - 1]!.number;
+    lines.push(`- ${node.title}: questions ${first}${first === last ? '' : `–${last}`}`);
+  });
+  lines.push('', 'Gates');
+  if (plan.gates.length === 0) lines.push('- none');
+  plan.gates.forEach((gate) => {
+    lines.push(`- ${gate.title}: ${gate.afterNodeTitle} -> ${gate.beforeNodeTitle} (question ${gate.beforeQuestionNumber})`);
+  });
+  return lines.join('\n');
+}
+
 function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
   const marks = question.marks ?? 4;
   if (!Number.isInteger(marks) || marks <= 0) {

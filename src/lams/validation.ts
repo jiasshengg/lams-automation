@@ -1,4 +1,5 @@
 import type { LamsConfig } from '../config.js';
+import type { AEPlan } from '../ae/plan.js';
 import type { AuthoringGraph, GraphNode } from './authoring.js';
 
 export interface ValidationCheck {
@@ -127,6 +128,75 @@ export function validateAuthoringGraph(graph: AuthoringGraph, config: LamsConfig
       detail: mismatches.length === 0 ? 'Configured properties match' : mismatches.join('; ')
     });
   }
+
+  return { passed: checks.every((check) => check.passed), checks };
+}
+
+export function validateAEPlanGraph(graph: AuthoringGraph, plan: AEPlan): ValidationReport {
+  const checks: ValidationCheck[] = [];
+  const nodesByName = new Map<string, GraphNode[]>();
+  graph.nodes.forEach((node) => {
+    const matches = nodesByName.get(node.name) ?? [];
+    matches.push(node);
+    nodesByName.set(node.name, matches);
+  });
+
+  for (const node of plan.nodes) {
+    const matches = (nodesByName.get(node.title) ?? []).filter((candidate) => candidate.type === 'tool');
+    checks.push({
+      label: `AE node — ${node.title}`,
+      passed: matches.length === 1,
+      detail: matches.length === 1 ? 'Found exactly once as a tool activity' : `Expected once as a tool activity; found ${matches.length}`
+    });
+  }
+  for (const gate of plan.gates) {
+    const matches = (nodesByName.get(gate.title) ?? []).filter((candidate) => candidate.type === 'gate');
+    checks.push({
+      label: `AE gate — ${gate.title}`,
+      passed: matches.length === 1,
+      detail: matches.length === 1 ? 'Found exactly once as a gate' : `Expected once as a gate; found ${matches.length}`
+    });
+  }
+
+  const aeNodes = graph.nodes.filter((node) => node.type === 'tool' && /^AE\b/i.test(node.name));
+  const aeGates = graph.nodes.filter((node) => node.type === 'gate' && /^AE Gate\b/i.test(node.name));
+  checks.push(countCheck('AE plan node count', plan.requiredAENodes, aeNodes.length));
+  checks.push(countCheck('AE plan gate count', plan.requiredAEGates, aeGates.length));
+
+  const expectedChain: string[] = [];
+  plan.nodes.forEach((node, index) => {
+    expectedChain.push(node.title);
+    const gate = plan.gates[index];
+    if (gate) expectedChain.push(gate.title);
+  });
+  const transitionKeys = new Set(
+    graph.transitions
+      .filter((transition) => transition.fromUiid !== null && transition.toUiid !== null)
+      .map((transition) => `${transition.fromUiid}->${transition.toUiid}`)
+  );
+  const missingConnections: string[] = [];
+  for (let index = 0; index < expectedChain.length - 1; index += 1) {
+    const fromName = expectedChain[index]!;
+    const toName = expectedChain[index + 1]!;
+    const fromMatches = nodesByName.get(fromName) ?? [];
+    const toMatches = nodesByName.get(toName) ?? [];
+    if (
+      fromMatches.length !== 1 ||
+      toMatches.length !== 1 ||
+      !transitionKeys.has(`${fromMatches[0]!.uiid}->${toMatches[0]!.uiid}`)
+    ) {
+      missingConnections.push(`${fromName} -> ${toName}`);
+    }
+  }
+  checks.push({
+    label: 'AE plan connectivity',
+    passed: graph.modelAvailable && missingConnections.length === 0,
+    detail: !graph.modelAvailable
+      ? 'Runtime model unavailable; AE transition endpoints could not be verified'
+      : missingConnections.length === 0
+        ? 'Every planned AE node and gate is connected in the required order'
+        : `Missing: ${missingConnections.join(', ')}`
+  });
 
   return { passed: checks.every((check) => check.passed), checks };
 }

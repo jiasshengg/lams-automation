@@ -1,0 +1,49 @@
+{
+  "sourceLabel": "FOM TBL06 AE Source of Truth",
+  "breakMarkerCount": 1,
+  "expectedTotalMarks": 12,
+  "nodes": [
+    {
+      "title": "AE Case 1",
+      "questions": [
+        {
+          "number": 1,
+          "type": "mcq",
+          "prompt": "Case 1\n[4 marks]\nQUESTION 1\nWhich action is best?",
+          "options": [
+            { "text": "A) First option", "correct": false },
+            { "text": "B) Correct option", "correct": true },
+            { "text": "C) Third option", "correct": false }
+          ]
+        },
+        {
+          "number": 2,
+          "type": "essay",
+          "prompt": "QUESTION 2\nExplain your reasoning."
+        }
+      ]
+    },
+    {
+      "title": "AE Case 2",
+      "questions": [
+        {
+          "number": 3,
+          "type": "mcq",
+          "prompt": "Case 2\n[4 marks]\nQUESTION 3\nWhat should happen next?",
+          "options": [
+            { "text": "A) Continue", "correct": true },
+            { "text": "B) Stop", "correct": false }
+          ]
+        }
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "title": "AE Gate Case 1 to Case 2 Question 3",
+      "afterNodeTitle": "AE Case 1",
+      "beforeNodeTitle": "AE Case 2",
+      "beforeQuestionNumber": 3
+    }
+  ]
+}
