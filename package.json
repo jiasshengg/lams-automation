@@ -21,7 +21,10 @@
     "discover:irat-ui": "tsx src/discover-irat-ui.ts",
     "test": "playwright test",
     "install:browsers": "playwright install chromium",
-    "fix:gate": "tsx src/fix-gate-rotation.ts"
+    "fix:gate": "tsx src/fix-gate-rotation.ts",
+    "find:lesson": "tsx src/find-lesson.ts",
+    "inspect:irat-questions": "tsx src/inspect-irat-questions.ts",
+    "apply:irat": "tsx src/apply-irat.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
