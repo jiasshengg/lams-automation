@@ -51,6 +51,20 @@ When the user explicitly requests one missing final destination folder, add `"cr
 
 For an explicitly identified read-only source, add `"openSourceAsCopy": true`; the workflow uses LAMS's observed **Open a copy** control and verifies that the writable, unsaved source clone opens. If the same approved operation must rename an existing destination folder, set `"renameDestinationFolderFrom"` to its exact current name and make the final `destinationFolderPath` segment the exact new name. The dry run verifies that the old folder exists, the new name is absent, and Rename is enabled. The committed run renames that folder, preserves its contents, saves the lesson copy inside it, and reopens the destination to verify the lesson. Folder creation and folder rename flags cannot be combined.
 
+Correct one password gate's dynamic-password rotation to the value the deployment guide
+requires. The dry run reports the current and intended rotation without touching the
+design; the committed run changes only that select, verifies nothing else about the gate
+moved, saves, and reopens the lesson to confirm the value persisted:
+
+```bash
+npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>'
+npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>' --commit
+```
+
+It refuses a gate that is not an exact unique match or is not a dynamic-password gate, and
+exits without changes when the rotation is already correct. This is the one place the
+automation edits a gate, and only when explicitly asked; validation itself stays read-only.
+
 Dry-run an in-place rename of an already-duplicated lesson:
 
 ```bash

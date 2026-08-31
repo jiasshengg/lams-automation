@@ -20,7 +20,8 @@
     "discover:lessons": "tsx src/discover-lessons.ts",
     "discover:irat-ui": "tsx src/discover-irat-ui.ts",
     "test": "playwright test",
-    "install:browsers": "playwright install chromium"
+    "install:browsers": "playwright install chromium",
+    "fix:gate": "tsx src/fix-gate-rotation.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
