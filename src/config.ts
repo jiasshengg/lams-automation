@@ -66,6 +66,7 @@ export interface LamsConfig {
     userDataDir: string;
     manualLoginTimeoutMs: number;
     actionTimeoutMs: number;
+    readyTimeoutMs: number;
   };
   selectors: {
     previousCohort?: LocatorSpec;
@@ -171,7 +172,10 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     headless: config.browser?.headless ?? false,
     userDataDir: config.browser?.userDataDir ?? '.playwright/lams-profile',
     manualLoginTimeoutMs: config.browser?.manualLoginTimeoutMs ?? 120_000,
-    actionTimeoutMs: config.browser?.actionTimeoutMs ?? 15_000
+    actionTimeoutMs: config.browser?.actionTimeoutMs ?? 15_000,
+    // LAMS initialises the authoring canvas well after the toolbar paints, so surface
+    // readiness needs a longer budget than an ordinary action.
+    readyTimeoutMs: config.browser?.readyTimeoutMs ?? 60_000
   };
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);

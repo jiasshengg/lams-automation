@@ -3,6 +3,9 @@ import type { LamsConfig, LocatorSpec } from '../config.js';
 import { saveDiagnostics } from './diagnostics.js';
 import { fromSpec } from './locators.js';
 
+/** Grace period for the dashboard heading to paint before re-selecting the course. */
+const HEADING_SETTLE_MS = 1_000;
+
 export class SelectorRequiredError extends Error {
   constructor(
     public readonly selectorName: string,
@@ -26,20 +29,36 @@ export async function verifyWorkspaceCourse(page: Page, config: LamsConfig): Pro
 
 export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Promise<void> {
   const heading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
+  const toggle = page.getByRole('button', { name: 'Toggle course menu', exact: true });
+
+  // The dashboard heading paints after domcontentloaded, so an instantaneous check can
+  // miss an already-selected course and needlessly drive the course menu. Wait for the
+  // menu toggle first, which ships in the same header and doubles as the manual-login
+  // gate, then give the heading a short grace period before deciding the approved
+  // course still has to be selected.
+  const toggleTarget = await waitForUniqueVisible(toggle, page, config, 'course menu', true);
+  await heading.first().waitFor({ state: 'visible', timeout: HEADING_SETTLE_MS }).catch(() => undefined);
   if (await hasOneVisibleMatch(heading)) {
     console.log(`Verified safe workspace: ${config.workspaceCourse}`);
     return;
   }
 
-  const toggle = page.getByRole('button', { name: 'Toggle course menu', exact: true });
-  await (await waitForUniqueVisible(toggle, page, config, 'course menu', true)).click();
+  await toggleTarget.click();
 
   const search = page.getByRole('searchbox', { name: 'Search for courses', exact: true });
   await (await waitForUniqueVisible(search, page, config, 'course search', false)).fill(config.workspaceCourse);
 
-  // The observed course-search results expose each course as an exact-name button.
+  // Each observed course entry is a <button> that overrides its implicit role with
+  // role="listitem", so a button-role lookup alone never matches it. listitem takes no
+  // name from its contents either, so that variant is matched on its exact label node.
   // Only the configured safety-boundary course is eligible for selection here.
-  const course = page.getByRole('button', { name: config.workspaceCourse, exact: true });
+  const course = page
+    .getByRole('button', { name: config.workspaceCourse, exact: true })
+    .or(
+      page
+        .getByRole('listitem')
+        .filter({ has: page.getByText(config.workspaceCourse, { exact: true }) })
+    );
   await (await waitForUniqueVisible(course, page, config, 'workspace course result', false)).click();
 
   await waitForUniqueVisible(heading, page, config, 'workspaceCourse', false);

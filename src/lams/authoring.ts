@@ -46,8 +46,30 @@ export async function openAuthoring(page: Page, config: LamsConfig): Promise<Pag
   const authoringPage = (await popupPromise) ?? page;
   await authoringPage.waitForLoadState('domcontentloaded').catch(() => undefined);
   await authoringPage.locator('#openButton').waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+  await waitForAuthoringReady(authoringPage, config);
   console.log(`Authoring surface opened${authoringPage === page ? '' : ' in a new page'}.`);
   return authoringPage;
+}
+
+/**
+ * LAMS paints the authoring toolbar and canvas behind a full-page spinner and only
+ * hides #loadingOverlay once the design and tool palette have finished initialising.
+ * Every toolbar button is visible and enabled underneath it for that whole period, so
+ * waiting for a button is not proof that it can be clicked: the overlay swallows the
+ * pointer event and the click times out.
+ */
+export async function waitForAuthoringReady(page: Page, config: LamsConfig): Promise<void> {
+  const timeout = config.browser.readyTimeoutMs ?? config.browser.actionTimeoutMs;
+  try {
+    // A detached overlay also counts as hidden, so this is a no-op once LAMS removes it.
+    await page.locator('#loadingOverlay').waitFor({ state: 'hidden', timeout });
+  } catch (error) {
+    const directory = await saveDiagnostics(page, 'authoring-loading-overlay-stuck');
+    throw new Error(
+      `The LAMS authoring loading overlay did not clear within ${timeout}ms. Diagnostics: ${directory}`,
+      { cause: error }
+    );
+  }
 }
 
 export async function listAuthoringNodes(page: Page, config: LamsConfig): Promise<AuthoringNode[]> {

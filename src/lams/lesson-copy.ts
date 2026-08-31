@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 import type { LamsConfig } from '../config.js';
+import { waitForAuthoringReady } from './authoring.js';
 import { waitForUniqueVisible } from './navigation.js';
 
 export interface CopyLessonOptions {
@@ -41,6 +42,7 @@ export async function openLessonFromLibrary(
   config: LamsConfig,
   options: OpenLessonOptions = {}
 ): Promise<void> {
+  await waitForAuthoringReady(page, config);
   await page.locator('#openButton').click();
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
@@ -301,6 +303,7 @@ async function prepareRenamedDestinationFolder(
 }
 
 async function verifyCopiedLessonInDestination(page: Page, config: LamsConfig): Promise<void> {
+  await waitForAuthoringReady(page, config);
   await page.locator('#openButton').click();
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
@@ -318,6 +321,7 @@ async function verifyCopiedLessonInDestination(page: Page, config: LamsConfig): 
 }
 
 async function verifyRenamedLessonInFolder(page: Page, config: LamsConfig): Promise<void> {
+  await waitForAuthoringReady(page, config);
   await page.locator('#openButton').click();
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
