@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
 import { inspectAuthoringGraph, listAuthoringNodes } from '../src/lams/authoring.js';
+import { openExactAEActivity } from '../src/lams/ae.js';
 
 test('lists visible authoring node names and types from a configured DOM shape', async ({ page }) => {
   await page.setContent(`
@@ -89,4 +90,31 @@ test('extracts SVG nodes, grouping associations, and transition endpoints', asyn
     { uiid: 14, fromUiid: 6, toUiid: 7 },
     { uiid: 15, fromUiid: 7, toUiid: 8 }
   ]);
+});
+
+test('opens one exact AE activity through its SVG node and configured semantic control', async ({ page }) => {
+  await page.setContent(`
+    <div id="canvas">
+      <svg width="500" height="300">
+        <g class="svg-activity svg-activity-tool" uiid="21" onclick="document.querySelector('#properties').hidden = false">
+          <rect width="120" height="50"></rect>
+          <text class="svg-activity-title-label" x="5" y="20">AE Case 1</text>
+        </g>
+      </svg>
+    </div>
+    <section id="properties" hidden>
+      <h2>AE Case 1</h2>
+      <button data-testid="open-ae" onclick="document.querySelector('#ae-editor').hidden = false">Open</button>
+    </section>
+    <section id="ae-editor" hidden><h1>Assessment editor</h1></section>
+  `);
+  const config = {
+    browser: { actionTimeoutMs: 2_000 },
+    selectors: { aeOpenActivity: { by: 'testId', testId: 'open-ae' } }
+  } as LamsConfig;
+
+  const activityPage = await openExactAEActivity(page, 'AE Case 1', config);
+
+  expect(activityPage).toBe(page);
+  await expect(page.getByRole('heading', { name: 'Assessment editor' })).toBeVisible();
 });
