@@ -53,6 +53,37 @@
     "endDate": "2026-09-03",
     "endTime": "23:59"
   },
+  "irat": {
+    "gate": {
+      "name": "iRAT Gate",
+      "description": "iRAT Gate",
+      "type": "password",
+      "dynamicPassword": true,
+      "rotationSeconds": 10
+    },
+    "activityName": "iRAT",
+    "teamSetupName": "Team Setup",
+    "questions": [
+      {
+        "title": "REPLACE WITH EXACT QUESTION TITLE",
+        "type": "multiple-choice",
+        "content": "REPLACE WITH SOURCE-OF-TRUTH QUESTION CONTENT",
+        "mandatory": true,
+        "fontFamily": "Arial",
+        "fontSize": 12,
+        "answers": [
+          { "text": "REPLACE WITH CORRECT ANSWER", "correct": true, "weight": 100 },
+          { "text": "REPLACE WITH INCORRECT ANSWER", "correct": false, "weight": 0 }
+        ]
+      }
+    ],
+    "advanced": {
+      "shuffleAnswers": true,
+      "displayAllQuestions": true,
+      "answerJustification": true,
+      "confidenceLevels": true
+    }
+  },
   "browser": {
     "headless": false,
     "userDataDir": ".playwright/lams-profile",

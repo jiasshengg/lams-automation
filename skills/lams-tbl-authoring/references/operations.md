@@ -58,6 +58,16 @@ It does not cover automatic Source-of-Truth parsing, branching/merging topology,
 
 An exit code of `2` means the browser inspection completed but the graph or activity settings did not match. A missing or ambiguous selector/control is an automation stop and must include diagnostics. Question content/version inspection and AE mutation remain unsupported until authenticated DOM evidence is captured.
 
+## iRAT preflight
+
+`npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'` opens the exact copied lesson and verifies the existing Team Setup, iRAT Gate, iRAT node, gate-to-iRAT connection, and Team Setup association. It prints the configured gate, question, advanced-setting, Print View, and save plan. It never applies those changes and rejects `--commit`.
+
+## Continuous copy and iRAT
+
+`npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` keeps one Playwright context open for the full operation. It verifies the playground, copies the exact source lesson, updates the iRAT Gate, Team Setup association, multiple-choice questions and answer weights, mandatory flags, advanced settings, Print View, and saves the tool and copied design.
+
+The command refuses to run without `--commit`, exact copy targets, and the structured `irat` request. It stops on unsupported question/distribution types and saves diagnostics on failure. It never deletes, restructures, publishes, or starts a lesson.
+
 ## Failures
 
 When the automation saves diagnostics, report the artifact directory. Diagnostics may include a screenshot, HTML, frame information, and a DOM summary. Do not include browser profiles, authentication material, or secrets in the report.
