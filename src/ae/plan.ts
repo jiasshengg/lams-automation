@@ -20,8 +20,7 @@ export interface AENodeInput {
 
 export interface AEGateInput {
   title: string;
-  /** Omitted for a leading gate that precedes the first AE node. */
-  afterNodeTitle?: string;
+  afterNodeTitle: string;
   beforeNodeTitle: string;
   beforeQuestionNumber: number;
 }
@@ -114,9 +113,9 @@ export function buildAEPlan(value: unknown): AEPlan {
       `breakMarkerCount ${input.breakMarkerCount} requires ${requiredAENodes} AE nodes; found ${input.nodes.length}`
     );
   }
-  // A TBL lesson may also gate entry to its first AE node, which is not a gate
-  // between two AE nodes and so is counted on top of the break-derived gates.
-  const requiredAEGates = input.breakMarkerCount + (hasLeadingGate(input) ? 1 : 0);
+  // Documented process: AE gates equal the number of SoT breaks while AE nodes are
+  // breaks + 1, so every gate sits between two AE nodes and the first is never gated.
+  const requiredAEGates = input.breakMarkerCount;
   if (input.gates.length !== requiredAEGates) {
     throw new Error(
       `breakMarkerCount ${input.breakMarkerCount} requires ${requiredAEGates} AE gates; found ${input.gates.length}`
@@ -183,7 +182,7 @@ export function formatAEPlanSummary(plan: AEPlan): string {
   lines.push('', 'Gates');
   if (plan.gates.length === 0) lines.push('- none');
   plan.gates.forEach((gate) => {
-    lines.push(`- ${gate.title}: ${gate.afterNodeTitle ?? '(lesson entry)'} -> ${gate.beforeNodeTitle} (question ${gate.beforeQuestionNumber})`);
+    lines.push(`- ${gate.title}: ${gate.afterNodeTitle} -> ${gate.beforeNodeTitle} (question ${gate.beforeQuestionNumber})`);
   });
   return lines.join('\n');
 }
@@ -347,10 +346,7 @@ function parseInput(value: unknown): AEPlanInput {
     if (!isRecord(gate)) throw new Error(`gates[${index}] must be an object`);
     return {
       title: nonEmptyString(gate.title, `gates[${index}].title`),
-      // Absent afterNodeTitle marks a leading gate placed before the first AE node.
-      ...(gate.afterNodeTitle === undefined || gate.afterNodeTitle === null
-        ? {}
-        : { afterNodeTitle: nonEmptyString(gate.afterNodeTitle, `gates[${index}].afterNodeTitle`) }),
+      afterNodeTitle: nonEmptyString(gate.afterNodeTitle, `gates[${index}].afterNodeTitle`),
       beforeNodeTitle: nonEmptyString(gate.beforeNodeTitle, `gates[${index}].beforeNodeTitle`),
       beforeQuestionNumber: positiveInteger(gate.beforeQuestionNumber, `gates[${index}].beforeQuestionNumber`)
     };
