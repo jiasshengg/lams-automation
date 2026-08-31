@@ -4,7 +4,7 @@ import { loadConfig, parseRequestOverrides } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { inspectPageSurface, saveDiagnostics } from './lams/diagnostics.js';
 import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
-import { openLams, SelectorRequiredError, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse, SelectorRequiredError } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/example.json';
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     const authoringPage = await openAuthoring(page, config);
     activePage = authoringPage;
     await openSourceLesson(authoringPage, config);

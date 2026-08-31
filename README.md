@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It covers the first-box lesson-copy workflow plus an incremental AE foundation: validate structured AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not parse a Source-of-Truth `.docx`, import questions, edit question rows, restructure nodes, or save AE changes yet.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the safe playground course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: validate structured AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not parse a Source-of-Truth `.docx`, import questions, edit question rows, restructure nodes, or save AE changes yet.
 
 ## Agent skill
 
@@ -50,6 +50,20 @@ It also refuses to overwrite an existing destination title and reopens the desti
 When the user explicitly requests one missing final destination folder, add `"createDestinationFolder": true` and include that exact folder name as the final `destinationFolderPath` segment. The dry run verifies the parent is writable, the folder is absent, and the live New Folder control is enabled without opening or accepting its prompt. The committed run validates the exact native prompt, creates only that final folder, then verifies the folder and copied lesson by reopening the destination. It refuses an existing final folder or a read-only parent.
 
 For an explicitly identified read-only source, add `"openSourceAsCopy": true`; the workflow uses LAMS's observed **Open a copy** control and verifies that the writable, unsaved source clone opens. If the same approved operation must rename an existing destination folder, set `"renameDestinationFolderFrom"` to its exact current name and make the final `destinationFolderPath` segment the exact new name. The dry run verifies that the old folder exists, the new name is absent, and Rename is enabled. The committed run renames that folder, preserves its contents, saves the lesson copy inside it, and reopens the destination to verify the lesson. Folder creation and folder rename flags cannot be combined.
+
+Dry-run an in-place rename of an already-duplicated lesson:
+
+```bash
+npm run rename:lesson -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","DL Playground 2026/2027 [internal]","FOM"],"sourceLessonTitle":"FOM TBL06 old title","lessonTitle":"FOM TBL06 new title"}'
+```
+
+The dry run opens and cancels the inline title editor without changing the lesson. After it passes, reuse the identical request JSON and explicitly save the rename:
+
+```bash
+npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+```
+
+The committed rename saves in the same folder, then verifies the new exact title exists and the old one is absent. It does not move, publish, start, or restructure the lesson.
 
 Inspect the copied lesson's SVG graph without changing it:
 
@@ -117,6 +131,54 @@ npm run inspect:ae -- --config configs/local.json --ae-json <AE_JSON> --node "<E
 The command verifies the exact playground heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
 
 The next implementation gate is authenticated DOM evidence for the question table, rich-text editor, Advanced question settings, version selector, and final Save action. Do not add selectors for those controls from the video alone.
+
+## Lesson index and monitoring
+
+Run these with `npx tsx` directly, not `npm run -- --flag`: npm strips the flag *names*
+from forwarded arguments on Windows, so `--config X` arrives as a bare `X` and the run
+falls back to `configs/example.json`.
+
+Create the lesson from the design the authoring workflow just saved, then read back its
+monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
+
+```bash
+npx tsx src/index-monitoring.ts --config configs/local.json --request-json '{"lessonIndex":{"endDate":"2026-09-03"}}'
+```
+
+The run is a dry run by default: it selects the top entry of "Recently used designs",
+opens the Advanced tab, turns *Display activity scores on completion* off, turns
+*Enable scheduling* on, sets the end date/time, advances to Course groupings and selects
+the preset — then stops without clicking **Add now**. Add `--commit` to create the lesson
+and continue into monitoring.
+
+`lessonIndex` fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `courseGrouping` | no | Exact preset name, only needed when a course offers more than one. Normally omit it. |
+| `endDate` | yes | `YYYY-MM-DD`. |
+| `endTime` | no | `HH:MM`, defaults to `23:59`. |
+| `displayScoresOnCompletion` | no | Defaults to `false`. |
+| `enableScheduling` | no | Defaults to `true`. |
+
+Course grouping needs no configuration. Y1 and Y2 run as a whole class, so a design that
+uses groupings offers exactly one preset besides `None` and it is selected automatically.
+A design with no grouping activities gets no Course groupings step at all — LAMS keeps
+Next hidden and commits straight from Add now — and the run publishes as-is, reporting
+`None`. If a course ever offers more than one preset the run stops and lists them rather
+than guessing; set `courseGrouping` to pick one.
+
+Monitoring resolves the lesson by exact title on the course page (each row is
+`div.j-single-lesson` carrying `data-name` and the lesson ID as its element `id`), opens
+`/lams/home/monitorLesson.do?lessonID=...`, and confirms the ID against the resulting URL
+before printing it. To read the ID for a lesson that already exists, skip the index
+steps:
+
+```bash
+npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
+```
+
+The ID is printed only; nothing downstream consumes it yet.
 
 ## Selector discovery workflow
 

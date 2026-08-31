@@ -25,6 +25,12 @@ If the identical request includes `createDestinationFolder: true`, the committed
 
 If the identical request includes `renameDestinationFolderFrom`, the committed run may rename only that exact final folder to the final `destinationFolderPath` segment. It must verify the old name disappears, preserve existing lessons, save the requested new copy inside the renamed folder, and reopen it to distinguish and verify the lesson even when the folder and lesson share a title.
 
+## Existing-lesson rename
+
+Run `npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'` first. The dry run must verify the approved playground, exact folder path, exact current lesson, inline title textbox, confirmation control, and cancellation without changing or saving the lesson.
+
+Run the identical command with `--commit` only after a successful dry run and explicit authorization to rename/save the exact lesson. It updates the inline title, uses the normal Authoring Save control, then reopens the same folder and verifies that the new exact title exists and the old title is absent. It never moves, publishes, starts, or restructures the lesson.
+
 ## Inspection and validation
 
 `npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'` prints SVG/runtime node information and transitions without modifying the graph.

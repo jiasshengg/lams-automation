@@ -24,6 +24,28 @@ export async function verifyWorkspaceCourse(page: Page, config: LamsConfig): Pro
   console.log(`Verified safe workspace: ${config.workspaceCourse}`);
 }
 
+export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Promise<void> {
+  const heading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
+  if (await hasOneVisibleMatch(heading)) {
+    console.log(`Verified safe workspace: ${config.workspaceCourse}`);
+    return;
+  }
+
+  const toggle = page.getByRole('button', { name: 'Toggle course menu', exact: true });
+  await (await waitForUniqueVisible(toggle, page, config, 'course menu', true)).click();
+
+  const search = page.getByRole('searchbox', { name: 'Search for courses', exact: true });
+  await (await waitForUniqueVisible(search, page, config, 'course search', false)).fill(config.workspaceCourse);
+
+  // The observed course-search results expose each course as an exact-name button.
+  // Only the configured safety-boundary course is eligible for selection here.
+  const course = page.getByRole('button', { name: config.workspaceCourse, exact: true });
+  await (await waitForUniqueVisible(course, page, config, 'workspace course result', false)).click();
+
+  await waitForUniqueVisible(heading, page, config, 'workspaceCourse', false);
+  console.log(`Selected and verified safe workspace: ${config.workspaceCourse}`);
+}
+
 export async function navigateToPreviousCohort(page: Page, config: LamsConfig): Promise<void> {
   await clickConfigured(page, config, 'previousCohort', config.selectors.previousCohort, true);
   await assertNextTarget(page, config, 'tbl', config.selectors.tbl);
@@ -93,6 +115,14 @@ async function assertNextTarget(
   if (!spec) throw await missingSelector(page, name);
   await waitForUniqueVisible(fromSpec(page, spec, config), page, config, name, false);
   console.log(`Verified expected next target: ${name}.`);
+}
+
+async function hasOneVisibleMatch(locator: Locator): Promise<boolean> {
+  let visible = 0;
+  for (let index = 0; index < (await locator.count()); index += 1) {
+    if (await locator.nth(index).isVisible()) visible += 1;
+  }
+  return visible === 1;
 }
 
 async function missingSelector(page: Page, name: string): Promise<SelectorRequiredError> {

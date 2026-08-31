@@ -34,6 +34,10 @@ When `createDestinationFolder` is true, `destinationFolderPath` must contain a p
 
 When `renameDestinationFolderFrom` is supplied, `destinationFolderPath` must contain the same parent path and a different exact final folder name. The workflow refuses an existing target folder, requires one exact current folder and an enabled Rename control, and preserves the folder's contents. Do not combine it with `createDestinationFolder`. Use `openSourceAsCopy: true` only when the exact selected source exposes LAMS's read-only **Open a copy** action.
 
+## Existing-lesson rename fields
+
+Use `sourceFolderPath` for the exact folder containing the existing lesson, `sourceLessonTitle` for its exact current title, and `lessonTitle` for the exact new title. A rename stays in the same folder and does not use `destinationFolderPath`.
+
 ## Validation fields
 
 `expectedFlow` contains the exact node names in their expected linear order. Do not populate it from the observed graph merely to make validation pass.
@@ -82,7 +86,7 @@ Pass the local path separately with `--ae-json`; do not merge AE question conten
 
 ## Configuration checks
 
-Before running a committed copy, reject the merged request when:
+Before running a committed copy or rename, reject the merged request when:
 
 - the new title equals the source title;
 - the new title contains a placeholder;
@@ -90,3 +94,5 @@ Before running a committed copy, reject the merged request when:
 - the source lesson or destination is not exact;
 - the destination already contains the new title;
 - the workspace course differs from the approved playground.
+
+For a rename, also reject the operation when the same folder already contains the new title. After saving, verify that the new title exists and the old title is absent.

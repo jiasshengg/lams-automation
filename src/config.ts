@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+export const APPROVED_WORKSPACE_COURSE = 'DL Playground 2026/2027 [internal]';
+
 export type RoleName =
   | 'button'
   | 'link'
@@ -31,6 +33,14 @@ export interface ExpectedGateProperties {
   rotationSeconds?: number;
 }
 
+export interface LessonIndexSettings {
+  courseGrouping?: string;
+  endDate: string;
+  endTime?: string;
+  displayScoresOnCompletion?: boolean;
+  enableScheduling?: boolean;
+}
+
 export interface LamsConfig {
   baseUrl: string;
   workspaceCourse: string;
@@ -50,6 +60,7 @@ export interface LamsConfig {
   expectedAEGates: number;
   expectedFlow: string[];
   expectedGateProperties?: ExpectedGateProperties[];
+  lessonIndex?: LessonIndexSettings;
   browser: {
     headless: boolean;
     userDataDir: string;
@@ -64,6 +75,8 @@ export interface LamsConfig {
     aeOpenActivity?: LocatorSpec;
     authoringRoot?: LocatorSpec;
     authoringNode?: AuthoringNodeSelector;
+    openAddLesson?: LocatorSpec;
+    openMonitoring?: LocatorSpec;
   };
 }
 
@@ -95,7 +108,8 @@ const requestOverrideKeys = [
   'expectedAENodes',
   'expectedAEGates',
   'expectedFlow',
-  'expectedGateProperties'
+  'expectedGateProperties',
+  'lessonIndex'
 ] as const;
 
 export async function loadConfig(configPath: string, overrides: Partial<LamsConfig> = {}): Promise<LamsConfig> {
@@ -108,6 +122,9 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     if (typeof merged[key] !== 'string' || merged[key].trim() === '') {
       throw new Error(`Configuration field "${key}" must be a non-empty string.`);
     }
+  }
+  if (merged.workspaceCourse !== APPROVED_WORKSPACE_COURSE) {
+    throw new Error(`Configuration field "workspaceCourse" must be exactly "${APPROVED_WORKSPACE_COURSE}".`);
   }
   for (const key of ['expectedAENodes', 'expectedAEGates'] as const) {
     if (!Number.isInteger(merged[key]) || Number(merged[key]) < 0) {
@@ -123,6 +140,7 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
   }
   validateExpectedGateProperties(merged.expectedGateProperties);
+  validateLessonIndex(merged.lessonIndex);
   if (merged.createDestinationFolder !== undefined && typeof merged.createDestinationFolder !== 'boolean') {
     throw new Error('Configuration field "createDestinationFolder" must be a boolean.');
   }
@@ -211,6 +229,25 @@ function validateExpectedGateProperties(value: unknown): void {
   });
 }
 
+function validateLessonIndex(value: unknown): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) throw new Error('Configuration field "lessonIndex" must be an object.');
+  if (value.courseGrouping !== undefined && (typeof value.courseGrouping !== 'string' || value.courseGrouping.trim() === '')) {
+    throw new Error('lessonIndex.courseGrouping must be a non-empty string when provided.');
+  }
+  if (typeof value.endDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.endDate)) {
+    throw new Error('lessonIndex.endDate must be a date formatted as YYYY-MM-DD.');
+  }
+  if (value.endTime !== undefined && (typeof value.endTime !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value.endTime))) {
+    throw new Error('lessonIndex.endTime must be a 24-hour time formatted as HH:MM.');
+  }
+  for (const key of ['displayScoresOnCompletion', 'enableScheduling'] as const) {
+    if (value[key] !== undefined && typeof value[key] !== 'boolean') {
+      throw new Error(`lessonIndex.${key} must be a boolean.`);
+    }
+  }
+}
+
 export function interpolate(value: string, config: LamsConfig): string {
   return value.replace(/\{\{(\w+)\}\}/g, (match, key: keyof LamsConfig) => {
     const replacement = config[key];
@@ -226,7 +263,9 @@ function validateLocatorSpecs(selectors: LamsConfig['selectors']): void {
     selectors.openAuthoring,
     selectors.aeOpenActivity,
     selectors.authoringRoot,
-    selectors.authoringNode?.locator
+    selectors.authoringNode?.locator,
+    selectors.openAddLesson,
+    selectors.openMonitoring
   ];
   for (const spec of specs) {
     if (spec === undefined) continue;
