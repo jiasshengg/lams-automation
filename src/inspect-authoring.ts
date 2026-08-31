@@ -33,7 +33,11 @@ async function main(): Promise<void> {
       console.log(
         `- UIID ${node.uiid}: ${node.name || '(unnamed)'} [${node.type}]` +
           ` grouped=${node.grouped}` +
-          `${node.groupingUiid === null ? '' : ` groupingUIID=${node.groupingUiid}`}`
+          `${node.groupingUiid === null ? '' : ` groupingUIID=${node.groupingUiid}`}` +
+          `${node.gateType === null ? '' : ` gateType=${node.gateType}`}` +
+          `${node.description === null ? '' : ` description=${JSON.stringify(node.description)}`}` +
+          `${node.dynamicPassword === null ? '' : ` dynamicPassword=${node.dynamicPassword}`}` +
+          `${node.rotationSeconds === null ? '' : ` rotationSeconds=${node.rotationSeconds}`}`
       );
     });
     console.log(`Transitions: ${graph.transitions.length}`);

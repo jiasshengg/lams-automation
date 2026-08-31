@@ -52,6 +52,29 @@ Validate the copied lesson against the exact manually configured reference flow:
 npm run validate:authoring -- --config configs/local.json
 ```
 
+Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the local configuration:
+
+```json
+{
+  "expectedGateProperties": [
+    {
+      "name": "iRAT Gate",
+      "type": "password",
+      "description": "iRAT Gate",
+      "dynamicPassword": true,
+      "rotationSeconds": 10
+    },
+    {
+      "name": "tRAT Gate",
+      "type": "permission",
+      "description": "tRAT Gate"
+    }
+  ]
+}
+```
+
+Each property is optional, so different lessons can validate only the settings they require. A mismatch is reported as a validation failure; the script never corrects or saves the gate automatically.
+
 ## Selector discovery workflow
 
 No LAMS-specific selector has been guessed. The example config only uses the supplied visible cohort and TBL text. Selectors use one of these forms:

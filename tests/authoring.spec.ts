@@ -38,11 +38,13 @@ test('extracts SVG nodes, grouping associations, and transition endpoints', asyn
         <g class="svg-activity svg-activity-grouping" uiid="6" data-x="40" data-y="40">
           <text class="svg-activity-title-label">Team Setup</text>
         </g>
+        <g class="svg-activity svg-activity-gate" uiid="7" data-x="40" data-y="100"></g>
         <g class="svg-activity svg-activity-tool" uiid="8" data-x="40" data-y="160">
           <rect class="svg-tool-activity-border-grouped"></rect>
           <text class="svg-activity-title-label">iRAT</text>
         </g>
         <g uiid="14"><path class="svg-transition"></path></g>
+        <g uiid="15"><path class="svg-transition"></path></g>
       </svg>
     </div>
   `);
@@ -52,7 +54,16 @@ test('extracts SVG nodes, grouping associations, and transition endpoints', asyn
         {
           uiid: 6,
           title: 'Team Setup',
-          transitions: { from: [{ uiid: 14, fromActivity: { uiid: 6 }, toActivity: { uiid: 8 } }] }
+          transitions: { from: [{ uiid: 14, fromActivity: { uiid: 6 }, toActivity: { uiid: 7 } }] }
+        },
+        {
+          uiid: 7,
+          title: 'iRAT Gate',
+          description: 'iRAT Gate',
+          gateType: 'password',
+          passwordDynamic: 1,
+          passwordDynamicSeconds: 10,
+          transitions: { from: [{ uiid: 15, fromActivity: { uiid: 7 }, toActivity: { uiid: 8 } }] }
         },
         { uiid: 8, title: 'iRAT', toolID: 5, grouping: { uiid: 6 }, transitions: { from: [] } }
       ]
@@ -63,7 +74,19 @@ test('extracts SVG nodes, grouping associations, and transition endpoints', asyn
   expect(graph.modelAvailable).toBe(true);
   expect(graph.nodes).toEqual([
     expect.objectContaining({ uiid: 6, name: 'Team Setup', type: 'grouping', grouped: false }),
+    expect.objectContaining({
+      uiid: 7,
+      name: 'iRAT Gate',
+      type: 'gate',
+      gateType: 'password',
+      description: 'iRAT Gate',
+      dynamicPassword: true,
+      rotationSeconds: 10
+    }),
     expect.objectContaining({ uiid: 8, name: 'iRAT', type: 'tool', grouped: true, groupingUiid: 6 })
   ]);
-  expect(graph.transitions).toEqual([{ uiid: 14, fromUiid: 6, toUiid: 8 }]);
+  expect(graph.transitions).toEqual([
+    { uiid: 14, fromUiid: 6, toUiid: 7 },
+    { uiid: 15, fromUiid: 7, toUiid: 8 }
+  ]);
 });

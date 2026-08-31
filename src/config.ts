@@ -23,6 +23,14 @@ export interface AuthoringNodeSelector {
   typeAttribute?: string;
 }
 
+export interface ExpectedGateProperties {
+  name: string;
+  type?: 'condition' | 'sync' | 'schedule' | 'permission' | 'password' | 'system';
+  description?: string;
+  dynamicPassword?: boolean;
+  rotationSeconds?: number;
+}
+
 export interface LamsConfig {
   baseUrl: string;
   workspaceCourse: string;
@@ -38,6 +46,7 @@ export interface LamsConfig {
   expectedAENodes: number;
   expectedAEGates: number;
   expectedFlow: string[];
+  expectedGateProperties?: ExpectedGateProperties[];
   browser: {
     headless: boolean;
     userDataDir: string;
@@ -89,6 +98,7 @@ export async function loadConfig(configPath: string): Promise<LamsConfig> {
   if (!Array.isArray(parsed.expectedFlow) || parsed.expectedFlow.length === 0 || parsed.expectedFlow.some((name) => typeof name !== 'string' || name.trim() === '')) {
     throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
   }
+  validateExpectedGateProperties(parsed.expectedGateProperties);
 
   const config = parsed as unknown as LamsConfig;
   config.browser = {
@@ -100,6 +110,31 @@ export async function loadConfig(configPath: string): Promise<LamsConfig> {
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);
   return config;
+}
+
+function validateExpectedGateProperties(value: unknown): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    throw new Error('Configuration field "expectedGateProperties" must be an array.');
+  }
+  const validTypes = new Set(['condition', 'sync', 'schedule', 'permission', 'password', 'system']);
+  value.forEach((rule, index) => {
+    if (!isRecord(rule) || typeof rule.name !== 'string' || rule.name.trim() === '') {
+      throw new Error(`expectedGateProperties[${index}].name must be a non-empty string.`);
+    }
+    if (rule.type !== undefined && !validTypes.has(String(rule.type))) {
+      throw new Error(`expectedGateProperties[${index}].type is invalid.`);
+    }
+    if (rule.description !== undefined && typeof rule.description !== 'string') {
+      throw new Error(`expectedGateProperties[${index}].description must be a string.`);
+    }
+    if (rule.dynamicPassword !== undefined && typeof rule.dynamicPassword !== 'boolean') {
+      throw new Error(`expectedGateProperties[${index}].dynamicPassword must be a boolean.`);
+    }
+    if (rule.rotationSeconds !== undefined && (!Number.isInteger(rule.rotationSeconds) || Number(rule.rotationSeconds) <= 0)) {
+      throw new Error(`expectedGateProperties[${index}].rotationSeconds must be a positive integer.`);
+    }
+  });
 }
 
 export function interpolate(value: string, config: LamsConfig): string {

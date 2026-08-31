@@ -22,6 +22,25 @@
     "AE Gate Application Exercise 1",
     "AE Test Qns"
   ],
+  "expectedGateProperties": [
+    {
+      "name": "iRAT Gate",
+      "type": "password",
+      "description": "iRAT Gate",
+      "dynamicPassword": true,
+      "rotationSeconds": 10
+    },
+    {
+      "name": "tRAT Gate",
+      "type": "permission",
+      "description": "tRAT Gate"
+    },
+    {
+      "name": "AE Gate Application Exercise 1",
+      "type": "permission",
+      "description": "AE Gate Application Exercise 1"
+    }
+  ],
   "browser": {
     "headless": false,
     "userDataDir": ".playwright/lams-profile",

@@ -101,6 +101,33 @@ export function validateAuthoringGraph(graph: AuthoringGraph, config: LamsConfig
     detail: gateNameFailures.length === 0 ? 'Every gate corresponds to the following activity category' : `Mismatch: ${gateNameFailures.join(', ')}`
   });
 
+  for (const expected of config.expectedGateProperties ?? []) {
+    const matches = nodesByName.get(expected.name) ?? [];
+    const gate = matches.length === 1 && matches[0]?.type === 'gate' ? matches[0] : undefined;
+    const mismatches: string[] = [];
+    if (!gate) {
+      mismatches.push(`expected one gate; found ${matches.filter((node) => node.type === 'gate').length}`);
+    } else {
+      if (expected.type !== undefined && gate.gateType !== expected.type) {
+        mismatches.push(`type expected ${expected.type}; found ${gate.gateType ?? 'unavailable'}`);
+      }
+      if (expected.description !== undefined && gate.description !== expected.description) {
+        mismatches.push(`description expected "${expected.description}"; found "${gate.description ?? 'unavailable'}"`);
+      }
+      if (expected.dynamicPassword !== undefined && gate.dynamicPassword !== expected.dynamicPassword) {
+        mismatches.push(`dynamic password expected ${expected.dynamicPassword}; found ${gate.dynamicPassword ?? 'unavailable'}`);
+      }
+      if (expected.rotationSeconds !== undefined && gate.rotationSeconds !== expected.rotationSeconds) {
+        mismatches.push(`rotation expected ${expected.rotationSeconds}s; found ${gate.rotationSeconds === null ? 'unavailable' : `${gate.rotationSeconds}s`}`);
+      }
+    }
+    checks.push({
+      label: `Gate properties — ${expected.name}`,
+      passed: mismatches.length === 0,
+      detail: mismatches.length === 0 ? 'Configured properties match' : mismatches.join('; ')
+    });
+  }
+
   return { passed: checks.every((check) => check.passed), checks };
 }
 

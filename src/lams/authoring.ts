@@ -20,6 +20,9 @@ export interface GraphNode {
   y: number | null;
   toolId: number | null;
   gateType: string | null;
+  description: string | null;
+  dynamicPassword: boolean | null;
+  rotationSeconds: number | null;
 }
 
 export interface GraphTransition {
@@ -77,6 +80,9 @@ export async function inspectAuthoringGraph(page: Page): Promise<AuthoringGraph>
       title?: string;
       toolID?: number;
       gateType?: string;
+      description?: string;
+      passwordDynamic?: boolean | number | null;
+      passwordDynamicSeconds?: number;
       grouping?: { uiid?: number; groupingUIID?: number };
       transitions?: {
         from?: Array<{
@@ -115,7 +121,13 @@ export async function inspectAuthoringGraph(page: Page): Promise<AuthoringGraph>
         x: numberOrNull(element.getAttribute('data-x')),
         y: numberOrNull(element.getAttribute('data-y')),
         toolId: Number.isFinite(model?.toolID) ? Number(model?.toolID) : null,
-        gateType: model?.gateType ?? null
+        gateType: model?.gateType ?? null,
+        description: typeof model?.description === 'string' ? model.description.trim() : null,
+        dynamicPassword: model?.gateType === 'password' ? Boolean(model.passwordDynamic) : null,
+        rotationSeconds:
+          model?.gateType === 'password' && Number.isFinite(model.passwordDynamicSeconds)
+            ? Number(model.passwordDynamicSeconds)
+            : null
       };
     });
 
