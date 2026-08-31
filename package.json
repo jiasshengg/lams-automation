@@ -8,6 +8,7 @@
     "build": "tsc --noEmit",
     "milestone1": "tsx src/main.ts",
     "copy:lesson": "tsx src/main.ts",
+    "rename:lesson": "tsx src/rename-lesson.ts",
     "inspect:authoring": "tsx src/inspect-authoring.ts",
     "validate:authoring": "tsx src/inspect-authoring.ts --validate",
     "lesson:index": "tsx src/index-monitoring.ts",

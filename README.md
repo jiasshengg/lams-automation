@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. The current implementation covers the first-box workflow: verify the safe playground course, open LAMS Authoring, traverse a configurable folder path, open an exact source design, and reach Save As. It does not modify authoring nodes.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. The current implementation selects and verifies the safe playground course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It does not modify authoring nodes.
 
 ## Agent skill
 
@@ -46,6 +46,20 @@ npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON
 
 `--commit` refuses to run when the new title matches the source or still contains a placeholder such as `REPLACE`.
 It also refuses to overwrite an existing destination title and reopens the destination after saving to verify the copy exists.
+
+Dry-run an in-place rename of an already-duplicated lesson:
+
+```bash
+npm run rename:lesson -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","DL Playground 2026/2027 [internal]","FOM"],"sourceLessonTitle":"FOM TBL06 old title","lessonTitle":"FOM TBL06 new title"}'
+```
+
+The dry run opens and cancels the inline title editor without changing the lesson. After it passes, reuse the identical request JSON and explicitly save the rename:
+
+```bash
+npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+```
+
+The committed rename saves in the same folder, then verifies the new exact title exists and the old one is absent. It does not move, publish, start, or restructure the lesson.
 
 Inspect the copied lesson's SVG graph without changing it:
 

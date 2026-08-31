@@ -13,6 +13,21 @@ export interface CopyLessonResult {
   committed: boolean;
 }
 
+export interface OpenLessonOptions {
+  absentTitle?: string;
+}
+
+export interface RenameLessonOptions {
+  commit: boolean;
+}
+
+export interface RenameLessonResult {
+  sourceTitle: string;
+  newTitle: string;
+  folderPath: string[];
+  committed: boolean;
+}
+
 export async function openSourceLesson(page: Page, config: LamsConfig): Promise<void> {
   await openLessonFromLibrary(page, config.sourceFolderPath, config.sourceLessonTitle, config);
 }
@@ -21,13 +36,15 @@ export async function openLessonFromLibrary(
   page: Page,
   folderPath: string[],
   lessonTitle: string,
-  config: LamsConfig
+  config: LamsConfig,
+  options: OpenLessonOptions = {}
 ): Promise<void> {
   await page.locator('#openButton').click();
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
 
   await traverseFolderPath(dialog, folderPath, page, config);
+  if (options.absentTitle) await assertTitleAbsent(dialog, options.absentTitle);
   const lesson = exactTreeItem(dialog, lessonTitle);
   await waitForUniqueVisible(lesson, page, config, `lesson: ${lessonTitle}`, false);
   await lesson.click();
@@ -44,6 +61,66 @@ export async function openLessonFromLibrary(
     timeout: config.browser.actionTimeoutMs
   });
   console.log(`Verified opened lesson: ${lessonTitle}`);
+}
+
+export async function renameLesson(
+  page: Page,
+  config: LamsConfig,
+  options: RenameLessonOptions
+): Promise<RenameLessonResult> {
+  assertNewTitleValues(config);
+
+  // These stable IDs/classes were observed in the real LAMS Authoring title editor.
+  const titleField = page.locator('#ldDescriptionFieldTitle');
+  const visibleTitle = await waitForUniqueVisible(titleField, page, config, 'authoring title', false);
+  const currentTitle = (await visibleTitle.innerText()).trim();
+  if (currentTitle !== config.sourceLessonTitle) {
+    throw new Error(
+      `Refusing to rename: opened title is "${currentTitle}", expected "${config.sourceLessonTitle}".`
+    );
+  }
+
+  await visibleTitle.click();
+  const titleContainer = page.locator('#ldDescriptionTitleContainer');
+  const titleInput = titleContainer.getByRole('textbox');
+  const submitButton = titleContainer.locator('button.editable-submit');
+  const cancelButton = titleContainer.locator('button.editable-cancel');
+  await waitForUniqueVisible(titleInput, page, config, 'inline title textbox', false);
+  await waitForUniqueVisible(submitButton, page, config, 'inline title confirmation', false);
+
+  if (!options.commit) {
+    await (await waitForUniqueVisible(cancelButton, page, config, 'inline title cancel', false)).click();
+    await waitForExactTitle(titleField, config.sourceLessonTitle, config);
+    console.log('Rename dry run complete: inline title controls were verified and cancelled; no title was changed.');
+    return {
+      sourceTitle: config.sourceLessonTitle,
+      newTitle: config.lessonTitle,
+      folderPath: config.sourceFolderPath,
+      committed: false
+    };
+  }
+
+  await titleInput.fill(config.lessonTitle);
+  await submitButton.click();
+  await waitForExactTitle(titleField, config.lessonTitle, config);
+
+  const modifiedIndicator = page.locator('#ldDescriptionFieldModified');
+  await waitForUniqueVisible(modifiedIndicator, page, config, 'unsaved title indicator', false);
+
+  const saveButton = page.locator('#saveButton');
+  const uniqueSaveButton = await waitForUniqueVisible(saveButton, page, config, 'authoring save', false);
+  if (!(await uniqueSaveButton.isEnabled())) throw new Error('Authoring Save remained disabled after changing the title.');
+  await uniqueSaveButton.click();
+  await modifiedIndicator.waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
+
+  await verifyRenamedLessonInFolder(page, config);
+  console.log(`Verified renamed lesson in source folder: ${config.lessonTitle}`);
+  return {
+    sourceTitle: config.sourceLessonTitle,
+    newTitle: config.lessonTitle,
+    folderPath: config.sourceFolderPath,
+    committed: true
+  };
 }
 
 export async function copyLesson(
@@ -73,7 +150,7 @@ export async function copyLesson(
     };
   }
 
-  assertCommitValues(config);
+  assertNewTitleValues(config);
   await assertTitleAbsent(dialog, config.lessonTitle);
   await titleInput.fill(config.lessonTitle);
 
@@ -112,11 +189,29 @@ async function verifyCopiedLessonInDestination(page: Page, config: LamsConfig): 
   await dialog.waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
 }
 
+async function verifyRenamedLessonInFolder(page: Page, config: LamsConfig): Promise<void> {
+  await page.locator('#openButton').click();
+  const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
+  await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+  await traverseFolderPath(dialog, config.sourceFolderPath, page, config);
+  await waitForUniqueVisible(
+    exactTreeItem(dialog, config.lessonTitle),
+    page,
+    config,
+    `renamed lesson: ${config.lessonTitle}`,
+    false
+  );
+  await assertTitleAbsent(dialog, config.sourceLessonTitle);
+  const cancelButton = dialog.locator('#ldStoreDialogCancelButton');
+  await cancelButton.click();
+  await dialog.waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
+}
+
 async function assertTitleAbsent(dialog: Locator, title: string): Promise<void> {
   const matches = exactTreeItem(dialog, title);
   for (let index = 0; index < (await matches.count()); index += 1) {
     if (await matches.nth(index).isVisible()) {
-      throw new Error(`Refusing to commit: destination already contains "${title}".`);
+      throw new Error(`Refusing to commit: selected folder already contains "${title}".`);
     }
   }
 }
@@ -145,11 +240,18 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function assertCommitValues(config: LamsConfig): void {
+function assertNewTitleValues(config: LamsConfig): void {
   if (config.lessonTitle === config.sourceLessonTitle) {
     throw new Error('Refusing to commit: lessonTitle must differ from sourceLessonTitle.');
   }
   if (/replace|example/i.test(config.lessonTitle)) {
     throw new Error('Refusing to commit with a placeholder lessonTitle.');
   }
+}
+
+async function waitForExactTitle(titleField: Locator, title: string, config: LamsConfig): Promise<void> {
+  await titleField.filter({ hasText: new RegExp(`^\\s*${escapeRegExp(title)}\\s*$`) }).waitFor({
+    state: 'visible',
+    timeout: config.browser.actionTimeoutMs
+  });
 }

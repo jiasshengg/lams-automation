@@ -15,6 +15,8 @@ Choose only the modes requested by the user:
 
 - **Dry-run copy:** verify the source lesson, Save As dialog, and destination without saving.
 - **Commit copy:** create the exact requested copy after a successful dry run.
+- **Dry-run rename:** open an exact existing lesson, verify its inline title controls, and cancel without changing it.
+- **Commit rename:** rename and save an exact existing lesson after a successful rename dry run.
 - **Inspect:** list the copied lesson's graph without validating expectations.
 - **Validate:** compare the graph with manually configured expectations.
 
@@ -31,6 +33,8 @@ For an actual copy, require all of the following before mutation:
 - an explicit request to create/save the copy.
 
 For validation, require the exact expected linear flow and manual AE node/gate counts. Gate-property expectations are optional. If a consequential target or expectation is ambiguous, stop and ask for the missing value instead of inferring it from similar lessons.
+
+For an existing-lesson rename, require the exact folder path, exact current title, exact new title, and an explicit request to rename/save it. The folder is both the source and destination; never move the lesson as part of a rename.
 
 Read [references/configuration.md](references/configuration.md) when preparing per-run inputs or changing the one-time environment configuration. Preserve credentials outside the repository and never place passwords, cookies, tokens, or OTPs in JSON.
 
@@ -58,6 +62,15 @@ Read [references/configuration.md](references/configuration.md) when preparing p
    npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    ```
+
+8. For an existing-lesson rename, run the non-mutating dry run first, then reuse the identical request JSON with `--commit` only when explicitly authorized:
+
+   ```bash
+   npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
+   npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+   ```
+
+   The committed command must verify the new exact title in the same folder and that the old title is absent. It must not move, publish, start, or restructure the lesson.
 
 Read [references/operations.md](references/operations.md) for command outcomes, stopping conditions, and reporting requirements.
 

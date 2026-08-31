@@ -17,6 +17,12 @@ If any state is missing or non-unique, stop without mutation.
 
 Run `npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` only after a successful dry run and an explicit user request to create the copy. Use the same request JSON for both commands. Report the exact new title and verified destination. Never publish or start the copied lesson.
 
+## Existing-lesson rename
+
+Run `npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'` first. The dry run must verify the approved playground, exact folder path, exact current lesson, inline title textbox, confirmation control, and cancellation without changing or saving the lesson.
+
+Run the identical command with `--commit` only after a successful dry run and explicit authorization to rename/save the exact lesson. It updates the inline title, uses the normal Authoring Save control, then reopens the same folder and verifies that the new exact title exists and the old title is absent. It never moves, publishes, starts, or restructures the lesson.
+
 ## Inspection and validation
 
 `npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'` prints SVG/runtime node information and transitions without modifying the graph.
