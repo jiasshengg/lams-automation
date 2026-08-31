@@ -11,6 +11,7 @@
     "inspect:authoring": "tsx src/inspect-authoring.ts",
     "validate:authoring": "tsx src/inspect-authoring.ts --validate",
     "plan:ae": "tsx src/plan-ae.ts",
+    "inspect:ae": "tsx src/inspect-ae.ts",
     "test": "playwright test",
     "install:browsers": "playwright install chromium"
   },

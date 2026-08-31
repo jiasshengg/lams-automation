@@ -58,6 +58,7 @@ export interface LamsConfig {
     tbl?: LocatorSpec;
     openLesson?: LocatorSpec;
     openAuthoring?: LocatorSpec;
+    aeOpenActivity?: LocatorSpec;
     authoringRoot?: LocatorSpec;
     authoringNode?: AuthoringNodeSelector;
   };
@@ -193,6 +194,7 @@ function validateLocatorSpecs(selectors: LamsConfig['selectors']): void {
     selectors.tbl,
     selectors.openLesson,
     selectors.openAuthoring,
+    selectors.aeOpenActivity,
     selectors.authoringRoot,
     selectors.authoringNode?.locator
   ];
