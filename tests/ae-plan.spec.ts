@@ -5,7 +5,7 @@ function validInput() {
   return {
     sourceLabel: 'FOM TBL06 AE Source of Truth',
     breakMarkerCount: 1,
-    expectedTotalMarks: 12,
+    expectedTotalMarks: 16,
     nodes: [
       {
         title: 'AE Case 1',
@@ -35,7 +35,7 @@ function validInput() {
             number: 3,
             type: 'mcq',
             prompt: 'Case 2\n[X marks]\nQUESTION 3\nWhat should happen next?',
-            marks: 0,
+            marks: 4,
             options: [
               { text: 'A. Continue', correct: true },
               { text: 'B. Stop', correct: false }
@@ -57,7 +57,6 @@ function validInput() {
 
 test('builds a deterministic AE execution plan from validated structured input', () => {
   const input = validInput();
-  input.nodes[1]!.questions[0]!.marks = 0;
   delete input.nodes[1]!.questions[0]!.marks;
 
   const plan = buildAEPlan(input);
