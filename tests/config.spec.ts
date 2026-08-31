@@ -43,3 +43,20 @@ test('accepts an explicit request to create only the missing final destination f
 
   expect(overrides.createDestinationFolder).toBe(true);
 });
+
+test('accepts explicit read-only source copy and destination rename controls', () => {
+  const overrides = parseRequestOverrides(
+    JSON.stringify({
+      openSourceAsCopy: true,
+      renameDestinationFolderFrom: '![Nathanael]',
+      destinationFolderPath: [
+        'Courses',
+        'DL Playground 2026/2027 [internal]',
+        '[Nathanael] MOCK FOM TBL01 AE TEST'
+      ]
+    })
+  );
+
+  expect(overrides.openSourceAsCopy).toBe(true);
+  expect(overrides.renameDestinationFolderFrom).toBe('![Nathanael]');
+});

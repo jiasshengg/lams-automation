@@ -99,6 +99,33 @@ test('commit saves and verifies the copy in the destination library', async ({ p
   await expect(page.getByRole('dialog', { name: 'Open design' })).toBeHidden();
 });
 
+test('opens a read-only source through the explicit Open a copy control', async ({ page }) => {
+  await page.setContent(`
+    <button id="openButton" onclick="document.querySelector('[role=dialog]').hidden = false">Open</button>
+    <div role="dialog" aria-label="Open design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        <div role="treeitem">Run sequences</div>
+        <div role="treeitem">FOM TBL01 110825 2025Y1</div>
+      </div>
+      <button id="ldStoreDialogOpenButton" hidden>Open</button>
+      <button id="ldStoreDialogCopyOpenButton" onclick="this.closest('[role=dialog]').hidden = true; document.querySelector('h1').hidden = false">Open a copy</button>
+    </div>
+    <h1 hidden>FOM TBL01 110825 2025Y1</h1>
+  `);
+  const config = {
+    sourceLessonTitle: 'FOM TBL01 110825 2025Y1',
+    sourceFolderPath: ['Courses', 'DL Playground 2026/2027 [internal]', 'Run sequences'],
+    openSourceAsCopy: true,
+    browser: { actionTimeoutMs: 2_000 }
+  } as LamsConfig;
+
+  await openSourceLesson(page, config);
+
+  await expect(page.getByRole('heading', { name: config.sourceLessonTitle })).toBeVisible();
+});
+
 test('dry run verifies a missing final destination folder can be created without creating it', async ({ page }) => {
   await page.setContent(`
     <button id="saveDropButton">Save menu</button>
@@ -181,5 +208,103 @@ test('commit creates only the missing final folder, saves the copy, and verifies
   expect(result.committed).toBe(true);
   expect(result.destinationFolderCreated).toBe(true);
   await expect(page.getByRole('heading', { name: '[Nathanael]' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Open design' })).toBeHidden();
+});
+
+test('dry run verifies an exact destination folder rename without renaming or saving', async ({ page }) => {
+  await page.setContent(`
+    <button id="saveDropButton">Save menu</button>
+    <a href="#" onclick="document.querySelector('[role=dialog]').hidden = false">Save as</a>
+    <div role="dialog" aria-label="Save design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        <div role="treeitem">![Nathanael]</div>
+      </div>
+      <input aria-label="Type the learning design name to save" value="source">
+      <button id="ldStoreDialogRenameButton">Rename</button>
+      <button id="ldStoreDialogSaveButton">Save</button>
+    </div>
+  `);
+  const config = {
+    sourceLessonTitle: 'FOM TBL01 110825 2025Y1',
+    lessonTitle: '[Nathanael] MOCK FOM TBL01 AE TEST',
+    destinationFolderPath: [
+      'Courses',
+      'DL Playground 2026/2027 [internal]',
+      '[Nathanael] MOCK FOM TBL01 AE TEST'
+    ],
+    renameDestinationFolderFrom: '![Nathanael]',
+    browser: { actionTimeoutMs: 2_000 }
+  } as LamsConfig;
+
+  const result = await copyLesson(page, config, { commit: false });
+
+  expect(result.committed).toBe(false);
+  expect(result.destinationFolderRenamed).toBe(false);
+  await expect(page.getByRole('treeitem', { name: '![Nathanael]', exact: true })).toBeVisible();
+  await expect(page.getByRole('treeitem', { name: config.destinationFolderPath.at(-1)!, exact: true })).toHaveCount(0);
+});
+
+test('commit renames the exact folder, preserves its lesson, and saves the new copy', async ({ page }) => {
+  await page.setContent(`
+    <button id="saveDropButton">Save menu</button>
+    <a href="#" onclick="document.querySelector('#save-dialog').hidden = false">Save as</a>
+    <div id="save-dialog" role="dialog" aria-label="Save design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        <div id="destination-folder" role="treeitem">![Nathanael]</div>
+        <div role="treeitem">[Nathanael]</div>
+        <div id="new-copy" role="treeitem"></div>
+      </div>
+      <input aria-label="Type the learning design name to save" value="source">
+      <button id="ldStoreDialogRenameButton" onclick="document.querySelector('#rename-modal').hidden = false">Rename</button>
+      <button id="ldStoreDialogSaveButton" onclick="
+        const title = this.parentElement.querySelector('input').value;
+        document.querySelector('#new-copy').textContent = title;
+        this.parentElement.hidden = true;
+        document.querySelector('h1').textContent = title;
+        document.querySelector('h1').hidden = false;
+      ">Save</button>
+    </div>
+    <div id="rename-modal" role="dialog" aria-label="Rename" hidden>
+      <label for="ldStoreDialogRenameModalInput">Please enter the new name for</label>
+      <input id="ldStoreDialogRenameModalInput">
+      <button id="ldStoreDialogRenameModalConfirm" onclick="
+        document.querySelector('#destination-folder').textContent = document.querySelector('#ldStoreDialogRenameModalInput').value;
+        this.closest('[role=dialog]').hidden = true;
+      ">Rename</button>
+    </div>
+    <h1 hidden></h1>
+    <button id="openButton" onclick="document.querySelector('#open-dialog').hidden = false">Open</button>
+    <div id="open-dialog" role="dialog" aria-label="Open design" hidden>
+      <div role="tree">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        <div role="treeitem">[Nathanael] MOCK FOM TBL01 AE TEST</div>
+        <div role="treeitem">[Nathanael]</div>
+        <div role="treeitem">[Nathanael] MOCK FOM TBL01 AE TEST</div>
+      </div>
+      <button id="ldStoreDialogCancelButton" onclick="this.parentElement.hidden = true">Cancel</button>
+    </div>
+  `);
+  const config = {
+    sourceLessonTitle: 'FOM TBL01 110825 2025Y1',
+    lessonTitle: '[Nathanael] MOCK FOM TBL01 AE TEST',
+    destinationFolderPath: [
+      'Courses',
+      'DL Playground 2026/2027 [internal]',
+      '[Nathanael] MOCK FOM TBL01 AE TEST'
+    ],
+    renameDestinationFolderFrom: '![Nathanael]',
+    browser: { actionTimeoutMs: 2_000 }
+  } as LamsConfig;
+
+  const result = await copyLesson(page, config, { commit: true });
+
+  expect(result.committed).toBe(true);
+  expect(result.destinationFolderRenamed).toBe(true);
+  await expect(page.getByRole('heading', { name: config.lessonTitle })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Open design' })).toBeHidden();
 });
