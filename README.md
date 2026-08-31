@@ -61,6 +61,22 @@ Validate the copied lesson against the exact manually configured reference flow:
 npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
+Prepare the iRAT work as a read-only preflight:
+
+```bash
+npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
+```
+
+The request supplies a changing `irat` object with the exact gate, Team Setup, question content, answer correctness/weights, formatting, and advanced-setting expectations. The preflight opens the exact copied lesson, verifies one iRAT Gate and one iRAT node, proves the gate-to-iRAT transition and Team Setup association, and prints every planned change without writing to LAMS. Correct-answer weights must total 100 for each question; incorrect answers must have zero weight.
+
+Run the full copy → iRAT workflow only with exact per-run values and an explicit commit:
+
+```bash
+npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+```
+
+The live adapter uses the observed authoring-canvas controls and the stable Assessment authoring IDs from the official LAMS v4.8 source. It updates the password gate, Team Setup association, configured multiple-choice questions as new versions, answer weights, mandatory state, advanced settings, Print View verification, the iRAT tool, and finally the design. It deliberately refuses non-multiple-choice questions and non-`all questions` distribution settings until an exact configuration model exists for those alternatives.
+
 Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the per-run request JSON:
 
 ```json

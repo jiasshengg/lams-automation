@@ -17,6 +17,7 @@ Choose only the modes requested by the user:
 - **Commit copy:** create the exact requested copy after a successful dry run.
 - **Inspect:** list the copied lesson's graph without validating expectations.
 - **Validate:** compare the graph with manually configured expectations.
+- **iRAT preflight:** verify the exact existing iRAT nodes and print the configured changes without writing them.
 
 Do not parse an AE Source of Truth. Do not create, delete, publish, start, move, or restructure authoring nodes.
 
@@ -58,6 +59,22 @@ Read [references/configuration.md](references/configuration.md) when preparing p
    npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    ```
+
+8. Prepare iRAT work only when the request includes the exact structured `irat` data:
+
+   ```bash
+   npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
+   ```
+
+   This command is read-only.
+
+9. Run the continuous copy → iRAT workflow only after the dry run succeeds, the user explicitly requests the copy and iRAT changes, and the identical request contains every exact value:
+
+   ```bash
+   npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+   ```
+
+   The live adapter supports multiple-choice iRAT questions and the `displayAllQuestions=true` distribution. Stop on other question or distribution types rather than approximating them.
 
 Read [references/operations.md](references/operations.md) for command outcomes, stopping conditions, and reporting requirements.
 

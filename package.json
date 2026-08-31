@@ -10,6 +10,10 @@
     "copy:lesson": "tsx src/main.ts",
     "inspect:authoring": "tsx src/inspect-authoring.ts",
     "validate:authoring": "tsx src/inspect-authoring.ts --validate",
+    "prepare:irat": "tsx src/prepare-irat.ts",
+    "run:tbl-irat": "tsx src/run-tbl-irat.ts",
+    "discover:lessons": "tsx src/discover-lessons.ts",
+    "discover:irat-ui": "tsx src/discover-irat-ui.ts",
     "test": "playwright test",
     "install:browsers": "playwright install chromium"
   },

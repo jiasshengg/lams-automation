@@ -56,6 +56,18 @@ Use `expectedGateProperties` for exact gate requirements:
 
 Every property except `name` is optional. Only add an expectation when it came from the user's request or an established workflow rule.
 
+## iRAT fields
+
+Use the per-run `irat` object for the changing iRAT Source-of-Truth data. It contains:
+
+- exact gate name, description, password type, dynamic-password state, and rotation seconds;
+- exact iRAT and Team Setup node names;
+- one structured entry per question with title, type, content, mandatory state, font, size, and answers;
+- exact answer correctness and weight, where correct weights total 100 and incorrect weights are zero;
+- shuffle-answer, display-all-question, answer-justification, and confidence-level expectations.
+
+Do not put this changing content in `configs/local.json`. Pass it in `--request-json`. Automatic parsing of a Source-of-Truth document is not implemented.
+
 ## Browser fields
 
 Keep `headless` false during development. Store the persistent profile only under ignored `.playwright/`. The user completes authentication manually when needed.
