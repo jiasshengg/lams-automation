@@ -5,7 +5,7 @@ description: Configure and run the repository's Playwright automation to locate,
 
 # LAMS TBL authoring
 
-Operate the reusable Playwright layer in this repository. Keep natural-language interpretation separate from browser mechanics: translate the user's request into `configs/local.json`, then call the existing npm scripts.
+Operate the reusable Playwright layer in this repository. Keep natural-language interpretation separate from browser mechanics: translate the user's changing lesson values into a per-run JSON object, then pass it to the existing npm scripts with `--request-json`. Do not rewrite `configs/local.json` for each request.
 
 ## Establish scope
 
@@ -32,30 +32,31 @@ For an actual copy, require all of the following before mutation:
 
 For validation, require the exact expected linear flow and manual AE node/gate counts. Gate-property expectations are optional. If a consequential target or expectation is ambiguous, stop and ask for the missing value instead of inferring it from similar lessons.
 
-Read [references/configuration.md](references/configuration.md) when creating or changing configuration. Preserve credentials outside the repository and never place passwords, cookies, tokens, or OTPs in JSON.
+Read [references/configuration.md](references/configuration.md) when preparing per-run inputs or changing the one-time environment configuration. Preserve credentials outside the repository and never place passwords, cookies, tokens, or OTPs in JSON.
 
 ## Execute safely
 
-1. Create or update ignored `configs/local.json` from `configs/example.json`. Change only values supported by the user's request.
-2. Run `npm run build` and `npm test` after repository code changes. Ordinary configuration-only runs do not require rebuilding unless code changed.
-3. For every requested copy, run the dry run first:
+1. Ensure ignored `configs/local.json` contains the one-time LAMS URL, approved workspace, browser settings, and valid fallback values. Do not edit it merely because the requested lesson changes.
+2. Build a compact per-run JSON object containing only prompt-supported request fields. Pass it as one shell-quoted argument to `--request-json`. Never include `baseUrl`, `workspaceCourse`, `browser`, or `selectors`; the scripts reject those overrides.
+3. Run `npm run build` and `npm test` after repository code changes. Ordinary requests do not require rebuilding.
+4. For every requested copy, run the dry run first:
 
    ```bash
-   npm run milestone1 -- --config configs/local.json
+   npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_JSON>'
    ```
 
-4. Confirm the output verifies the exact playground course, source lesson, new title, and destination. A completed click is not sufficient evidence.
-5. Run the actual copy only when the user explicitly requested it and every target is exact:
+5. Confirm the output verifies the exact playground course, source lesson, new title, and destination. A completed click is not sufficient evidence.
+6. Run the actual copy only when the user explicitly requested it and every target is exact. Reuse the identical request JSON from the successful dry run:
 
    ```bash
-   npm run copy:lesson -- --config configs/local.json --commit
+   npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
    ```
 
-6. Inspect or validate only when requested:
+7. Inspect or validate only when requested:
 
    ```bash
-   npm run inspect:authoring -- --config configs/local.json
-   npm run validate:authoring -- --config configs/local.json
+   npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
+   npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
    ```
 
 Read [references/operations.md](references/operations.md) for command outcomes, stopping conditions, and reporting requirements.

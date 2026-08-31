@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { loadConfig } from './config.js';
+import { loadConfig, parseRequestOverrides } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { inspectPageSurface, saveDiagnostics } from './lams/diagnostics.js';
 import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
@@ -9,7 +9,7 @@ import { openLams, SelectorRequiredError, verifyWorkspaceCourse } from './lams/n
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/example.json';
   const commit = process.argv.includes('--commit');
-  const config = await loadConfig(configPath);
+  const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   if (config.baseUrl.includes('replace-with-your-lams-host.example')) {
     throw new Error(`Edit ${path.resolve(configPath)} and set the real LAMS baseUrl before running Milestone 1.`);
   }

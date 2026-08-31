@@ -75,32 +75,49 @@ const requiredStrings = [
   'destinationFolder'
 ] as const;
 
-export async function loadConfig(configPath: string): Promise<LamsConfig> {
+const requestOverrideKeys = [
+  'previousCohort',
+  'currentCohort',
+  'module',
+  'tbl',
+  'lessonTitle',
+  'sourceLessonTitle',
+  'sourceFolderPath',
+  'destinationFolder',
+  'destinationFolderPath',
+  'expectedAENodes',
+  'expectedAEGates',
+  'expectedFlow',
+  'expectedGateProperties'
+] as const;
+
+export async function loadConfig(configPath: string, overrides: Partial<LamsConfig> = {}): Promise<LamsConfig> {
   const absolutePath = path.resolve(configPath);
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
 
   if (!isRecord(parsed)) throw new Error('Configuration must be a JSON object.');
+  const merged: Record<string, unknown> = { ...parsed, ...overrides };
   for (const key of requiredStrings) {
-    if (typeof parsed[key] !== 'string' || parsed[key].trim() === '') {
+    if (typeof merged[key] !== 'string' || merged[key].trim() === '') {
       throw new Error(`Configuration field "${key}" must be a non-empty string.`);
     }
   }
   for (const key of ['expectedAENodes', 'expectedAEGates'] as const) {
-    if (!Number.isInteger(parsed[key]) || Number(parsed[key]) < 0) {
+    if (!Number.isInteger(merged[key]) || Number(merged[key]) < 0) {
       throw new Error(`Configuration field "${key}" must be a non-negative integer.`);
     }
   }
   for (const key of ['sourceFolderPath', 'destinationFolderPath'] as const) {
-    if (!Array.isArray(parsed[key]) || parsed[key].length === 0 || parsed[key].some((part) => typeof part !== 'string' || part.trim() === '')) {
+    if (!Array.isArray(merged[key]) || merged[key].length === 0 || merged[key].some((part) => typeof part !== 'string' || part.trim() === '')) {
       throw new Error(`Configuration field "${key}" must be a non-empty array of folder names.`);
     }
   }
-  if (!Array.isArray(parsed.expectedFlow) || parsed.expectedFlow.length === 0 || parsed.expectedFlow.some((name) => typeof name !== 'string' || name.trim() === '')) {
+  if (!Array.isArray(merged.expectedFlow) || merged.expectedFlow.length === 0 || merged.expectedFlow.some((name) => typeof name !== 'string' || name.trim() === '')) {
     throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
   }
-  validateExpectedGateProperties(parsed.expectedGateProperties);
+  validateExpectedGateProperties(merged.expectedGateProperties);
 
-  const config = parsed as unknown as LamsConfig;
+  const config = merged as unknown as LamsConfig;
   config.browser = {
     headless: config.browser?.headless ?? false,
     userDataDir: config.browser?.userDataDir ?? '.playwright/lams-profile',
@@ -110,6 +127,32 @@ export async function loadConfig(configPath: string): Promise<LamsConfig> {
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);
   return config;
+}
+
+export function parseRequestOverrides(raw: string | undefined): Partial<LamsConfig> {
+  if (raw === undefined) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`--request-json must contain valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isRecord(parsed)) throw new Error('--request-json must contain a JSON object.');
+
+  const allowed = new Set<string>(requestOverrideKeys);
+  const unknownKeys = Object.keys(parsed).filter((key) => !allowed.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`--request-json cannot override stable environment fields: ${unknownKeys.join(', ')}`);
+  }
+
+  const overrideRecord: Record<string, unknown> = {};
+  requestOverrideKeys.forEach((key) => {
+    if (Object.hasOwn(parsed, key)) overrideRecord[key] = parsed[key];
+  });
+  if (!Object.hasOwn(overrideRecord, 'destinationFolder') && Array.isArray(overrideRecord.destinationFolderPath)) {
+    overrideRecord.destinationFolder = overrideRecord.destinationFolderPath.join('/');
+  }
+  return overrideRecord as Partial<LamsConfig>;
 }
 
 function validateExpectedGateProperties(value: unknown): void {

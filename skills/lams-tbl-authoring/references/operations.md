@@ -2,7 +2,7 @@
 
 ## Dry-run copy
 
-Run `npm run milestone1 -- --config configs/local.json` before every committed copy. It must verify:
+Run `npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_JSON>'` before every committed copy. It must verify:
 
 - the exact `DL Playground 2026/2027 [internal]` heading;
 - every configured source folder;
@@ -15,13 +15,13 @@ If any state is missing or non-unique, stop without mutation.
 
 ## Committed copy
 
-Run `npm run copy:lesson -- --config configs/local.json --commit` only after a successful dry run and an explicit user request to create the copy. Report the exact new title and verified destination. Never publish or start the copied lesson.
+Run `npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` only after a successful dry run and an explicit user request to create the copy. Use the same request JSON for both commands. Report the exact new title and verified destination. Never publish or start the copied lesson.
 
 ## Inspection and validation
 
-`npm run inspect:authoring -- --config configs/local.json` prints SVG/runtime node information and transitions without modifying the graph.
+`npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'` prints SVG/runtime node information and transitions without modifying the graph.
 
-`npm run validate:authoring -- --config configs/local.json` may exit with code `2` for a validly executed inspection whose expectations failed. Treat that as a validation result, not an automation crash. Report every failed check.
+`npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'` may exit with code `2` for a validly executed inspection whose expectations failed. Treat that as a validation result, not an automation crash. Report every failed check.
 
 Current validation covers:
 

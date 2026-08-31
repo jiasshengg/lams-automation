@@ -18,7 +18,7 @@ Courses > Cohort_2026Y1 > FOM, then validate the supplied linear flow with
 5 AE nodes and 4 AE gates.
 ```
 
-The agent translates the request into ignored `configs/local.json`, runs the safe dry run first, and calls the existing Playwright commands. It requires exact copy targets and explicit authorization before the committed Save action. Automatic Source-of-Truth parsing and automatic node correction remain out of scope.
+The agent passes changing lesson values directly to the scripts as per-run JSON, runs the safe dry run first, and calls the existing Playwright commands. It does not rewrite `configs/local.json` for every lesson. That ignored file holds stable local LAMS/browser settings and fallback defaults. The skill requires exact copy targets and explicit authorization before the committed Save action. Automatic Source-of-Truth parsing and automatic node correction remain out of scope.
 
 ## Setup
 
@@ -28,29 +28,20 @@ npm run install:browsers
 cp configs/example.json configs/local.json
 ```
 
-Edit `configs/local.json` with the real LAMS URL and lesson values. The browser runs visibly and uses `.playwright/lams-profile`, so you can sign in manually and reuse that local browser session. Passwords are never read from configuration and `.playwright/` is ignored by Git.
+Edit `configs/local.json` once with the real LAMS URL, approved workspace, browser settings, and valid fallback values. The browser runs visibly and uses `.playwright/lams-profile`, so you can sign in manually and reuse that local browser session. Passwords are never read from configuration and `.playwright/` is ignored by Git.
 
-Configure these folder/title variables in `configs/local.json`:
-
-```json
-{
-  "sourceFolderPath": ["Courses", "! My Courses", "! Sample & Orientation Lessons"],
-  "sourceLessonTitle": "[Jss] TEST LESSON A 280826",
-  "destinationFolderPath": ["Courses", "DL Playground 2026/2027 [internal]"],
-  "lessonTitle": "REPLACE WITH THE NEW COPY TITLE"
-}
-```
-
-Run a safe dry run. It opens and verifies the source lesson, Save As dialog, and configured destination folder, but does not save:
+For individual operations, pass changing lesson values without editing the file:
 
 ```bash
-npm run milestone1 -- --config configs/local.json
+npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
 ```
 
-After verifying the exact new title and destination in configuration, explicitly enable the final Save action with:
+The skill constructs this per-run JSON automatically from the user's prompt. The command opens and verifies the source lesson, Save As dialog, and requested destination, but does not save.
+
+After a successful dry run, reuse the identical request JSON and explicitly enable the final Save action with:
 
 ```bash
-npm run copy:lesson -- --config configs/local.json --commit
+npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
 ```
 
 `--commit` refuses to run when the new title matches the source or still contains a placeholder such as `REPLACE`.
@@ -59,7 +50,7 @@ It also refuses to overwrite an existing destination title and reopens the desti
 Inspect the copied lesson's SVG graph without changing it:
 
 ```bash
-npm run inspect:authoring -- --config configs/local.json
+npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 This prints each activity's UIID, name, type, Team Setup grouping association, and every transition endpoint available from the LAMS runtime model.
@@ -67,10 +58,10 @@ This prints each activity's UIID, name, type, Team Setup grouping association, a
 Validate the copied lesson against the exact manually configured reference flow:
 
 ```bash
-npm run validate:authoring -- --config configs/local.json
+npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
-Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the local configuration:
+Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the per-run request JSON:
 
 ```json
 {

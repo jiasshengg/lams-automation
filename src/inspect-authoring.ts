@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { loadConfig } from './config.js';
+import { loadConfig, parseRequestOverrides } from './config.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
@@ -9,7 +9,7 @@ import { formatValidationReport, validateAuthoringGraph } from './lams/validatio
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
-  const config = await loadConfig(configPath);
+  const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
     headless: config.browser.headless,
     viewport: null

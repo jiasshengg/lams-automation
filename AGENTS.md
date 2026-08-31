@@ -56,8 +56,8 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 
 ## Configuration and credentials
 
-- Keep lesson-specific and cohort-specific values in JSON configuration, not source code.
-- Use `configs/local.json` for local live testing; it is ignored by Git.
+- Keep lesson-specific and cohort-specific values in the per-run `--request-json` input, not source code.
+- Use `configs/local.json` only for stable local environment values and fallback defaults; it is ignored by Git and should not be rewritten for each request.
 - Keep the reusable schema/example in `configs/example.json` free of real credentials.
 - Never store LAMS passwords, session cookies, tokens, OTPs, or browser profile contents in the repository.
 - The local persistent browser profile belongs under `.playwright/`, which must remain ignored by Git.
@@ -89,13 +89,13 @@ npm test
 For a live headed run, use:
 
 ```bash
-npm run milestone1 -- --config configs/local.json
+npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 This command is a dry run and must not save a copy. The final Save action requires both exact configured targets and the explicit `--commit` flag:
 
 ```bash
-npm run copy:lesson -- --config configs/local.json --commit
+npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
 ```
 
 A live run is not considered successful merely because a click completed. Report which expected states were verified and where diagnostics were saved when it stops.

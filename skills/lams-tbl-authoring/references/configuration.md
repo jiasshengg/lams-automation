@@ -1,18 +1,28 @@
 # Configuration
 
-Use `configs/local.json` for live values. It is ignored by Git. Keep `configs/example.json` reusable and free of credentials.
+Use `configs/local.json` only for stable local environment values and fallback defaults. It is ignored by Git. Keep `configs/example.json` reusable and free of credentials. Pass changing request values through `--request-json`; do not edit a file for every lesson.
+
+## Per-run input
+
+Pass a compact JSON object as one shell-quoted argument:
+
+```bash
+npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
+```
+
+The scripts merge these permitted request values in memory and derive `destinationFolder` from `destinationFolderPath` when omitted. They reject attempts to override stable `baseUrl`, `workspaceCourse`, browser settings, or selectors.
 
 ## Copy fields
 
 | Field | Meaning |
 |---|---|
-| `baseUrl` | LAMS entry URL |
-| `workspaceCourse` | Must remain exactly `DL Playground 2026/2027 [internal]` for live development |
+| `baseUrl` | Stable LAMS entry URL; keep in local configuration |
+| `workspaceCourse` | Stable safety boundary; must remain exactly `DL Playground 2026/2027 [internal]` |
 | `sourceFolderPath` | Ordered folder names leading to the source lesson |
 | `sourceLessonTitle` | Exact existing lesson title |
 | `destinationFolderPath` | Ordered folder names for the new copy |
 | `lessonTitle` | Exact new copy title |
-| `previousCohort`, `currentCohort`, `module`, `tbl` | Prompt-derived workflow metadata; do not leave misleading example values |
+| `previousCohort`, `currentCohort`, `module`, `tbl` | Optional prompt-derived overrides when the request supplies them |
 | `destinationFolder` | Human-readable destination used in reporting |
 
 Folder paths are variable-length arrays. Do not assume a fixed number of folders.
@@ -52,7 +62,7 @@ Keep `headless` false during development. Store the persistent profile only unde
 
 ## Configuration checks
 
-Before running a committed copy, reject configuration when:
+Before running a committed copy, reject the merged request when:
 
 - the new title equals the source title;
 - the new title contains a placeholder;
