@@ -7,9 +7,17 @@
   "tbl": "TBL06",
   "lessonTitle": "FOM TBL06 030926 2026Y1",
   "sourceLessonTitle": "FOM TBL06 PREVIOUS-YEAR TITLE",
-  "sourceFolderPath": ["Courses", "! My Courses", "! Sample & Orientation Lessons"],
+  "sourceFolderPath": [
+    "Courses",
+    "! My Courses",
+    "! Sample & Orientation Lessons"
+  ],
   "destinationFolder": "Cohort_2026Y1/FOM",
-  "destinationFolderPath": ["Courses", "! My Courses", "DL Playground 2026/2027 [internal]"],
+  "destinationFolderPath": [
+    "Courses",
+    "! My Courses",
+    "DL Playground 2026/2027 [internal]"
+  ],
   "expectedAENodes": 5,
   "expectedAEGates": 4,
   "expectedFlow": [
@@ -41,6 +49,13 @@
       "description": "AE Gate Application Exercise 1"
     }
   ],
+  "lessonIndex": {
+    "courseGrouping": "Y1 ALL",
+    "endDate": "2026-09-03",
+    "endTime": "23:59",
+    "displayScoresOnCompletion": false,
+    "enableScheduling": true
+  },
   "browser": {
     "headless": false,
     "userDataDir": ".playwright/lams-profile",
@@ -56,6 +71,18 @@
     "tbl": {
       "by": "text",
       "text": "{{tbl}}",
+      "exact": false
+    },
+    "openAddLesson": {
+      "by": "role",
+      "role": "link",
+      "name": "Add Lesson",
+      "exact": false
+    },
+    "openMonitoring": {
+      "by": "role",
+      "role": "link",
+      "name": "Monitor",
       "exact": false
     }
   }

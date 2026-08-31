@@ -84,6 +84,45 @@ Gate settings can also be validated without opening or changing the gate propert
 
 Each property is optional, so different lessons can validate only the settings they require. A mismatch is reported as a validation failure; the script never corrects or saves the gate automatically.
 
+## Lesson index and monitoring
+
+Create the lesson from the design the authoring workflow just saved, then read back its
+monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
+
+```bash
+npm run lesson:index -- --config configs/local.json --request-json '{"lessonIndex":{"courseGrouping":"Y1 ALL","endDate":"2026-09-03","expectedDesignTitle":"FOM TBL06 030926 2026Y1"}}'
+```
+
+The run is a dry run by default: it selects the top entry of "Recently used designs",
+opens the Advanced tab, turns *Display activity scores on completion* off, turns
+*Enable scheduling* on, sets the end date/time, advances to Course groupings and selects
+the preset — then stops without clicking **Add now**. Add `--commit` to create the lesson
+and continue into monitoring.
+
+`lessonIndex` fields:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `courseGrouping` | yes | Preset to apply; `"None"` applies no preset. |
+| `endDate` | yes | `YYYY-MM-DD`. |
+| `endTime` | no | `HH:MM`, defaults to `23:59`. |
+| `expectedDesignTitle` | no | Aborts if the most recent design is not this exact title. |
+| `displayScoresOnCompletion` | no | Defaults to `false`. |
+| `enableScheduling` | no | Defaults to `true`. |
+
+Setting `expectedDesignTitle` is strongly recommended once the upstream AE step is
+automated, because "most recent" is otherwise whatever the workspace last touched.
+
+Monitoring opens Monitor for the lesson in view and prints the 5-digit lesson ID parsed
+from the monitoring URL. To read the ID for a lesson that already exists, skip the index
+steps:
+
+```bash
+npm run lesson:monitor -- --config configs/local.json
+```
+
+The ID is printed only; nothing downstream consumes it yet.
+
 ## Selector discovery workflow
 
 No LAMS-specific selector has been guessed. The example config only uses the supplied visible cohort and TBL text. Selectors use one of these forms:
