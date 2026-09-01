@@ -210,6 +210,32 @@ npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
 
 The ID is printed only; nothing downstream consumes it yet.
 
+## Publishing the 5-digit code to the Kanban sheet
+
+The Google Apps Script Web App writes a lesson's 5-digit code into the Kanban sheet, keyed
+on **TBL/Quiz Details (column G)**. That column holds the same string this automation already
+carries as `config.lessonTitle` (for example `FOM TBL06 030926 2026Y1`), so that value is sent
+as `identifier`; no new ID or row number is introduced.
+
+The endpoint and shared secret are read from the environment, never from a config file:
+
+```bash
+cp .env.example .env   # then fill in both values
+export LAMS_SHEET_WEBHOOK_URL=... LAMS_SHEET_SECRET=...
+```
+
+```bash
+npm run send:code -- --code 12345 --config configs/local.json          # identifier from config.lessonTitle
+npm run send:code -- --code 12345 --identifier "FOM TBL06 030926 2026Y1"
+npm run send:code -- --code 12345 --dry-run                            # print, send nothing
+```
+
+`sendCodeToSheet` in `src/sheets/code-sink.ts` POSTs `{ code, identifier, secret }` as JSON,
+rejects anything that is not exactly five digits before the request, retries a transient
+network failure twice, and throws unless the Apps Script answers `{"status":"ok"}` — an HTML
+sign-in page instead of JSON is reported as a Web App access-setting problem. Call it from any
+workflow once that workflow has the code in hand.
+
 ## Selector discovery workflow
 
 No LAMS-specific selector has been guessed. The example config only uses the supplied visible cohort and TBL text. Selectors use one of these forms:
