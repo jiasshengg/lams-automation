@@ -1,9 +1,8 @@
 import path from 'node:path';
-import { chromium, type Page } from '@playwright/test';
-import { loadConfig, parseRequestOverrides, type LamsConfig } from './config.js';
+import { chromium } from '@playwright/test';
+import { loadConfig, parseRequestOverrides } from './config.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { createLessonFromMostRecentDesign, openAddLesson } from './lams/lesson-index.js';
-import { readLessonCode } from './lams/lesson-code.js';
 import { openMonitoring } from './lams/monitoring.js';
 import { sendCodeToSheet } from './sheets/code-sink.js';
 import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
@@ -32,8 +31,8 @@ async function main(): Promise<void> {
     if (monitorOnly) {
       const monitoring = await openMonitoring(page, config.lessonTitle, config);
       console.log('\nMonitoring workflow: OK');
-      console.log(`Lesson ID: ${monitoring.lessonId}`);
-      await reportLessonCode(page, config, monitoring.lessonId, publishCode);
+      console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
+      await reportLessonCode(config.lessonTitle, monitoring.lessonId, publishCode);
       return;
     }
 
@@ -52,8 +51,8 @@ async function main(): Promise<void> {
     await openLams(page, config);
     const monitoring = await openMonitoring(page, result.lessonTitle, config);
     console.log('\nMonitoring workflow: OK');
-    console.log(`Lesson ID: ${monitoring.lessonId}`);
-    await reportLessonCode(page, config, monitoring.lessonId, publishCode);
+    console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
+    await reportLessonCode(result.lessonTitle, monitoring.lessonId, publishCode);
   } catch (error) {
     const directory = await saveDiagnostics(page, 'index-monitoring-failure').catch(() => undefined);
     if (directory) console.error(`Live failure diagnostics: ${directory}`);
@@ -64,26 +63,25 @@ async function main(): Promise<void> {
 }
 
 /**
- * Reads the learner-facing 5-digit code and, with --publish-code, posts it to the Kanban
- * sheet. The lesson ID is passed in only so it can be excluded: it is five digits too.
- * A missing code is reported without failing the run, which has already done its work.
+ * The 5-digit code the Kanban sheet wants is the lesson ID from the monitoring URL
+ * (monitorLesson.do?lessonID=41192), which openMonitoring has already read and confirmed
+ * against the URL the browser actually landed on. With --publish-code it goes to the sheet.
  */
-async function reportLessonCode(page: Page, config: LamsConfig, lessonId: string, publish: boolean): Promise<void> {
-  let code: string;
-  try {
-    code = (await readLessonCode(page, config, [lessonId])).code;
-  } catch (error) {
-    console.warn(`Lesson code: unavailable - ${error instanceof Error ? error.message : String(error)}`);
-    return;
-  }
-  console.log(`Lesson code: ${code}`);
-
+async function reportLessonCode(identifier: string, code: string, publish: boolean): Promise<void> {
   if (!publish) {
-    console.log('Pass --publish-code to send it to the Kanban sheet.');
+    console.log('Pass --publish-code to send this code to the Kanban sheet.');
     return;
   }
-  await sendCodeToSheet(code, config.lessonTitle);
-  console.log(`Sent code ${code} for "${config.lessonTitle}" to the Kanban sheet.`);
+
+  // The lesson exists by this point, so a sheet that is unreachable or rejects the
+  // identifier is reported rather than allowed to fail the whole run.
+  try {
+    await sendCodeToSheet(code, identifier);
+    console.log(`Sent code ${code} for "${identifier}" to the Kanban sheet.`);
+  } catch (error) {
+    console.error(`Kanban sheet not updated: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  }
 }
 
 function readArgument(name: string): string | undefined {

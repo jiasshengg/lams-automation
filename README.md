@@ -208,53 +208,19 @@ steps:
 npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
 ```
 
-Monitoring then reads the learner-facing 5-digit code and prints it. Add `--publish-code`
-to POST it to the Kanban sheet in the same run:
+Monitoring then prints the 5-digit code and, with `--publish-code`, POSTs it to the Kanban
+sheet in the same run:
 
 ```bash
 npx tsx src/index-monitoring.ts --monitor-only --publish-code --config configs/local.json
 ```
 
-A lesson ID is five digits too (`41276`), and monitoring prints it in links and hidden
-inputs many times, so the reader only accepts a 5-digit value whose surrounding text names
-it as a code (`join`/`access`/`lesson`/`class` + `code`/`key`/`pin`/`passcode`) and excludes
-the known lesson ID outright. Two different labelled codes, or none, stops rather than
-guessing. Failing to read the code does not fail the run - the lesson has already been made.
-
-If the reader cannot find it on your LAMS skin, dump every 5-digit value with its context:
-
-```bash
-npm run discover:lesson-code -- --config configs/local.json
-```
-
-That is read-only and writes `code-candidates.json` plus the page HTML under `artifacts/`,
-which is what is needed to pin the exact element.
-
-## Publishing the 5-digit code to the Kanban sheet
-
-The Google Apps Script Web App writes a lesson's 5-digit code into the Kanban sheet, keyed
-on **TBL/Quiz Details (column G)**. That column holds the same string this automation already
-carries as `config.lessonTitle` (for example `FOM TBL06 030926 2026Y1`), so that value is sent
-as `identifier`; no new ID or row number is introduced.
-
-The endpoint and shared secret are read from the environment, never from a config file:
-
-```bash
-cp .env.example .env   # then fill in both values
-export LAMS_SHEET_WEBHOOK_URL=... LAMS_SHEET_SECRET=...
-```
-
-```bash
-npm run send:code -- --code 12345 --config configs/local.json          # identifier from config.lessonTitle
-npm run send:code -- --code 12345 --identifier "FOM TBL06 030926 2026Y1"
-npm run send:code -- --code 12345 --dry-run                            # print, send nothing
-```
-
-`sendCodeToSheet` in `src/sheets/code-sink.ts` POSTs `{ code, identifier, secret }` as JSON,
-rejects anything that is not exactly five digits before the request, retries a transient
-network failure twice, and throws unless the Apps Script answers `{"status":"ok"}` — an HTML
-sign-in page instead of JSON is reported as a Web App access-setting problem. Call it from any
-workflow once that workflow has the code in hand.
+The 5-digit code is the LAMS lesson ID, read from the monitoring URL
+(`monitorLesson.do?lessonID=41192`). `openMonitoring` already confirms it against the URL the
+browser actually landed on, so no extra scraping is involved. The identifier sent alongside it
+is the lesson title, which matches the sheet's TBL/Quiz Details column. A sheet that is
+unreachable does not fail the run - the lesson already exists by then - but the run exits
+non-zero so the failure is not silent.
 
 ## Selector discovery workflow
 

@@ -25,10 +25,14 @@ export interface CodeSinkResult {
   message?: string;
 }
 
-/** The Apps Script only accepts a 5-digit LAMS code; catch a bad value before the POST. */
+/**
+ * The code is the LAMS lesson ID out of the monitoring URL
+ * (monitorLesson.do?lessonID=41192), and the sheet expects five digits. Lesson IDs are
+ * allocated sequentially, so this will need revisiting if LAMS ever reaches six.
+ */
 export function assertLessonCode(code: string): string {
   if (!/^\d{5}$/.test(code)) {
-    throw new Error(`Expected a 5-digit lesson code, got "${code}".`);
+    throw new Error(`Expected a 5-digit lesson code (the LAMS lesson ID), got "${code}".`);
   }
   return code;
 }
