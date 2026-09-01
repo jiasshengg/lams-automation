@@ -208,7 +208,27 @@ steps:
 npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
 ```
 
-The ID is printed only; nothing downstream consumes it yet.
+Monitoring then reads the learner-facing 5-digit code and prints it. Add `--publish-code`
+to POST it to the Kanban sheet in the same run:
+
+```bash
+npx tsx src/index-monitoring.ts --monitor-only --publish-code --config configs/local.json
+```
+
+A lesson ID is five digits too (`41276`), and monitoring prints it in links and hidden
+inputs many times, so the reader only accepts a 5-digit value whose surrounding text names
+it as a code (`join`/`access`/`lesson`/`class` + `code`/`key`/`pin`/`passcode`) and excludes
+the known lesson ID outright. Two different labelled codes, or none, stops rather than
+guessing. Failing to read the code does not fail the run - the lesson has already been made.
+
+If the reader cannot find it on your LAMS skin, dump every 5-digit value with its context:
+
+```bash
+npm run discover:lesson-code -- --config configs/local.json
+```
+
+That is read-only and writes `code-candidates.json` plus the page HTML under `artifacts/`,
+which is what is needed to pin the exact element.
 
 ## Publishing the 5-digit code to the Kanban sheet
 
