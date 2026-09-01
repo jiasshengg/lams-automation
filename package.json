@@ -24,7 +24,9 @@
     "fix:gate": "tsx src/fix-gate-rotation.ts",
     "find:lesson": "tsx src/find-lesson.ts",
     "inspect:irat-questions": "tsx src/inspect-irat-questions.ts",
-    "apply:irat": "tsx src/apply-irat.ts"
+    "apply:irat": "tsx src/apply-irat.ts",
+    "send:code": "tsx src/send-code.ts",
+    "watch:url": "tsx src/watch-url.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

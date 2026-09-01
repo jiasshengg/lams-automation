@@ -208,7 +208,19 @@ steps:
 npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
 ```
 
-The ID is printed only; nothing downstream consumes it yet.
+Monitoring then prints the 5-digit code and, with `--publish-code`, POSTs it to the Kanban
+sheet in the same run:
+
+```bash
+npx tsx src/index-monitoring.ts --monitor-only --publish-code --config configs/local.json
+```
+
+The 5-digit code is the LAMS lesson ID, read from the monitoring URL
+(`monitorLesson.do?lessonID=41192`). `openMonitoring` already confirms it against the URL the
+browser actually landed on, so no extra scraping is involved. The identifier sent alongside it
+is the lesson title, which matches the sheet's TBL/Quiz Details column. A sheet that is
+unreachable does not fail the run - the lesson already exists by then - but the run exits
+non-zero so the failure is not silent.
 
 ## Selector discovery workflow
 
