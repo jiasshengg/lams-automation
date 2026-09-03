@@ -12,6 +12,7 @@
     "inspect:authoring": "tsx src/inspect-authoring.ts",
     "validate:authoring": "tsx src/inspect-authoring.ts --validate",
     "plan:ae": "tsx src/plan-ae.ts",
+    "extract:ae-sot": "tsx src/extract-ae-sot.ts",
     "inspect:ae": "tsx src/inspect-ae.ts",
     "lesson:index": "tsx src/index-monitoring.ts",
     "lesson:monitor": "tsx src/index-monitoring.ts --monitor-only",
