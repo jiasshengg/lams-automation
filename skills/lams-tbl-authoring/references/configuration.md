@@ -42,7 +42,7 @@ Use `sourceFolderPath` for the exact folder containing the existing lesson, `sou
 
 `expectedFlow` contains the exact node names in their expected linear order. Do not populate it from the observed graph merely to make validation pass.
 
-`expectedAENodes` and `expectedAEGates` are manual expectations. Source-of-Truth parsing is not part of this skill version.
+`expectedAENodes` and `expectedAEGates` are reviewed expectations. When an AE SOT DOCX is available, derive the initial values with `npm run extract:ae-sot -- --sot-docx '<PATH>'`; the command returns them under `requestVariables`. Confirm the break markers before browser use.
 
 Use `expectedGateProperties` for exact gate requirements:
 
@@ -84,6 +84,18 @@ Do not put this changing content in `configs/local.json`. Pass it in `--request-
 Keep `headless` false during development. Store the persistent profile only under ignored `.playwright/`. The user completes authentication manually when needed.
 
 For read-only AE inspection, `selectors.aeOpenActivity` is a stable local-environment selector for the Open control shown after selecting one exact AE SVG node. Discover it from authenticated DOM diagnostics; do not infer it from the training video. Keep it in ignored `configs/local.json`, not per-run JSON.
+
+## AE SOT structural extraction
+
+Run `npm run extract:ae-sot -- --sot-docx '<PATH>' [--out '<JSON_PATH>'] [--json]`. The read-only extractor:
+
+- treats standalone `--- BREAK ---` paragraphs as the only node separators;
+- stops at standalone `END` and ignores version tracking after it;
+- derives AE node/gate counts and question ranges;
+- inventories explicit marks, selectable/open-response types, detected answer keys, Case headings, and embedded images;
+- reports warnings that require review.
+
+Do not use page boundaries or Case headings as separators. Do not use generated suggested titles as exact LAMS names. The extractor does not fully preserve tables, images, links, rationales, or rich formatting in executable AE JSON.
 
 ## Structured AE preflight input
 

@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-Build and verify a reusable Playwright + TypeScript automation layer for the initial LAMS TBL authoring workflow, with a vendor-neutral Agent Skill that orchestrates the tested scripts. Source-of-Truth parsing remains out of scope until the browser automation is reliable.
+Build and verify a reusable Playwright + TypeScript automation layer for the initial LAMS TBL authoring workflow, with a vendor-neutral Agent Skill that orchestrates the tested scripts. Read-only structural extraction from an AE Source-of-Truth DOCX is supported; browser mutation still requires reviewed structured data and reliable DOM evidence.
 
 ## LAMS safety boundary
 
@@ -37,7 +37,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Inspect and list Authoring nodes.
 - Determine whether the Authoring surface uses HTML, SVG, canvas, iframes, or another representation.
 - Validate required nodes, counts, connections, Team Setup associations, and gate names.
-- Parse the AE Source of Truth only after the Playwright layer is reliable.
+- Extend AE Source-of-Truth extraction beyond structural break/question inventory only when reliable fixtures support the new fields.
 - Extend the vendor-neutral skill only with behavior already supported by the reusable automation.
 
 ## Browser automation rules

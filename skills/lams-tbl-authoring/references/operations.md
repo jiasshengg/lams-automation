@@ -46,7 +46,11 @@ Current validation covers:
 - gate-to-following-activity category correspondence;
 - configured gate type, description, dynamic-password state, and rotation time.
 
-It does not cover automatic Source-of-Truth parsing, branching/merging topology, or automatic correction.
+It does not cover branching/merging topology or automatic correction.
+
+## AE SOT extraction
+
+`npm run extract:ae-sot -- --sot-docx '<SOT_DOCX_PATH>' [--out '<ANALYSIS_JSON_PATH>'] [--json]` is local and non-mutating. It derives the AE node/gate counts from standalone break markers, groups sequential questions, stops at `END`, and emits the `requestVariables` needed by graph validation. Review all warnings and confirm exact node/gate titles before opening LAMS; this output is evidence for preparing reviewed AE JSON, not permission to create or restructure nodes.
 
 ## AE preflight
 

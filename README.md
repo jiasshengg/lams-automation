@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the safe playground course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: validate structured AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not parse a Source-of-Truth `.docx`, import questions, edit question rows, restructure nodes, or save AE changes yet.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the safe playground course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: extract structural evidence from an AE Source-of-Truth `.docx`, validate reviewed AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not automatically import questions, edit question rows, restructure nodes, or save AE changes yet.
 
 ## Agent skill
 
@@ -134,7 +134,16 @@ Each property is optional, so different lessons can validate only the settings t
 
 ## AE preflight and read-only inspection
 
-Convert the SoT into reviewed structured JSON matching [`configs/ae-example.json`](configs/ae-example.json). This conversion is intentionally outside the current automation until a real SoT `.docx` is available for parser fixtures. Preflight the JSON locally before launching a browser:
+First extract the structural evidence from the supplied SoT DOCX:
+
+```bash
+npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx"
+npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx" --out /tmp/ae-sot-analysis.json --json
+```
+
+The extractor treats only a standalone literal `--- BREAK ---` paragraph as an AE boundary. It derives `expectedAENodes = breaks + 1`, `expectedAEGates = breaks`, inventories the question ranges, explicit marks, selectable/open-response types, detected answer keys, and embedded-image counts, and stops at a standalone `END`. Page boundaries and `Case` headings never create nodes. Its suggested node titles are review aids, not authority for exact names in LAMS.
+
+Review the extraction warnings, then convert the content into structured JSON matching [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, images, links, and question content must be confirmed before browser use. Preflight the reviewed JSON locally:
 
 ```bash
 npm run plan:ae -- --ae-json configs/ae-example.json
