@@ -63,6 +63,9 @@ const BREAK_MARKER = /^-{3}\s*BREAK\s*-{3}$/i;
 const END_MARKER = /^END$/i;
 const QUESTION_START = /^(\d+)[.)]\s+\S/;
 const OPTION_START = /^([A-Z])[.)]\s+\S/;
+const INLINE_OPTION = /(?:^|\s)([A-Z])[.)]\s+\S/g;
+const ANSWER_LINE = /^Answer\s*[-:]\s*(.+)$/i;
+const RATIONALE_LINE = /^Rationale\b/i;
 
 export function readDocumentXmlFromDocx(buffer: Buffer): string {
   const entry = readZipEntry(buffer, 'word/document.xml');
@@ -112,6 +115,7 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
   if (groups.length === 0) throw new Error('The AE SOT did not contain any content.');
 
   const questions: AEQuestionObservation[] = [];
+  const unlabelledOptionBlockQuestions: number[] = [];
   const nodes = groups.map<AENodeObservation>((untrimmedGroup, index) => {
     const firstQuestionIndex = untrimmedGroup.findIndex((paragraph) => QUESTION_START.test(paragraph.text));
     const precedingCaseIndex = untrimmedGroup.reduce(
@@ -133,7 +137,9 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
 
     questionStarts.forEach((start, questionIndex) => {
       const nextStart = questionStarts[questionIndex + 1]?.paragraphIndex ?? group.length;
-      questions.push(observeQuestion(group.slice(start.paragraphIndex, nextStart), start.number));
+      const observed = observeQuestion(group.slice(start.paragraphIndex, nextStart), start.number);
+      questions.push(observed.observation);
+      if (observed.unlabelledOptionBlock) unlabelledOptionBlockQuestions.push(start.number);
     });
 
     const questionNumbers = questionStarts.map((question) => question.number);
@@ -178,6 +184,11 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
   }
   if (missingAnswerKeys.length > 0) {
     warnings.push(`Selectable questions without a confidently detected answer key: ${formatNumberList(missingAnswerKeys)}.`);
+  }
+  if (unlabelledOptionBlockQuestions.length > 0) {
+    warnings.push(
+      `Questions with an unlabelled option block that could not be resolved: ${formatNumberList(unlabelledOptionBlockQuestions)}. The option list could not be bounded automatically; confirm the options and answer key manually.`
+    );
   }
 
   const sourceLabel = applicationTitle ?? fallbackLabel;
@@ -241,30 +252,128 @@ export function formatAESOTSummary(analysis: AESOTAnalysis): string {
   return lines.join('\n');
 }
 
-function observeQuestion(paragraphs: SOTParagraph[], number: number): AEQuestionObservation {
-  const optionParagraphs = paragraphs
-    .map((paragraph) => ({ paragraph, match: paragraph.text.match(OPTION_START) }))
-    .filter((value): value is { paragraph: SOTParagraph; match: RegExpMatchArray } => value.match !== null);
-  const optionLabels = optionParagraphs.map(({ match }) => match[1]!);
+interface OptionEntry {
+  label: string;
+  paragraph: SOTParagraph;
+  // False for options recovered from a collapsed run: they all share one
+  // paragraph, so its bold flag cannot single any of them out as the answer.
+  boldEligible: boolean;
+}
+
+interface ObservedQuestion {
+  observation: AEQuestionObservation;
+  unlabelledOptionBlock: boolean;
+}
+
+function optionLabelAt(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+// Word sometimes collapses a whole option list onto one line, e.g.
+// "A. First B. Second C. Third". Split it only when the labels form a
+// sequential run starting at A, so ordinary prose containing "B." is untouched.
+function splitInlineOptionRun(paragraph: SOTParagraph): OptionEntry[] | null {
+  const matches = [...paragraph.text.matchAll(INLINE_OPTION)];
+  if (matches.length < 2) return null;
+  const labels = matches.map((match) => match[1]!);
+  if (!labels.every((label, index) => label === optionLabelAt(index))) return null;
+  return labels.map((label) => ({ label, paragraph, boldEligible: false }));
+}
+
+// Some option lists carry no letter prefixes because each option starts with
+// its own identifier. They can only be labelled safely when an explicit answer
+// line closes the block; without one the end of the list is unknowable, so the
+// question is reported for manual review instead of being guessed.
+function collectOptionEntries(paragraphs: SOTParagraph[]): {
+  entries: OptionEntry[];
+  unlabelledOptionBlock: boolean;
+} {
+  const body = paragraphs.slice(1);
+  // Answer and rationale prose often enumerates "A. … B. …" while discussing the
+  // options, so it must never be read as the option list itself.
+  const optionBody = body.filter(
+    (paragraph) => !ANSWER_LINE.test(paragraph.text) && !RATIONALE_LINE.test(paragraph.text)
+  );
+  // A genuinely collapsed run occupies one paragraph; more than one prefixed
+  // paragraph is proof that any inline split would be spurious.
+  const allowInlineSplit = optionBody.filter((paragraph) => OPTION_START.test(paragraph.text)).length <= 1;
+  const labelled: OptionEntry[] = [];
+  for (const paragraph of optionBody) {
+    const inline = allowInlineSplit ? splitInlineOptionRun(paragraph) : null;
+    if (inline) {
+      labelled.push(...inline);
+      continue;
+    }
+    const match = paragraph.text.match(OPTION_START);
+    if (match) labelled.push({ label: match[1]!, paragraph, boldEligible: true });
+  }
+  if (labelled.length > 0) return { entries: labelled, unlabelledOptionBlock: false };
+
+  const answerIndex = paragraphs.findIndex((paragraph) => ANSWER_LINE.test(paragraph.text));
+  const candidates = answerIndex > 1 ? paragraphs.slice(1, answerIndex) : [];
+  if (candidates.length < 2) {
+    const unlabelled = body.filter((paragraph) => paragraph.text !== '');
+    return {
+      entries: [],
+      unlabelledOptionBlock:
+        answerIndex < 0 && unlabelled.length >= 2 && unlabelled.some((paragraph) => paragraph.bold)
+    };
+  }
+
+  // Only an answer line naming a label inside the block proves these paragraphs
+  // are options. A prose answer belongs to an open-response question whose stem
+  // simply spans several paragraphs.
+  const answerLabel = /^([A-Z])(?:[.):]|\s|$)/.exec(paragraphs[answerIndex]!.text.match(ANSWER_LINE)![1]!.trim())?.[1];
+  const inRange =
+    answerLabel !== undefined && candidates.length <= 26 && answerLabel <= optionLabelAt(candidates.length - 1);
+  const usable = candidates.every(
+    (paragraph) =>
+      paragraph.text !== '' && !RATIONALE_LINE.test(paragraph.text) && !QUESTION_START.test(paragraph.text)
+  );
+  if (inRange && usable) {
+    return {
+      entries: candidates.map((paragraph, index) => ({
+        label: optionLabelAt(index),
+        paragraph,
+        boldEligible: true
+      })),
+      unlabelledOptionBlock: false
+    };
+  }
+  // The answer names a label, so an option list exists but could not be bounded.
+  // Report it rather than silently degrading the question to open-response.
+  return { entries: [], unlabelledOptionBlock: answerLabel !== undefined };
+}
+
+function observeQuestion(paragraphs: SOTParagraph[], number: number): ObservedQuestion {
+  const { entries: optionParagraphs, unlabelledOptionBlock } = collectOptionEntries(paragraphs);
+  const optionLabels = optionParagraphs.map(({ label }) => label);
   const explicitAnswer = paragraphs
-    .map((paragraph) => paragraph.text.match(/^Answer\s*[-:]\s*(.+)$/i)?.[1])
+    .map((paragraph) => paragraph.text.match(ANSWER_LINE)?.[1])
     .find((value) => value !== undefined);
   const explicitLabels = explicitAnswer ? [...explicitAnswer.matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!) : [];
   const boldLabels = optionParagraphs
-    .filter(({ paragraph }) => paragraph.bold)
-    .map(({ match }) => match[1]!);
-  const correctAnswerLabels = unique(explicitLabels.length > 0 ? explicitLabels : boldLabels);
+    .filter(({ paragraph, boldEligible }) => boldEligible && paragraph.bold)
+    .map(({ label }) => label);
+  // An answer key may only name options that were actually observed. Free answer
+  // prose otherwise contributes stray capitals such as "vitamin A".
+  const correctAnswerLabels = unique(explicitLabels.length > 0 ? explicitLabels : boldLabels).filter((label) =>
+    optionLabels.includes(label)
+  );
   const prompt = paragraphs[0]?.text ?? '';
   const marksMatch = prompt.match(/\(?\s*(\d+)\s+marks?\s*\)?/i);
   const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || correctAnswerLabels.length > 1;
   const type: ObservedAEQuestionType =
     optionLabels.length === 0 ? 'open-response' : multipleSelect ? 'multiple-select' : 'single-select';
   return {
-    number,
-    type,
-    explicitMarks: marksMatch ? Number(marksMatch[1]) : null,
-    optionLabels,
-    correctAnswerLabels
+    observation: {
+      number,
+      type,
+      explicitMarks: marksMatch ? Number(marksMatch[1]) : null,
+      optionLabels,
+      correctAnswerLabels
+    },
+    unlabelledOptionBlock
   };
 }
 
