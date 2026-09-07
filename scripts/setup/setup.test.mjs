@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,4 +23,24 @@ test('doctor runs without installed dependencies and never claims readiness', ()
     assert.doesNotMatch(result.stdout, /Local runtime checks passed/);
     assert.match(result.stdout + result.stderr, /FAIL TypeScript runtime/);
   } finally { rmSync(temporary, { recursive: true, force: true }); }
+});
+
+test('beginner launchers bootstrap the same pinned, checksummed local Node runtime', () => {
+  const macLauncher = readFileSync(path.join(root, 'Setup Mac.command'), 'utf8');
+  const windowsLauncher = readFileSync(path.join(root, 'Setup Windows.cmd'), 'utf8');
+  const windowsBootstrap = readFileSync(path.join(root, 'scripts/setup/bootstrap-windows.ps1'), 'utf8');
+  const gitignore = readFileSync(path.join(root, '.gitignore'), 'utf8');
+
+  assert.equal(spawnSync('bash', ['-n', path.join(root, 'Setup Mac.command')]).status, 0);
+  assert.match(macLauncher, /node_version='24\.20\.0'/);
+  assert.match(windowsBootstrap, /\$nodeVersion = '24\.20\.0'/);
+  assert.equal((macLauncher.match(/[a-f0-9]{64}/g) ?? []).length, 2);
+  assert.equal((windowsBootstrap.match(/[a-f0-9]{64}/g) ?? []).length, 2);
+  assert.match(macLauncher, /https:\/\/nodejs\.org\/dist\/v/);
+  assert.match(windowsBootstrap, /https:\/\/nodejs\.org\/dist\/v/);
+  assert.match(macLauncher, /\.tools/);
+  assert.match(windowsBootstrap, /\.tools/);
+  assert.match(gitignore, /^\.tools\/$/m);
+  assert.match(windowsLauncher, /bootstrap-windows\.ps1/);
+  assert.doesNotMatch(windowsLauncher, /where node/i);
 });

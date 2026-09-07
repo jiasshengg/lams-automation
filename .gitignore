@@ -1,5 +1,6 @@
 .env
 configs/local.json
+.tools/
 node_modules/
 dist/
 artifacts/

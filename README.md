@@ -23,7 +23,7 @@ All skills use [shared operating rules](skills/lams-tbl-authoring/references/sha
 
 ## Setup
 
-New to developer tools? Follow [first-time setup](docs/first-time-setup.md). Install Node.js 24 LTS using the official installer, restart your agent app, then open `Setup Mac.command` or `Setup Windows.cmd` in this folder. Homebrew is not required.
+New to developer tools? Follow [first-time setup](docs/first-time-setup.md) and open `Setup Mac.command` or `Setup Windows.cmd`. If Node.js is missing or too old, the launcher downloads a pinned official Node.js 24 LTS archive, verifies its checksum, and keeps it inside the ignored `.tools` folder. Homebrew, administrator access, and a system-wide Node installation are not required.
 
 With Node/npm already available, run:
 

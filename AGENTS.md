@@ -60,6 +60,13 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Never store LAMS passwords, session cookies, tokens, OTPs, or browser profile contents in the repository.
 - The local persistent browser profile belongs under `.playwright/`, which must remain ignored by Git.
 
+## First-time computer setup
+
+- If Node.js 22 or newer and npm are already available, run `npm run setup` from the repository root.
+- If Node.js/npm are missing or too old, run `bash "./Setup Mac.command"` on macOS or `Setup Windows.cmd` on Windows. These launchers install a pinned, checksummed Node.js 24 runtime inside the ignored `.tools/` directory, then install dependencies and Playwright Chromium and run the local doctor checks. They do not require a system-wide Node installation.
+- Setup is runtime-only. Do not open LAMS, change lessons, request credentials, or claim configuration/login readiness as part of first-time setup.
+- Do not bypass operating-system or organisation security controls. If downloads, PowerShell, or project-local executables are prohibited, report that IT must provide an approved Node.js 24 installation.
+
 ## Code organization
 
 - `src/main.ts`: workflow entry point and orchestration.

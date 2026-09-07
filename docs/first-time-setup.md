@@ -1,11 +1,11 @@
 # First-time setup
 
-You do not need to know how to code or install Homebrew. You need the project source folder, Node.js, and permission to download the project's dependencies and browser.
+You do not need to know how to code, install Homebrew, or install Node.js yourself. You need the project source folder and permission to download the project's private runtime, dependencies, and browser.
 
 1. Download and unzip a clean source copy of this project, or obtain it through your organisation's approved repository access. Keep `package-lock.json` and the hidden `.agents`/`.claude` skill folders. Do not transfer someone else's `node_modules`, `.playwright`, `.env`, or `configs/local.json`; dependencies and login sessions belong to each computer/user. Git is not needed if you use a source ZIP.
-2. Install **Node.js 24 LTS** using the [official Node.js installer](https://nodejs.org/en/download) for macOS or Windows. The normal installer includes npm. Follow your organisation's software-installation process if administrator permission is needed. Restart your terminal and agent app after installation so they can find Node.
-3. Open the project folder and double-click **Setup Mac.command** on Mac or **Setup Windows.cmd** on Windows. If your organisation blocks downloaded launchers, ask IT or ask your coding agent to run `npm run setup` from the project folder. Do not disable macOS Gatekeeper or strip quarantine flags to force it to run.
-4. Wait while setup installs fresh project dependencies and Chromium. A temporary browser window opens and closes for a local check; it does not visit LAMS. Existing local configuration is preserved. If none exists, setup creates `configs/local.json` from the example.
+2. Open the project folder and double-click **Setup Mac.command** on Mac or **Setup Windows.cmd** on Windows. The launcher uses a compatible Node.js already on the computer when available. Otherwise, it downloads the pinned official Node.js 24 LTS archive, verifies its SHA-256 checksum, and installs it under this project's ignored `.tools` folder. It does not need Homebrew, a system-wide Node installation, or an administrator password.
+3. Wait while setup installs fresh project dependencies and Chromium. A temporary browser window opens and closes for a local check; it does not visit LAMS. Existing local configuration is preserved. If none exists, setup creates `configs/local.json` from the example.
+4. If the operating system or organisation blocks the launcher, do not bypass its security controls. Ask IT, or ask your coding agent to run `bash "./Setup Mac.command"` on macOS or `powershell.exe -NoProfile -File ".\\scripts\\setup\\bootstrap-windows.ps1"` on Windows. If PowerShell, downloads, or project-local executable files are prohibited, IT must provide Node.js 24 LTS and allow the project dependencies to run.
 5. Ask your agent: “Set up my LAMS URL and course in the local configuration.” Supply those details when asked. No passwords belong in that configuration file. Then request a separate login check and complete any sign-in prompts yourself. Runtime readiness does not mean you are already logged in.
 
 For example, you can tell your agent:
@@ -14,7 +14,7 @@ For example, you can tell your agent:
 
 ## What the checks prove
 
-`npm run setup` uses `npm ci --include=dev --include=optional`, installs Playwright Chromium, and runs `npm run doctor`'s checks. The lockfile stays unchanged. Dependencies are installed for this computer; copied dependencies are replaced. Network access is required. Do not run setup while another local automation is using the dependencies.
+The double-click launcher bootstraps Node.js when necessary and then starts `npm run setup`. That command uses `npm ci --include=dev --include=optional`, installs Playwright Chromium, and runs `npm run doctor`'s checks. The lockfile stays unchanged. Dependencies are installed for this computer; copied dependencies are replaced. Network access is required. Do not run setup while another local automation is using the dependencies.
 
 `npm run doctor` can also run by itself without reinstalling anything. It checks:
 
@@ -30,7 +30,9 @@ It exits unsuccessfully if any check fails. It does not open a saved browser pro
 
 | Message | Next step |
 |---|---|
-| Node/npm missing | Install Node using the official installer; restart the agent/terminal and rerun setup. |
+| Node/npm missing or too old | Use the Mac or Windows launcher; it installs the pinned runtime inside `.tools`. |
+| Unsupported CPU or local executables prohibited | Ask IT to install Node.js 24 LTS through your organisation's approved process. |
+| PowerShell unavailable or blocked | Ask IT to enable the approved setup route, or have IT install Node.js 24 LTS and then run `npm run setup`. |
 | esbuild missing, wrong architecture, or tsx fails | Rerun setup to install fresh local dependencies. Do not reuse another machine's `node_modules`. |
 | macOS kills or blocks a binary | The message alone does not prove quarantine is the cause. If a clean local install remains blocked, ask IT to inspect the specific executable and security event. |
 | Chromium executable missing | Run `npm run install:browsers`, then `npm run doctor`. |
@@ -40,4 +42,6 @@ It exits unsuccessfully if any check fails. It does not open a saved browser pro
 
 A successful `npm run build` alone is insufficient: it does not execute esbuild/tsx or launch a browser. The screenshot that prompted these checks reported a quarantined esbuild executable after an earlier build had passed; without that machine's logs, that reported cause is not independently confirmed.
 
-References: [esbuild platform-specific installation](https://esbuild.github.io/getting-started/#simultaneous-platforms), [npm clean installation](https://docs.npmjs.com/cli/v11/commands/npm-ci/), [Playwright browser installation](https://playwright.dev/docs/browsers).
+To move the source folder to another computer, leave out `.tools`, `node_modules`, `.playwright`, `.env`, and `configs/local.json`. Each user should run setup on their own computer so native packages and login data are never copied between users.
+
+References: [Node.js release archive](https://nodejs.org/en/download/archive/v24), [esbuild platform-specific installation](https://esbuild.github.io/getting-started/#simultaneous-platforms), [npm clean installation](https://docs.npmjs.com/cli/v11/commands/npm-ci/), [Playwright browser installation](https://playwright.dev/docs/browsers).
