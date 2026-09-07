@@ -1,6 +1,6 @@
 ---
 name: lams-tbl-authoring
-description: Orchestrate the supported LAMS TBL authoring workflow across lesson copying, iRAT configuration, AE preparation, and validation. Use for an overall or multi-stage TBL authoring request. For a single targeted operation, route to the matching focused LAMS skill. Does not implement AE mutation, node restructuring, or learner publishing.
+description: Orchestrate the supported LAMS TBL authoring workflow across lesson copying, iRAT configuration, AE preparation, and validation. Use for first-time LAMS project setup or an overall or multi-stage TBL authoring request. For a single targeted operation, route to the matching focused LAMS skill. Does not implement AE mutation, node restructuring, or learner publishing.
 ---
 
 # Overall TBL authoring workflow
@@ -9,8 +9,9 @@ Read [shared operating rules](references/shared.md). Use the existing scripts an
 
 ## Route the work
 
-| Request | Focused skill |
+| Request | Focused skill or guide |
 |---|---|
+| New computer, missing tools, or setup failure | [First-time setup](../../docs/first-time-setup.md) |
 | Locate, copy, or rename a lesson | [lams-lesson-management](../lams-lesson-management/SKILL.md) |
 | Inspect or update existing iRAT content/settings | [lams-irat-editing](../lams-irat-editing/SKILL.md) |
 | Change one dynamic-password gate's rotation | [lams-gate-settings](../lams-gate-settings/SKILL.md) |

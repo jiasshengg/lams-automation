@@ -27,12 +27,18 @@
     "inspect:irat-questions": "tsx src/inspect-irat-questions.ts",
     "apply:irat": "tsx src/apply-irat.ts",
     "send:code": "tsx src/send-code.ts",
-    "watch:url": "tsx src/watch-url.ts"
+    "watch:url": "tsx src/watch-url.ts",
+    "setup": "node scripts/setup/setup.mjs",
+    "doctor": "node scripts/setup/doctor.mjs",
+    "test:setup": "node --test scripts/setup/setup.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "@types/node": "^22.18.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

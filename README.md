@@ -23,13 +23,17 @@ All skills use [shared operating rules](skills/lams-tbl-authoring/references/sha
 
 ## Setup
 
+New to developer tools? Follow [first-time setup](docs/first-time-setup.md). Install Node.js 24 LTS using the official installer, restart your agent app, then open `Setup Mac.command` or `Setup Windows.cmd` in this folder. Homebrew is not required.
+
+With Node/npm already available, run:
+
 ```bash
-npm install
-npm run install:browsers
-cp configs/example.json configs/local.json
+npm run setup
 ```
 
-Edit `configs/local.json` once with the real LAMS URL, approved workspace, browser settings, and valid fallback values. The browser runs visibly and uses `.playwright/lams-profile`, so you can sign in manually and reuse that local browser session. Passwords are never read from configuration and `.playwright/` is ignored by Git.
+Setup replaces local dependencies using the lockfile, installs Chromium, preserves existing local configuration, and checks actual esbuild/tsx execution, the build, and a headed browser launch. It creates the example local configuration only if missing. Run `npm run doctor` later to repeat the checks without reinstalling.
+
+After the runtime checks pass, configure the real LAMS URL and course in `configs/local.json` and sign in separately. Runtime readiness is not login verification. Do not distribute `node_modules` or saved login profiles with the project.
 
 For individual operations, pass changing lesson values without editing the file:
 
