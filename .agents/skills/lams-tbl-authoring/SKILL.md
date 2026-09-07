@@ -1,6 +1,6 @@
 ---
 name: lams-tbl-authoring
-description: Orchestrate the supported LAMS TBL authoring workflow across lesson copying, iRAT configuration, AE preparation, and validation. Use for first-time LAMS project setup or an overall or multi-stage TBL authoring request. For a single targeted operation, route to the matching focused LAMS skill. Does not implement AE mutation, node restructuring, or learner publishing.
+description: Orchestrate LAMS TBL authoring across copying, iRAT and AE writing, SOT image import, append-only AE graph reconciliation, and validation. Use for overall or multi-stage authoring. Does not publish learner lessons or delete/rewire nodes.
 ---
 
 Read and follow the canonical skill at [skills/lams-tbl-authoring/SKILL.md](../../../skills/lams-tbl-authoring/SKILL.md). Follow its linked shared rules and operation-specific references.

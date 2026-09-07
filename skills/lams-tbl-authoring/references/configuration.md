@@ -79,6 +79,8 @@ Use the per-run `irat` object for the changing iRAT Source-of-Truth data. It con
 
 Do not put this changing content in `configs/local.json`. Pass it in `--request-json`. Automatic parsing of a Source-of-Truth document is not implemented.
 
+Optional image fields are `irat.sourceDocx` for embedded images assigned by question order, per-question `sourceQuestionNumber` to override the default one-based source position, and per-question `images` containing local `{ "path", "altText"?, "widthPx"? }` files. Question text/answer parsing from an iRAT Source-of-Truth document is not implemented; image extraction is.
+
 ## Browser fields
 
 Keep `headless` false during development. Store the persistent profile only under ignored `.playwright/`. The user completes authentication manually when needed.
@@ -105,6 +107,8 @@ Pass the local path separately with `--ae-json`; do not merge AE question conten
 - exact node titles and globally sequential question numbers;
 - `mcq` or `essay` question type, prompt text, and MCQ options with exactly one `correct: true`;
 - exact gate title, adjacent node titles, and the first question number after each gate.
+
+Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
 
 `marks` defaults to 4. `attempts` defaults to 1 and `passingMark` to null; supply them only when the SoT explicitly overrides those defaults. `expectedTotalMarks` is optional but recommended.
 

@@ -2,6 +2,8 @@ import type { Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
 import type { IratEditor, IratObservedQuestion, IratObservedState } from './irat.js';
+import type { QuestionImageAsset } from '../docx/question-images.js';
+import { imageHtml, uploadCkEditorImages } from './ckeditor-media.js';
 
 /**
  * Live adapter for the LAMS Assessment authoring UI.
@@ -60,11 +62,13 @@ export const ADVANCED_TOGGLES = {
 
 export class LamsIratEditor implements IratEditor {
   private activityFrame: Frame | undefined;
+  private readonly uploadedImageUrls = new Set<string>();
 
   constructor(
     private readonly page: Page,
     private readonly request: IratRequest,
-    private readonly timeoutMs: number
+    private readonly timeoutMs: number,
+    private readonly questionImages: Map<string, QuestionImageAsset[]> = new Map()
   ) {}
 
   async inspect(): Promise<IratObservedState> {
@@ -150,7 +154,19 @@ export class LamsIratEditor implements IratEditor {
     }
 
     await questionFrame.locator('#title').fill(question.title);
-    await setCkEditor(questionFrame, 'description', formattedHtml(question.content, question.fontFamily, question.fontSize));
+    await waitForCkEditor(questionFrame, 'description');
+    const uploaded = await uploadCkEditorImages(
+      this.page,
+      questionFrame,
+      'description',
+      this.questionImages.get(question.title) ?? []
+    );
+    uploaded.forEach((image) => this.uploadedImageUrls.add(image.url));
+    await setCkEditor(
+      questionFrame,
+      'description',
+      `${formattedHtml(question.content, question.fontFamily, question.fontSize)}${imageHtml(uploaded)}`
+    );
     await resizeOptions(questionFrame, question.answers.length, this.timeoutMs);
     await questionFrame.locator('#multipleAnswersAllowed').selectOption(
       question.answers.filter((answer) => answer.correct).length > 1 ? 'true' : 'false'
@@ -251,6 +267,14 @@ export class LamsIratEditor implements IratEditor {
           if (!printableText.includes(normalizeText(expected))) {
             throw new Error(`Print View did not contain expected iRAT text: "${normalizeText(expected)}".`);
           }
+        }
+      }
+      if (this.uploadedImageUrls.size > 0) {
+        const printableImages = new Set(
+          await printPage.locator('img').evaluateAll((elements) => elements.map((element) => (element as HTMLImageElement).src))
+        );
+        for (const url of this.uploadedImageUrls) {
+          if (!printableImages.has(url)) throw new Error(`Print View did not contain uploaded iRAT image: ${url}`);
         }
       }
     } finally {
@@ -395,10 +419,7 @@ async function resizeOptions(frame: Frame, expectedCount: number, timeoutMs: num
 }
 
 async function setCkEditor(frame: Frame, id: string, html: string): Promise<void> {
-  await frame.waitForFunction(
-    (editorId) => Boolean((window as typeof window & { CKEDITOR?: { instances?: Record<string, { status?: string }> } }).CKEDITOR?.instances?.[editorId]),
-    id
-  );
+  await waitForCkEditor(frame, id);
   await frame.evaluate(
     ({ editorId, value }) => {
       const editor = (window as typeof window & {
@@ -409,6 +430,13 @@ async function setCkEditor(frame: Frame, id: string, html: string): Promise<void
       editor.fire('change');
     },
     { editorId: id, value: html }
+  );
+}
+
+async function waitForCkEditor(frame: Frame, id: string): Promise<void> {
+  await frame.waitForFunction(
+    (editorId) => Boolean((window as typeof window & { CKEDITOR?: { instances?: Record<string, { status?: string }> } }).CKEDITOR?.instances?.[editorId]),
+    id
   );
 }
 

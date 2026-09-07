@@ -1,3 +1,5 @@
+import type { QuestionImageRequest } from '../config.js';
+
 export type AEQuestionType = 'mcq' | 'essay';
 
 export interface AEOptionInput {
@@ -7,10 +9,13 @@ export interface AEOptionInput {
 
 export interface AEQuestionInput {
   number: number;
+  title?: string;
   type: AEQuestionType;
   prompt: string;
   marks?: number;
   options?: AEOptionInput[];
+  sourceQuestionNumber?: number;
+  images?: QuestionImageRequest[];
 }
 
 export interface AENodeInput {
@@ -27,6 +32,7 @@ export interface AEGateInput {
 
 export interface AEPlanInput {
   sourceLabel: string;
+  sourceDocx?: string;
   breakMarkerCount: number;
   expectedTotalMarks?: number;
   attempts?: number;
@@ -42,6 +48,7 @@ export interface AEOptionPlan {
 
 export interface AEQuestionPlan {
   number: number;
+  title: string;
   type: AEQuestionType;
   promptHtml: string;
   marks: number;
@@ -50,6 +57,8 @@ export interface AEQuestionPlan {
   saveAsNewVersion: true;
   selectLatestVersion: true;
   options: AEOptionPlan[];
+  sourceQuestionNumber: number;
+  images: QuestionImageRequest[];
 }
 
 export interface AENodePlan {
@@ -79,6 +88,7 @@ export interface AEActivitySettings {
 
 export interface AEPlan {
   sourceLabel: string;
+  sourceDocx?: string;
   breakMarkerCount: number;
   requiredAENodes: number;
   requiredAEGates: number;
@@ -151,6 +161,7 @@ export function buildAEPlan(value: unknown): AEPlan {
 
   return {
     sourceLabel: input.sourceLabel,
+    ...(input.sourceDocx ? { sourceDocx: input.sourceDocx } : {}),
     breakMarkerCount: input.breakMarkerCount,
     requiredAENodes,
     requiredAEGates,
@@ -198,6 +209,7 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
     }
     return {
       number: question.number,
+      title: question.title ?? `Question ${question.number}`,
       type: question.type,
       promptHtml: normalizePrompt(question.prompt, question.number),
       marks,
@@ -205,7 +217,9 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
       prefixSequentialLetters: false,
       saveAsNewVersion: true,
       selectLatestVersion: true,
-      options: []
+      options: [],
+      sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
+      images: question.images ?? []
     };
   }
 
@@ -217,6 +231,7 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
   }
   return {
     number: question.number,
+    title: question.title ?? `Question ${question.number}`,
     type: question.type,
     promptHtml: normalizePrompt(question.prompt, question.number),
     marks,
@@ -228,7 +243,9 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
       const text = stripOptionPrefix(option.text);
       if (text === '') throw new Error(`Question ${question.number} option ${index + 1} is empty after removing its prefix`);
       return { text, creditPercent: option.correct === true ? 100 : 0 };
-    })
+    }),
+    sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
+    images: question.images ?? []
   };
 }
 
@@ -303,6 +320,7 @@ function validateGateAdjacency(input: AEPlanInput): void {
 function parseInput(value: unknown): AEPlanInput {
   if (!isRecord(value)) throw new Error('AE input must be a JSON object');
   const sourceLabel = nonEmptyString(value.sourceLabel, 'sourceLabel');
+  const sourceDocx = value.sourceDocx === undefined ? undefined : nonEmptyString(value.sourceDocx, 'sourceDocx');
   const breakMarkerCount = nonNegativeInteger(value.breakMarkerCount, 'breakMarkerCount');
   if (!Array.isArray(value.nodes) || value.nodes.length === 0) throw new Error('nodes must be a non-empty array');
   if (!Array.isArray(value.gates)) throw new Error('gates must be an array');
@@ -324,6 +342,7 @@ function parseInput(value: unknown): AEPlanInput {
         type: question.type,
         prompt: nonEmptyString(question.prompt, `Question ${number} prompt`)
       };
+      if (question.title !== undefined) parsedQuestion.title = nonEmptyString(question.title, `Question ${number} title`);
       if (question.marks !== undefined) parsedQuestion.marks = numberValue(question.marks, `Question ${number} marks`);
       if (question.options !== undefined) {
         if (!Array.isArray(question.options)) throw new Error(`Question ${number} options must be an array`);
@@ -336,6 +355,13 @@ function parseInput(value: unknown): AEPlanInput {
           }
           return parsedOption;
         });
+      }
+      if (question.sourceQuestionNumber !== undefined) {
+        parsedQuestion.sourceQuestionNumber = positiveInteger(question.sourceQuestionNumber, `Question ${number} sourceQuestionNumber`);
+      }
+      if (question.images !== undefined) {
+        if (!Array.isArray(question.images)) throw new Error(`Question ${number} images must be an array`);
+        parsedQuestion.images = question.images.map((image, imageIndex) => parseQuestionImage(image, `Question ${number} image ${imageIndex + 1}`));
       }
       return parsedQuestion;
     });
@@ -352,13 +378,28 @@ function parseInput(value: unknown): AEPlanInput {
     };
   });
 
-  const parsed: AEPlanInput = { sourceLabel, breakMarkerCount, nodes, gates };
+  const parsed: AEPlanInput = { sourceLabel, breakMarkerCount, nodes, gates, ...(sourceDocx ? { sourceDocx } : {}) };
   if (value.expectedTotalMarks !== undefined) parsed.expectedTotalMarks = nonNegativeInteger(value.expectedTotalMarks, 'expectedTotalMarks');
   if (value.attempts !== undefined) parsed.attempts = positiveInteger(value.attempts, 'attempts');
   if (value.passingMark !== undefined) {
     parsed.passingMark = value.passingMark === null ? null : nonNegativeInteger(value.passingMark, 'passingMark');
   }
   return parsed;
+}
+
+function parseQuestionImage(value: unknown, label: string): QuestionImageRequest {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  const image: QuestionImageRequest = { path: nonEmptyString(value.path, `${label} path`) };
+  if (value.altText !== undefined) {
+    if (typeof value.altText !== 'string') throw new Error(`${label} altText must be a string`);
+    image.altText = value.altText;
+  }
+  if (value.widthPx !== undefined) {
+    const width = numberValue(value.widthPx, `${label} widthPx`);
+    if (width <= 0) throw new Error(`${label} widthPx must be positive`);
+    image.widthPx = width;
+  }
+  return image;
 }
 
 function assertUnique(values: string[], label: string): void {

@@ -1,6 +1,6 @@
 ---
 name: lams-ae-preparation
-description: Extract structural evidence from an AE Source-of-Truth DOCX, preflight reviewed AE JSON, or inspect an existing LAMS AE activity and checkbox settings. Use for AE planning and read-only checks. Does not write AE questions or repair nodes.
+description: Extract AE Source-of-Truth structure and images, preflight reviewed AE JSON, inspect AE settings, or write/reconcile AE Assessment activities. Use for AE planning, media extraction, content writing, and append-only graph additions. Does not delete questions/nodes or remove/rewire transitions.
 ---
 
 # AE preparation and inspection
@@ -13,12 +13,16 @@ Choose the requested operation:
 npm run extract:ae-sot -- --sot-docx '<DOCX_NAME_OR_PATH>' [--out '<OUTPUT_PATH>'] [--json]
 npm run plan:ae -- --ae-json '<JSON_NAME_OR_PATH>' [--json]
 npm run inspect:ae -- --config configs/local.json --ae-json '<JSON_NAME_OR_PATH>' --node '<EXACT_AE_NODE>' --request-json '<REQUEST_JSON>'
+npm run extract:sot-media -- --sot-docx '<DOCX_NAME_OR_PATH>' [--out-dir '<DIRECTORY>']
+npm run apply:ae -- --config configs/local.json --ae-json '<JSON_NAME_OR_PATH>' --request-json '<REQUEST_JSON>' [--team-setup '<EXACT_TITLE>']
 ```
 
-Extraction and preflight run locally without LAMS. Extraction uses standalone `--- BREAK ---` markers and stops at `END`; page breaks and Case headings are not AE boundaries. Review all warnings, question numbering, answer keys, marks, multiple-select questions, and media limitations. Suggested node titles are not exact LAMS titles or permission to mutate.
+Extraction and preflight run locally without LAMS. Structural extraction uses standalone `--- BREAK ---` markers and stops at `END`; page breaks and Case headings are not AE boundaries. Media extraction reads embedded DOCX images, dimensions, hashes, alt text, and assigns them to numbered questions. Review unassigned images and all structural warnings. Suggested node titles are not exact LAMS titles.
 
-For preflight, prepare reviewed structured JSON using [AE configuration fields](../lams-tbl-authoring/references/configuration.md) and `configs/ae-example.json`. Structural extraction does not preserve all rich content or automatically create executable question imports. Validate the plan before browser inspection.
+For preflight or writing, prepare reviewed structured JSON using [AE configuration fields](../lams-tbl-authoring/references/configuration.md) and `configs/ae-example.json`. Set `sourceDocx` to import images assigned by question number; explicit per-question `images` can add local files. Structural extraction still requires review before it becomes executable input.
 
 Inspection requires `destinationFolderPath`, `lessonTitle`, and an exact AE node title. It checks the graph and required checkbox settings and never saves; exit code 2 means an expectation mismatch. Do not guess missing UI selectors: inspect diagnostics and the current adapter. All three commands are read-only in LAMS; extraction can write a local report with `--out`. Inspection and extraction reject `--commit`.
 
-Report extracted counts/groups and warnings, plan results, or observed settings mismatches as applicable. AE content changes and automatic node repair remain unsupported. Route topology checks to [authoring validation](../lams-authoring-validation/SKILL.md).
+`apply:ae` saves by default; `--dry-run` reports missing AE nodes, gates, transitions, and gate-bypass edges without mutation. A committed run writes every reviewed AE question, creates missing questions, imports images into CKEditor, applies canonical settings, associates Team Setup, creates missing Assessment/gate nodes, adds missing reviewed linear connections, saves, and verifies. It refuses extra questions requiring deletion and direct transitions requiring removal/rewiring.
+
+Report exact nodes/questions/images written, graph additions, verified results, and diagnostics. Route independent topology checks to [authoring validation](../lams-authoring-validation/SKILL.md).

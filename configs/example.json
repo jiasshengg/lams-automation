@@ -56,6 +56,7 @@
     "endTime": "23:59"
   },
   "irat": {
+    "sourceDocx": "REPLACE WITH iRAT SOT DOCX FILENAME",
     "gate": {
       "name": "iRAT Gate",
       "description": "iRAT Gate",
@@ -68,6 +69,7 @@
     "questions": [
       {
         "title": "REPLACE WITH EXACT QUESTION TITLE",
+        "sourceQuestionNumber": 1,
         "type": "multiple-choice",
         "content": "REPLACE WITH SOURCE-OF-TRUTH QUESTION CONTENT",
         "mandatory": true,

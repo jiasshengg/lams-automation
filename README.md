@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: extract structural evidence from an AE Source-of-Truth `.docx`, validate reviewed AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not automatically import questions, edit question rows, restructure nodes, or save AE changes yet.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, copies or renames exact designs, writes iRAT and AE Assessment questions, imports embedded DOCX images into CKEditor, applies activity settings and Team Setup associations, and reconciles missing AE Assessment nodes, permission gates, and reviewed linear transitions. It validates the resulting authoring graph and keeps learner publishing separate. Graph reconciliation is append-only: it does not delete questions/nodes or remove/rewire transitions.
 
 ## Agent skills
 
@@ -12,12 +12,12 @@ Use `lams-tbl-authoring` for the overall supported authoring flow. Focused skill
 | [lams-lesson-management](skills/lams-lesson-management/SKILL.md) | Locate, copy, or rename a lesson |
 | [lams-irat-editing](skills/lams-irat-editing/SKILL.md) | Inspect or update existing iRAT content and settings |
 | [lams-gate-settings](skills/lams-gate-settings/SKILL.md) | Change one dynamic-password gate's rotation interval |
-| [lams-ae-preparation](skills/lams-ae-preparation/SKILL.md) | Extract AE SoT, preflight AE JSON, or inspect AE settings |
+| [lams-ae-preparation](skills/lams-ae-preparation/SKILL.md) | Extract AE SoT/media, preflight data, inspect settings, or write/reconcile AE |
 | [lams-authoring-validation](skills/lams-authoring-validation/SKILL.md) | Check nodes, connections, grouping, and gate expectations |
 
 Canonical instructions live under `skills/`. Thin adapters under `.agents/skills/` and `.claude/skills/` expose every skill to Codex and Claude Code. Invoke `$lams-irat-editing` in Codex or `/lams-irat-editing` in Claude Code, for example, or describe the matching task naturally.
 
-Examples: “Copy this TBL and configure its iRAT” uses the overall skill; “Set the iRAT Gate rotation to 10 seconds” uses gate settings; “Check why Team Setup is wrong” uses graph validation. “Correct question 3” routes to iRAT editing, whose current bulk adapter still requires complete current data and a compatible write scope. The skill split does not add a single-question patch endpoint or automatic node repairs.
+Examples: “Copy this TBL and configure its iRAT” uses the overall skill; “Set the iRAT Gate rotation to 10 seconds” uses gate settings; “Check why Team Setup is wrong” uses graph validation. “Correct question 3” routes to iRAT editing, whose current bulk adapter still requires complete current data and a compatible write scope. AE reconciliation can add missing reviewed nodes/gates/transitions, but it does not delete or rewire existing graph elements.
 
 All skills use [shared operating rules](skills/lams-tbl-authoring/references/shared.md). Changing request data stays in `--request-json`; local input files accept filenames and partial names. Saving remains the default for supported authoring write commands, with optional `--dry-run`. An overall authoring request does not implicitly publish the lesson.
 
@@ -114,6 +114,18 @@ npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSO
 
 The live adapter uses the observed authoring-canvas controls and the stable Assessment authoring IDs from the official LAMS v4.8 source. It updates the password gate, Team Setup association, configured multiple-choice questions as new versions, answer weights, mandatory state, advanced settings, Print View verification, the iRAT tool, and finally the design. It deliberately refuses non-multiple-choice questions and non-`all questions` distribution settings until an exact configuration model exists for those alternatives.
 
+To import embedded iRAT images, set `irat.sourceDocx` and optionally override a question's one-based source position with `sourceQuestionNumber`. Extract and review the media mapping independently with:
+
+```bash
+npm run extract:sot-media -- --sot-docx "iRAT SOT.docx"
+```
+
+For one continuous copy → iRAT → AE run, include reviewed AE JSON:
+
+```bash
+npm run run:tbl -- --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
+```
+
 Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the per-run request JSON:
 
 ```json
@@ -137,7 +149,7 @@ Gate settings can also be validated without opening or changing the gate propert
 
 Each property is optional, so different lessons can validate only the settings they require. A mismatch is reported as a validation failure; the script never corrects or saves the gate automatically.
 
-## AE preflight and read-only inspection
+## AE extraction, writing, and graph reconciliation
 
 First extract the structural evidence from the supplied SoT DOCX:
 
@@ -148,7 +160,13 @@ npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx" --out /tmp/ae-
 
 The extractor treats only a standalone literal `--- BREAK ---` paragraph as an AE boundary. It derives `expectedAENodes = breaks + 1`, `expectedAEGates = breaks`, inventories the question ranges, explicit marks, selectable/open-response types, detected answer keys, and embedded-image counts, and stops at a standalone `END`. Page boundaries and `Case` headings never create nodes. Its suggested node titles are review aids, not authority for exact names in LAMS.
 
-Review the extraction warnings, then convert the content into structured JSON matching [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, images, links, and question content must be confirmed before browser use. Preflight the reviewed JSON locally:
+Extract the embedded images and inspect their question assignments:
+
+```bash
+npm run extract:sot-media -- --sot-docx "AE SOT.docx"
+```
+
+Review the extraction warnings, then convert the content into structured JSON matching [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, links, and question content must be confirmed before browser use. Set root-level `sourceDocx` to import embedded images by question number, or add explicit local `images` to individual questions. Preflight the reviewed JSON locally:
 
 ```bash
 npm run plan:ae -- --ae-json configs/ae-example.json
@@ -174,7 +192,13 @@ npm run inspect:ae -- --config configs/local.json --ae-json <AE_JSON> --node "<E
 
 The command verifies the configured course heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
 
-The next implementation gate is authenticated DOM evidence for the question table, rich-text editor, Advanced question settings, version selector, and final Save action. Do not add selectors for those controls from the video alone.
+Write the reviewed AE plan to an existing lesson, creating missing Assessment nodes, permission gates, questions, and linear transitions when required:
+
+```bash
+npm run apply:ae -- --config configs/local.json --ae-json <AE_JSON> --request-json '<REQUEST_JSON>'
+```
+
+Add `--dry-run` to report missing nodes, gates, connections, and gate-bypass edges without mutation. A committed run updates existing questions as new versions, creates missing MCQ/essay questions, imports images, applies canonical AE settings, associates Team Setup, saves the design, and verifies the resulting graph. It stops rather than deleting extra questions/nodes or removing a direct transition that would bypass a planned gate.
 
 ## Lesson index and monitoring
 

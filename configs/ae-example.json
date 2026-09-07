@@ -1,5 +1,6 @@
 {
   "sourceLabel": "FOM TBL06 AE Source of Truth",
+  "sourceDocx": "REPLACE WITH AE SOT DOCX FILENAME",
   "breakMarkerCount": 1,
   "expectedTotalMarks": 12,
   "nodes": [
@@ -8,6 +9,7 @@
       "questions": [
         {
           "number": 1,
+          "title": "Question 1",
           "type": "mcq",
           "prompt": "Case 1\n[4 marks]\nQUESTION 1\nWhich action is best?",
           "options": [

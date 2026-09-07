@@ -46,6 +46,13 @@ export interface IratAnswerRequest {
   weight: number;
 }
 
+export interface QuestionImageRequest {
+  /** Local image file. Filenames and partial filenames use the standard input resolver. */
+  path: string;
+  altText?: string;
+  widthPx?: number;
+}
+
 export interface IratQuestionRequest {
   title: string;
   /** Deployment guide: iRAT questions carry 1 mark each unless stated otherwise. */
@@ -56,9 +63,14 @@ export interface IratQuestionRequest {
   fontFamily: string;
   fontSize: number;
   answers: IratAnswerRequest[];
+  /** Defaults to this question's one-based position when irat.sourceDocx is supplied. */
+  sourceQuestionNumber?: number;
+  images?: QuestionImageRequest[];
 }
 
 export interface IratRequest {
+  /** Optional DOCX whose embedded images are assigned to questions by question number/order. */
+  sourceDocx?: string;
   gate: {
     name: string;
     description: string;
@@ -288,6 +300,13 @@ function validateIratRequest(value: unknown): void {
     if (!Number.isFinite(question.fontSize) || Number(question.fontSize) <= 0) {
       throw new Error(`irat.questions[${questionIndex}].fontSize must be positive.`);
     }
+    if (
+      question.sourceQuestionNumber !== undefined &&
+      (!Number.isInteger(question.sourceQuestionNumber) || Number(question.sourceQuestionNumber) <= 0)
+    ) {
+      throw new Error(`irat.questions[${questionIndex}].sourceQuestionNumber must be a positive integer.`);
+    }
+    validateQuestionImages(question.images, `irat.questions[${questionIndex}].images`);
     if (!Array.isArray(question.answers) || question.answers.length < 2) {
       throw new Error(`irat.questions[${questionIndex}].answers must contain at least two answers.`);
     }
@@ -311,6 +330,9 @@ function validateIratRequest(value: unknown): void {
       throw new Error(`Correct answer weights must total 100 in iRAT question "${question.title}"; found ${correctWeight}.`);
     }
   });
+  if (value.sourceDocx !== undefined && (typeof value.sourceDocx !== 'string' || value.sourceDocx.trim() === '')) {
+    throw new Error('irat.sourceDocx must be a non-empty string when provided.');
+  }
   if (!isRecord(value.advanced)) throw new Error('irat.advanced must be an object.');
   for (const key of [
     'shuffleQuestions',
@@ -322,6 +344,22 @@ function validateIratRequest(value: unknown): void {
   ] as const) {
     if (typeof value.advanced[key] !== 'boolean') throw new Error(`irat.advanced.${key} must be a boolean.`);
   }
+}
+
+function validateQuestionImages(value: unknown, label: string): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
+  value.forEach((image, index) => {
+    if (!isRecord(image) || typeof image.path !== 'string' || image.path.trim() === '') {
+      throw new Error(`${label}[${index}].path must be a non-empty string.`);
+    }
+    if (image.altText !== undefined && typeof image.altText !== 'string') {
+      throw new Error(`${label}[${index}].altText must be a string.`);
+    }
+    if (image.widthPx !== undefined && (!Number.isFinite(image.widthPx) || Number(image.widthPx) <= 0)) {
+      throw new Error(`${label}[${index}].widthPx must be positive.`);
+    }
+  });
 }
 
 export function parseRequestOverrides(raw: string | undefined): Partial<LamsConfig> {

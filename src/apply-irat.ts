@@ -7,6 +7,7 @@ import { executeIratAutomation, requireIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
+import { resolveIratQuestionImages } from './docx/question-images.js';
 
 /**
  * Applies the structured iRAT request to a lesson that already exists in the approved
@@ -34,7 +35,8 @@ async function main(): Promise<void> {
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
 
-    const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs);
+    const questionImages = await resolveIratQuestionImages(irat);
+    const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs, questionImages);
     const result = await executeIratAutomation(editor, irat, { commit });
 
     if (!commit) {
@@ -45,6 +47,7 @@ async function main(): Promise<void> {
     console.log(`Lesson: ${config.lessonTitle}`);
     console.log(`Folder: ${config.destinationFolderPath.join(' > ')}`);
     console.log(`Questions updated (${result.updatedQuestions.length}): ${result.updatedQuestions.join(', ')}`);
+    console.log(`Question images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
     console.log('Verified: configured course, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'apply-irat-failure').catch(() => undefined);

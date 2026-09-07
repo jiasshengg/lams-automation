@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-Build and verify a reusable Playwright + TypeScript automation layer for the initial LAMS TBL authoring workflow, with a vendor-neutral Agent Skill that orchestrates the tested scripts. Read-only structural extraction from an AE Source-of-Truth DOCX is supported; browser mutation still requires reviewed structured data and reliable DOM evidence.
+Build and verify a reusable Playwright + TypeScript automation layer for the LAMS TBL authoring workflow, with a vendor-neutral Agent Skill that orchestrates the tested scripts. Structural/media extraction from Source-of-Truth DOCX files and reviewed iRAT/AE browser mutation are supported when reliable DOM evidence exists.
 
 ## LAMS safety boundary
 
@@ -30,12 +30,14 @@ Work incrementally.
 
 Do not infer an exact source sequence from only a module or TBL number when multiple matches exist.
 
-### Later scope
+### Extended authoring scope
 
 - Inspect and list Authoring nodes.
 - Determine whether the Authoring surface uses HTML, SVG, canvas, iframes, or another representation.
 - Validate required nodes, counts, connections, Team Setup associations, and gate names.
-- Extend AE Source-of-Truth extraction beyond structural break/question inventory only when reliable fixtures support the new fields.
+- Extract embedded DOCX images with question associations and import them through the observed CKEditor upload endpoint.
+- Write reviewed AE MCQ/essay questions and canonical activity settings.
+- Reconcile missing AE Assessment nodes, permission gates, Team Setup associations, and reviewed linear transitions without deleting or rewiring existing graph elements.
 - Extend the vendor-neutral skill only with behavior already supported by the reusable automation.
 
 ## Browser automation rules
@@ -75,6 +77,9 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - `src/lams/lesson-copy.ts`: Save As, rename, destination selection, and copy verification.
 - `src/lams/authoring.ts`: Authoring-page inspection and node extraction.
 - `src/lams/validation.ts`: later validation rules and reporting.
+- `src/lams/ae-editor.ts`: AE Assessment question/settings mutation.
+- `src/lams/ae-graph.ts`: append-only AE node/gate/transition reconciliation.
+- `src/docx/`: DOCX archive, embedded-media, and question-assignment handling.
 - `src/lams/diagnostics.ts`: non-mutating DOM and screenshot evidence.
 - `skills/lams-tbl-authoring/`: overall workflow skill and shared operational references.
 - `skills/lams-*/`: focused lesson-management, iRAT-editing, gate-settings, AE-preparation, and authoring-validation skills.

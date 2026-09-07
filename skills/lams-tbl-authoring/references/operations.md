@@ -60,7 +60,28 @@ It does not cover branching/merging topology or automatic correction.
 
 `npm run inspect:ae -- --config configs/local.json --ae-json '<AE_JSON_PATH>' --node '<EXACT_AE_NODE_TITLE>' --request-json '<REQUEST_JSON>'` is read-only. It verifies the configured course, exact lesson, AE graph, and exact node before opening the activity and checking all required checkbox labels. It rejects `--commit` and never clicks the activity Save control.
 
-An exit code of `2` means the browser inspection completed but the graph or activity settings did not match. A missing or ambiguous selector/control is an automation stop and must include diagnostics. Question content/version inspection and AE mutation remain unsupported until authenticated DOM evidence is captured.
+An exit code of `2` means the browser inspection completed but the graph or activity settings did not match. A missing or ambiguous selector/control is an automation stop and must include diagnostics.
+
+## SOT image extraction and import
+
+`npm run extract:sot-media -- --sot-docx '<DOCX>' [--out-dir '<DIRECTORY>']` extracts embedded images locally and writes a manifest with relationship IDs, question assignments, dimensions, hashes, and alt text. Numbered AE questions are matched directly; unnumbered iRAT questions are assigned by marked-question order. Review every unassigned image.
+
+Set `sourceDocx` in reviewed iRAT or AE input to import all images assigned to each question. The live adapter uploads each image to the active Assessment content folder, inserts the returned same-origin URL into CKEditor, and verifies iRAT images in Print View. Per-question `images` can add explicit local image files.
+
+## AE writing and append-only reconciliation
+
+`npm run apply:ae -- --config configs/local.json --ae-json '<AE_JSON>' --request-json '<REQUEST_JSON>'` writes an existing lesson. `--dry-run` reports the graph diff without saving. A committed run:
+
+- updates existing AE question rows as new question-bank versions;
+- creates missing MCQ or essay questions;
+- applies marks, Answer required, options/weights, attempts/passing mark, and canonical AE settings;
+- imports SOT and explicit local images;
+- associates every AE Assessment node with the exact Team Setup;
+- creates missing Assessment nodes and permission gates;
+- adds missing transitions in the reviewed linear AE flow;
+- saves and verifies the resulting graph.
+
+The reconciler does not delete extra questions/nodes or remove/rewire transitions. It stops when an existing direct transition would bypass a planned gate.
 
 ## iRAT preflight
 
@@ -71,6 +92,8 @@ An exit code of `2` means the browser inspection completed but the graph or acti
 `npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>'` keeps one Playwright context open for the full operation. It opens the configured course, copies the exact source lesson, updates the iRAT Gate, Team Setup association, multiple-choice questions and answer weights, mandatory flags, advanced settings, Print View, and saves the tool and copied design.
 
 The command requires resolved copy targets and the structured `irat` request. It saves by default. `--dry-run` previews the copy and stops before iRAT editing. It stops on unsupported question/distribution types and saves diagnostics on failure. It never deletes, restructures, publishes, or starts a lesson.
+
+Pass `--ae-json '<AE_JSON>'` or use the `run:tbl` alias to continue in the same browser context through AE writing and append-only graph reconciliation after iRAT is saved.
 
 ## Failures
 
