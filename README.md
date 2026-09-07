@@ -2,23 +2,24 @@
 
 This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: extract structural evidence from an AE Source-of-Truth `.docx`, validate reviewed AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not automatically import questions, edit question rows, restructure nodes, or save AE changes yet.
 
-## Agent skill
+## Agent skills
 
-The repository includes one vendor-neutral skill at `skills/lams-tbl-authoring/`. Thin discovery adapters expose the same instructions to both supported coding agents:
+Use `lams-tbl-authoring` for the overall supported authoring flow. Focused skills handle targeted operations without automatically copying or rerunning the full lesson workflow.
 
-- Codex: invoke `$lams-tbl-authoring` or describe a matching LAMS copy/validation request.
-- Claude Code: invoke `/lams-tbl-authoring` or describe a matching request.
+| Skill | Use it for |
+|---|---|
+| [lams-tbl-authoring](skills/lams-tbl-authoring/SKILL.md) | Coordinate copy, iRAT configuration, AE preparation, and validation |
+| [lams-lesson-management](skills/lams-lesson-management/SKILL.md) | Locate, copy, or rename a lesson |
+| [lams-irat-editing](skills/lams-irat-editing/SKILL.md) | Inspect or update existing iRAT content and settings |
+| [lams-gate-settings](skills/lams-gate-settings/SKILL.md) | Change one dynamic-password gate's rotation interval |
+| [lams-ae-preparation](skills/lams-ae-preparation/SKILL.md) | Extract AE SoT, preflight AE JSON, or inspect AE settings |
+| [lams-authoring-validation](skills/lams-authoring-validation/SKILL.md) | Check nodes, connections, grouping, and gate expectations |
 
-For example:
+Canonical instructions live under `skills/`. Thin adapters under `.agents/skills/` and `.claude/skills/` expose every skill to Codex and Claude Code. Invoke `$lams-irat-editing` in Codex or `/lams-irat-editing` in Claude Code, for example, or describe the matching task naturally.
 
-```text
-Copy the exact lesson "FOM TBL06 2025Y1" from Courses > Cohort_2025Y1 > FOM,
-rename it to "FOM TBL06 030926 2026Y1", save it in
-Courses > Cohort_2026Y1 > FOM, then validate the supplied linear flow with
-5 AE nodes and 4 AE gates.
-```
+Examples: “Copy this TBL and configure its iRAT” uses the overall skill; “Set the iRAT Gate rotation to 10 seconds” uses gate settings; “Check why Team Setup is wrong” uses graph validation. “Correct question 3” routes to iRAT editing, whose current bulk adapter still requires complete current data and a compatible write scope. The skill split does not add a single-question patch endpoint or automatic node repairs.
 
-The agent passes changing lesson values directly to the scripts as per-run JSON and calls the existing Playwright commands. It does not rewrite `configs/local.json` for every lesson. That ignored file holds stable local LAMS/browser settings and fallback defaults. The skill requires exact copy targets and explicit authorization before the committed Save action. Automatic Source-of-Truth parsing and automatic node correction remain out of scope.
+All skills use [shared operating rules](skills/lams-tbl-authoring/references/shared.md). Changing request data stays in `--request-json`; local input files accept filenames and partial names. Saving remains the default for supported authoring write commands, with optional `--dry-run`. An overall authoring request does not implicitly publish the lesson.
 
 ## Setup
 

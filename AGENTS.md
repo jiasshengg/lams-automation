@@ -69,9 +69,10 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - `src/lams/authoring.ts`: Authoring-page inspection and node extraction.
 - `src/lams/validation.ts`: later validation rules and reporting.
 - `src/lams/diagnostics.ts`: non-mutating DOM and screenshot evidence.
-- `skills/lams-tbl-authoring/`: canonical cross-agent skill and operational references.
-- `.agents/skills/lams-tbl-authoring/`: Codex discovery adapter.
-- `.claude/skills/lams-tbl-authoring/`: Claude Code discovery adapter.
+- `skills/lams-tbl-authoring/`: overall workflow skill and shared operational references.
+- `skills/lams-*/`: focused lesson-management, iRAT-editing, gate-settings, AE-preparation, and authoring-validation skills.
+- `.agents/skills/lams-*/`: Codex discovery adapters for every canonical skill.
+- `.claude/skills/lams-*/`: Claude Code discovery adapters for every canonical skill.
 
 Keep UI mechanics separate from workflow orchestration so later validation and Source-of-Truth parsing can reuse the same browser layer.
 

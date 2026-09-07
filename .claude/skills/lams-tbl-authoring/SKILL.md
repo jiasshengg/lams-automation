@@ -1,6 +1,6 @@
 ---
 name: lams-tbl-authoring
-description: Configure and run the repository's automation to extract AE Source-of-Truth structure and locate, copy, rename, inspect, or validate LAMS TBL authoring lessons in the configured course. Use for AE SOT break-derived planning, lesson Save As workflows, and authoring-graph checks. Do not use for learner publishing, automatic node restructuring.
+description: Orchestrate the supported LAMS TBL authoring workflow across lesson copying, iRAT configuration, AE preparation, and validation. Use for an overall or multi-stage TBL authoring request. For a single targeted operation, route to the matching focused LAMS skill. Does not implement AE mutation, node restructuring, or learner publishing.
 ---
 
-Read and follow the canonical cross-agent skill at [skills/lams-tbl-authoring/SKILL.md](../../../skills/lams-tbl-authoring/SKILL.md), including only the references it routes to for the requested operation.
+Read and follow the canonical skill at [skills/lams-tbl-authoring/SKILL.md](../../../skills/lams-tbl-authoring/SKILL.md). Follow its linked shared rules and operation-specific references.
