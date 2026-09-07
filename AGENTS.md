@@ -8,7 +8,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the ini
 
 - Use the course requested by the user through `workspaceCourse`; there is no fixed playground allowlist. Select the configured course as part of navigation.
 - Treat navigation and DOM inspection as read-only.
-- Do not create, copy, rename, move, save, publish, delete, or restructure a lesson unless the user has supplied the exact source lesson, new title, and destination and has asked for that operation.
+- Perform lesson changes only when requested. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
 - Never delete or automatically restructure authoring nodes.
 - Never publish or start a copied lesson as a learner-facing lesson unless explicitly requested.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.

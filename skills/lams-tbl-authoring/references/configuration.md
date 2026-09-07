@@ -119,3 +119,5 @@ Before running a committed copy or rename, reject the merged request when:
 - the destination already contains the new title;
 
 For a rename, also reject the operation when the same folder already contains the new title. After saving, verify that the new title exists and the old title is absent.
+
+When a copy destination is omitted, save in the resolved source lesson folder without asking for destination confirmation. Copy commands derive `destinationFolderPath` and its display label from `sourceFolderPath`, overriding stale destination defaults in local configuration. An explicit per-run `destinationFolderPath` wins. Folder creation/rename still requires its requested target path. Existing-lesson edits and renames save in place; their destination fields identify the existing lesson rather than move it.

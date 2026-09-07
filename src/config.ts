@@ -157,12 +157,30 @@ const requestOverrideKeys = [
   'irat'
 ] as const;
 
-export async function loadConfig(configPath: string, overrides: Partial<LamsConfig> = {}): Promise<LamsConfig> {
+export async function loadConfig(
+  configPath: string,
+  overrides: Partial<LamsConfig> = {},
+  options: { defaultDestinationToSource?: boolean } = {}
+): Promise<LamsConfig> {
   const absolutePath = await resolveInputFile(configPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
 
   if (!isRecord(parsed)) throw new Error('Configuration must be a JSON object.');
   const merged: Record<string, unknown> = { ...parsed, ...overrides };
+  // Copy commands default to the actual source, not a stale local-config destination.
+  if (options.defaultDestinationToSource && !Object.hasOwn(overrides, 'destinationFolderPath')) {
+    if (merged.createDestinationFolder === true || merged.renameDestinationFolderFrom !== undefined) {
+      throw new Error('Folder creation or rename requires an explicit destinationFolderPath; it cannot target the source folder by default.');
+    }
+    if (Object.hasOwn(overrides, 'destinationFolder')) {
+      throw new Error('destinationFolder is a display label; supply destinationFolderPath to select a different folder.');
+    }
+    merged.destinationFolderPath = Array.isArray(merged.sourceFolderPath) ? [...merged.sourceFolderPath] : merged.sourceFolderPath;
+    if (Array.isArray(merged.destinationFolderPath)) merged.destinationFolder = merged.destinationFolderPath.join('/');
+  } else if (options.defaultDestinationToSource && Array.isArray(merged.destinationFolderPath)) {
+    merged.destinationFolder = merged.destinationFolderPath.join('/');
+  }
+
   for (const key of requiredStrings) {
     if (typeof merged[key] !== 'string' || merged[key].trim() === '') {
       throw new Error(`Configuration field "${key}" must be a non-empty string.`);

@@ -11,7 +11,7 @@ import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 async function main(): Promise<void> {
   const commit = !process.argv.includes('--dry-run');
   const configPath = readArgument('--config') ?? 'configs/local.json';
-  const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
+  const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { defaultDestinationToSource: true });
   const irat = requireIratRequest(config);
   const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
     headless: config.browser.headless,

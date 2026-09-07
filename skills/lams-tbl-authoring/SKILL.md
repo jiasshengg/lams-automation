@@ -22,7 +22,7 @@ Read the relevant focused instructions directly; routing does not require a new 
 
 ## Coordinate the requested flow
 
-1. Resolve source documents, source lesson, intended new title/destination, and requested content changes. Use available context and read-only discovery before asking for missing information. File names and partial file names are accepted.
+1. Resolve source documents, source lesson, intended new title/destination, and requested content changes. Use available context and read-only discovery before asking for missing information. File names and partial file names are accepted. If no copy destination is stated, use the source lesson folder without asking for confirmation.
 2. If AE SoT is supplied, use AE preparation to extract and review its structural evidence. This does not produce executable iRAT data or authorize AE changes.
 3. For copy-only work, use lesson management. For an existing lesson, skip copying and use the relevant focused skill.
 4. For a requested new copy plus iRAT configuration, resolve the complete structured `irat` request following the iRAT skill, then run the combined workflow once:

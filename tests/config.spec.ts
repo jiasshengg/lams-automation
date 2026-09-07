@@ -117,3 +117,35 @@ test('defaults iRAT question marks to 1 and rejects a non-positive mark', async 
     'irat.questions[0].marks must be a positive integer.'
   );
 });
+
+test('copy defaults to the source folder rather than the local destination', async () => {
+  const config = await loadConfig('configs/example.json', {
+    sourceFolderPath: ['Courses', 'Current source'], lessonTitle: 'New copy'
+  }, { defaultDestinationToSource: true });
+  expect(config.destinationFolderPath).toEqual(['Courses', 'Current source']);
+  expect(config.destinationFolder).toBe('Courses/Current source');
+  expect(config.destinationFolderPath).not.toBe(config.sourceFolderPath);
+});
+
+test('copy honors an explicit destination and keeps its report consistent', async () => {
+  const config = await loadConfig('configs/example.json', {
+    destinationFolderPath: ['Courses', 'Requested destination']
+  }, { defaultDestinationToSource: true });
+  expect(config.destinationFolderPath).toEqual(['Courses', 'Requested destination']);
+  expect(config.destinationFolder).toBe('Courses/Requested destination');
+});
+
+test('same-folder default works with the configured source and preserves existing edit targets', async () => {
+  const existing = await loadConfig('configs/example.json');
+  const copy = await loadConfig('configs/example.json', {}, { defaultDestinationToSource: true });
+  expect(copy.destinationFolderPath).toEqual(existing.sourceFolderPath);
+  const edit = await loadConfig('configs/example.json', { sourceFolderPath: ['Different source'] });
+  expect(edit.destinationFolderPath).toEqual(existing.destinationFolderPath);
+});
+
+test('copy does not interpret a missing folder-operation target as the source', async () => {
+  await expect(loadConfig('configs/example.json', { createDestinationFolder: true }, { defaultDestinationToSource: true }))
+    .rejects.toThrow('requires an explicit destinationFolderPath');
+  await expect(loadConfig('configs/example.json', { destinationFolderPath: [] }, { defaultDestinationToSource: true }))
+    .rejects.toThrow(/destinationFolder/);
+});
