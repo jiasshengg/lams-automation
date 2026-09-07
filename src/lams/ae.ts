@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 import type { LamsConfig } from '../config.js';
 import { inspectAuthoringGraph } from './authoring.js';
 import { saveDiagnostics } from './diagnostics.js';
-import { waitForUniqueVisible } from './navigation.js';
+import { waitForVisibleTarget } from './navigation.js';
 
 export async function openExactAEActivity(page: Page, nodeTitle: string, config: LamsConfig): Promise<Page> {
   const graph = await inspectAuthoringGraph(page);
@@ -13,7 +13,7 @@ export async function openExactAEActivity(page: Page, nodeTitle: string, config:
   }
 
   const node = page.locator(`#canvas > svg > g.svg-activity-tool[uiid="${matches[0]!.uiid}"]`);
-  const target = await waitForUniqueVisible(node, page, config, `AE node: ${nodeTitle}`, false);
+  const target = await waitForVisibleTarget(node, page, config, `AE node: ${nodeTitle}`, false);
   const popupPromise = page
     .waitForEvent('popup', { timeout: Math.min(config.browser.actionTimeoutMs, 750) })
     .catch(() => undefined);

@@ -2,9 +2,9 @@ import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
 import { selectWorkspaceCourse } from '../src/lams/navigation.js';
 
-const workspaceCourse = 'DL Playground 2026/2027 [internal]';
+const workspaceCourse = 'User-selected course';
 
-test('keeps the already-selected approved workspace', async ({ page }) => {
+test('keeps the already-selected configured course', async ({ page }) => {
   await page.setContent(`
     <button aria-label="Toggle course menu" onclick="document.body.dataset.menuOpened = 'true'">Menu</button>
     <h2>${workspaceCourse}</h2>
@@ -15,7 +15,7 @@ test('keeps the already-selected approved workspace', async ({ page }) => {
   await expect(page.locator('body')).not.toHaveAttribute('data-menu-opened');
 });
 
-test('searches for and selects only the approved workspace', async ({ page }) => {
+test('searches for and selects only the configured course', async ({ page }) => {
   await page.setContent(`
     <button aria-label="Toggle course menu" onclick="document.querySelector('[role=dialog]').hidden = false">Menu</button>
     <div role="dialog" hidden>
@@ -33,7 +33,7 @@ test('searches for and selects only the approved workspace', async ({ page }) =>
   await expect(page.locator('input[aria-label="Search for courses"]')).toHaveValue(workspaceCourse);
 });
 
-test('waits for the approved workspace heading before opening the course menu', async ({ page }) => {
+test('waits for the configured course heading before opening the course menu', async ({ page }) => {
   // The dashboard heading paints a moment after domcontentloaded. An instantaneous
   // check misses it and needlessly re-opens the course menu for an active course.
   await page.setContent(`
@@ -75,3 +75,10 @@ function config(): LamsConfig {
     browser: { manualLoginTimeoutMs: 2_000, actionTimeoutMs: 2_000, readyTimeoutMs: 2_000 }
   } as LamsConfig;
 }
+
+test('uses the first visible navigation match and skips hidden matches', async ({ page }) => {
+  const { waitForVisibleTarget } = await import('../src/lams/navigation.js');
+  await page.setContent('<button hidden>Open</button><button id="first">Open</button><button>Open</button>');
+  const target = await waitForVisibleTarget(page.getByRole('button', { name: 'Open', includeHidden: true }), page, config(), 'open', false);
+  await expect(target).toHaveAttribute('id', 'first');
+});

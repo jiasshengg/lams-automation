@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { LamsConfig } from '../config.js';
 import { waitForAuthoringReady } from './authoring.js';
-import { waitForUniqueVisible } from './navigation.js';
+import { waitForVisibleTarget } from './navigation.js';
 
 export interface CopyLessonOptions {
   commit: boolean;
@@ -50,8 +50,7 @@ export async function openLessonFromLibrary(
   await traverseFolderPath(dialog, folderPath, page, config);
   if (options.absentTitle) await assertTitleAbsent(dialog, options.absentTitle);
   const lesson = await exactLessonTreeItem(dialog, lessonTitle);
-  await waitForUniqueVisible(lesson, page, config, `lesson: ${lessonTitle}`, false);
-  await lesson.click();
+  await (await waitForVisibleTarget(lesson, page, config, `lesson: ${lessonTitle}`, false)).click();
 
   // Read-only library designs expose a distinct stable control that opens an
   // unsaved writable clone. No library copy exists until Save As completes.
@@ -79,7 +78,7 @@ export async function renameLesson(
   assertCommitValues(config);
 
   const titleField = page.locator('#ldDescriptionFieldTitle');
-  const visibleTitle = await waitForUniqueVisible(titleField, page, config, 'authoring title', false);
+  const visibleTitle = await waitForVisibleTarget(titleField, page, config, 'authoring title', false);
   const currentTitle = (await visibleTitle.innerText()).trim();
   if (currentTitle !== config.sourceLessonTitle) {
     throw new Error(`Refusing to rename: opened title is "${currentTitle}", expected "${config.sourceLessonTitle}".`);
@@ -90,11 +89,11 @@ export async function renameLesson(
   const titleInput = titleContainer.getByRole('textbox');
   const submitButton = titleContainer.locator('button.editable-submit');
   const cancelButton = titleContainer.locator('button.editable-cancel');
-  await waitForUniqueVisible(titleInput, page, config, 'inline title textbox', false);
-  await waitForUniqueVisible(submitButton, page, config, 'inline title confirmation', false);
+  const visibleInput = await waitForVisibleTarget(titleInput, page, config, 'inline title textbox', false);
+  const visibleSubmit = await waitForVisibleTarget(submitButton, page, config, 'inline title confirmation', false);
 
   if (!options.commit) {
-    await (await waitForUniqueVisible(cancelButton, page, config, 'inline title cancel', false)).click();
+    await (await waitForVisibleTarget(cancelButton, page, config, 'inline title cancel', false)).click();
     await waitForExactTitle(titleField, config.sourceLessonTitle, config);
     console.log('Rename dry run complete: inline title controls were verified and cancelled; no title was changed.');
     return {
@@ -105,13 +104,13 @@ export async function renameLesson(
     };
   }
 
-  await titleInput.fill(config.lessonTitle);
-  await submitButton.click();
+  await visibleInput.fill(config.lessonTitle);
+  await visibleSubmit.click();
   await waitForExactTitle(titleField, config.lessonTitle, config);
 
   const modifiedIndicator = page.locator('#ldDescriptionFieldModified');
-  await waitForUniqueVisible(modifiedIndicator, page, config, 'unsaved title indicator', false);
-  const saveButton = await waitForUniqueVisible(page.locator('#saveButton'), page, config, 'authoring save', false);
+  await waitForVisibleTarget(modifiedIndicator, page, config, 'unsaved title indicator', false);
+  const saveButton = await waitForVisibleTarget(page.locator('#saveButton'), page, config, 'authoring save', false);
   if (!(await saveButton.isEnabled())) throw new Error('Authoring Save remained disabled after changing the title.');
   await saveButton.click();
   await modifiedIndicator.waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
@@ -239,7 +238,7 @@ async function prepareDestinationFolder(
     });
   });
   await Promise.all([newFolderButton.click(), promptHandled]);
-  const created = await waitForUniqueVisible(exactTreeItem(dialog, folderName), page, config, `created folder: ${folderName}`, false);
+  const created = await waitForVisibleTarget(exactTreeItem(dialog, folderName), page, config, `created folder: ${folderName}`, false);
   if ((await created.getAttribute('aria-expanded')) !== 'true') await created.click();
   console.log(`Verified created destination folder: ${folderName}`);
   return { created: true, renamed: false };
@@ -259,7 +258,7 @@ async function prepareRenamedDestinationFolder(
   if ((await visibleCount(await exactFolderTreeItem(dialog, newName))) > 0) {
     throw new Error(`Refusing to rename destination folder: "${newName}" already exists.`);
   }
-  const oldFolder = await waitForUniqueVisible(
+  const oldFolder = await waitForVisibleTarget(
     await exactFolderTreeItem(dialog, oldName),
     page,
     config,
@@ -287,7 +286,7 @@ async function prepareRenamedDestinationFolder(
   await confirm.click();
   await renameDialog.waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
 
-  const renamed = await waitForUniqueVisible(
+  const renamed = await waitForVisibleTarget(
     await exactFolderTreeItem(dialog, newName),
     page,
     config,
@@ -308,7 +307,7 @@ async function verifyCopiedLessonInDestination(page: Page, config: LamsConfig): 
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
   await traverseFolderPath(dialog, config.destinationFolderPath, page, config);
-  await waitForUniqueVisible(
+  await waitForVisibleTarget(
     await exactLessonTreeItem(dialog, config.lessonTitle),
     page,
     config,
@@ -326,7 +325,7 @@ async function verifyRenamedLessonInFolder(page: Page, config: LamsConfig): Prom
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
   await traverseFolderPath(dialog, config.sourceFolderPath, page, config);
-  await waitForUniqueVisible(
+  await waitForVisibleTarget(
     await exactLessonTreeItem(dialog, config.lessonTitle),
     page,
     config,
@@ -364,7 +363,7 @@ export async function traverseFolderPath(
 ): Promise<void> {
   for (const folderName of folderPath) {
     const folder = await exactFolderTreeItem(dialog, folderName);
-    const target = await waitForUniqueVisible(folder, page, config, `folder: ${folderName}`, false);
+    const target = await waitForVisibleTarget(folder, page, config, `folder: ${folderName}`, false);
     const expanded = await target.getAttribute('aria-expanded');
     if (expanded !== 'true') await target.click();
     await target.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });

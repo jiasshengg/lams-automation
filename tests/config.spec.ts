@@ -33,10 +33,10 @@ test('rejects attempts to override stable environment fields per run', () => {
   ).toThrow('cannot override stable environment fields');
 });
 
-test('rejects a local configuration outside the approved playground', async () => {
+test('accepts another configured course', async () => {
   await expect(
-    loadConfig('configs/example.json', { workspaceCourse: 'Another course' })
-  ).rejects.toThrow('must be exactly "DL Playground 2026/2027 [internal]"');
+    loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ workspaceCourse: 'Another course' })))
+  ).resolves.toMatchObject({ workspaceCourse: 'Another course' });
 });
 
 test('accepts an explicit request to create only the missing final destination folder', () => {

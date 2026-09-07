@@ -21,12 +21,6 @@ export async function openLams(page: Page, config: LamsConfig): Promise<void> {
   console.log(`Opened LAMS: ${page.url()}`);
 }
 
-export async function verifyWorkspaceCourse(page: Page, config: LamsConfig): Promise<void> {
-  const heading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
-  await waitForUniqueVisible(heading, page, config, 'workspaceCourse', true);
-  console.log(`Verified safe workspace: ${config.workspaceCourse}`);
-}
-
 export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Promise<void> {
   const heading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
   const toggle = page.getByRole('button', { name: 'Toggle course menu', exact: true });
@@ -34,24 +28,24 @@ export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Pro
   // The dashboard heading paints after domcontentloaded, so an instantaneous check can
   // miss an already-selected course and needlessly drive the course menu. Wait for the
   // menu toggle first, which ships in the same header and doubles as the manual-login
-  // gate, then give the heading a short grace period before deciding the approved
+  // gate, then give the heading a short grace period before deciding the configured
   // course still has to be selected.
-  const toggleTarget = await waitForUniqueVisible(toggle, page, config, 'course menu', true);
+  const toggleTarget = await waitForVisibleTarget(toggle, page, config, 'course menu', true);
   await heading.first().waitFor({ state: 'visible', timeout: HEADING_SETTLE_MS }).catch(() => undefined);
   if (await hasOneVisibleMatch(heading)) {
-    console.log(`Verified safe workspace: ${config.workspaceCourse}`);
+    console.log(`Opened configured course: ${config.workspaceCourse}`);
     return;
   }
 
   await toggleTarget.click();
 
   const search = page.getByRole('searchbox', { name: 'Search for courses', exact: true });
-  await (await waitForUniqueVisible(search, page, config, 'course search', false)).fill(config.workspaceCourse);
+  await (await waitForVisibleTarget(search, page, config, 'course search', false)).fill(config.workspaceCourse);
 
   // Each observed course entry is a <button> that overrides its implicit role with
   // role="listitem", so a button-role lookup alone never matches it. listitem takes no
   // name from its contents either, so that variant is matched on its exact label node.
-  // Only the configured safety-boundary course is eligible for selection here.
+  // Only the configured course is eligible for selection here.
   const course = page
     .getByRole('button', { name: config.workspaceCourse, exact: true })
     .or(
@@ -59,10 +53,10 @@ export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Pro
         .getByRole('listitem')
         .filter({ has: page.getByText(config.workspaceCourse, { exact: true }) })
     );
-  await (await waitForUniqueVisible(course, page, config, 'workspace course result', false)).click();
+  await (await waitForVisibleTarget(course, page, config, 'workspace course result', false)).click();
 
-  await waitForUniqueVisible(heading, page, config, 'workspaceCourse', false);
-  console.log(`Selected and verified safe workspace: ${config.workspaceCourse}`);
+  await waitForVisibleTarget(heading, page, config, 'workspaceCourse', false);
+  console.log(`Opened configured course: ${config.workspaceCourse}`);
 }
 
 export async function navigateToPreviousCohort(page: Page, config: LamsConfig): Promise<void> {
@@ -88,7 +82,7 @@ export async function clickConfigured(
 ): Promise<void> {
   if (!spec) throw await missingSelector(page, name);
   const locator = fromSpec(page, spec, config);
-  const target = await waitForUniqueVisible(locator, page, config, name, allowManualLogin);
+  const target = await waitForVisibleTarget(locator, page, config, name, allowManualLogin);
 
   const previousUrl = page.url();
   await target.click();
@@ -96,7 +90,7 @@ export async function clickConfigured(
   console.log(`Completed ${name}; URL ${previousUrl === page.url() ? 'unchanged' : `changed to ${page.url()}`}.`);
 }
 
-export async function waitForUniqueVisible(
+export async function waitForVisibleTarget(
   locator: Locator,
   page: Page,
   config: LamsConfig,
@@ -108,21 +102,17 @@ export async function waitForUniqueVisible(
     console.log(`Waiting up to ${Math.round(timeout / 1000)}s for "${name}". Log in manually if LAMS prompts you.`);
   }
   try {
-    await locator.first().waitFor({ state: 'visible', timeout });
+    await locator.filter({ visible: true }).first().waitFor({ state: 'visible', timeout });
   } catch (error) {
     const directory = await saveDiagnostics(page, `${name}-not-found`);
     throw new Error(`Could not find a visible "${name}" target. Diagnostics: ${directory}`, { cause: error });
   }
-  const visible: Locator[] = [];
+  // Repeated matching navigation controls use DOM order; missing controls still fail.
   for (let index = 0; index < (await locator.count()); index += 1) {
     const candidate = locator.nth(index);
-    if (await candidate.isVisible()) visible.push(candidate);
+    if (await candidate.isVisible()) return candidate;
   }
-  if (visible.length !== 1) {
-    const directory = await saveDiagnostics(page, `${name}-ambiguous`);
-    throw new Error(`Expected one visible "${name}" target, found ${visible.length}. Diagnostics: ${directory}`);
-  }
-  return visible[0]!;
+  throw new Error(`No visible "${name}" target remains.`);
 }
 
 async function assertNextTarget(
@@ -132,7 +122,7 @@ async function assertNextTarget(
   spec: LocatorSpec | undefined
 ): Promise<void> {
   if (!spec) throw await missingSelector(page, name);
-  await waitForUniqueVisible(fromSpec(page, spec, config), page, config, name, false);
+  await waitForVisibleTarget(fromSpec(page, spec, config), page, config, name, false);
   console.log(`Verified expected next target: ${name}.`);
 }
 

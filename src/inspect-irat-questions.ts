@@ -4,7 +4,7 @@ import { loadConfig, parseRequestOverrides } from './config.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { MAX_MARK_INPUT, QUESTION_EDITOR_IFRAME, QUESTION_TITLE, QUESTION_TYPE_BADGE, REQUIRED_TOGGLE } from './lams/irat-editor.js';
 
 /**
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, folderPath, lessonTitle, config);
 

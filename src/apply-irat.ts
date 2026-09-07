@@ -6,7 +6,7 @@ import { saveDiagnostics } from './lams/diagnostics.js';
 import { executeIratAutomation, requireIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 /**
  * Applies the structured iRAT request to a lesson that already exists in the approved
@@ -15,9 +15,7 @@ import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
  * It never copies, renames, publishes, starts, or restructures a lesson.
  */
 async function main(): Promise<void> {
-  if (!process.argv.includes('--commit')) {
-    throw new Error('apply:irat requires --commit and an exact per-run lesson, destination, and irat data.');
-  }
+  const commit = !process.argv.includes('--dry-run');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   const irat = requireIratRequest(config);
@@ -32,18 +30,22 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
 
     const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs);
-    const result = await executeIratAutomation(editor, irat, { commit: true });
+    const result = await executeIratAutomation(editor, irat, { commit });
 
+    if (!commit) {
+      console.log('iRAT preflight passed; no changes applied.');
+      return;
+    }
     console.log('\niRAT application: COMPLETE');
     console.log(`Lesson: ${config.lessonTitle}`);
     console.log(`Folder: ${config.destinationFolderPath.join(' > ')}`);
     console.log(`Questions updated (${result.updatedQuestions.length}): ${result.updatedQuestions.join(', ')}`);
-    console.log('Verified: playground, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
+    console.log('Verified: configured course, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'apply-irat-failure').catch(() => undefined);
     if (directory) console.error(`iRAT diagnostics: ${directory}`);

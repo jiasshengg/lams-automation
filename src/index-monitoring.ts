@@ -5,7 +5,7 @@ import { saveDiagnostics } from './lams/diagnostics.js';
 import { createLessonFromMostRecentDesign, openAddLesson } from './lams/lesson-index.js';
 import { openMonitoring } from './lams/monitoring.js';
 import { sendCodeToSheet } from './sheets/code-sink.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/example.json';
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
 
     if (monitorOnly) {
       const monitoring = await openMonitoring(page, config.lessonTitle, config);

@@ -1,7 +1,5 @@
+import { resolveInputFile } from './input-file.js';
 import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-
-export const APPROVED_WORKSPACE_COURSE = 'DL Playground 2026/2027 [internal]';
 
 export type RoleName =
   | 'button'
@@ -137,6 +135,7 @@ const requiredStrings = [
 ] as const;
 
 const requestOverrideKeys = [
+  'workspaceCourse',
   'previousCohort',
   'currentCohort',
   'module',
@@ -159,7 +158,7 @@ const requestOverrideKeys = [
 ] as const;
 
 export async function loadConfig(configPath: string, overrides: Partial<LamsConfig> = {}): Promise<LamsConfig> {
-  const absolutePath = path.resolve(configPath);
+  const absolutePath = await resolveInputFile(configPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
 
   if (!isRecord(parsed)) throw new Error('Configuration must be a JSON object.');
@@ -168,9 +167,6 @@ export async function loadConfig(configPath: string, overrides: Partial<LamsConf
     if (typeof merged[key] !== 'string' || merged[key].trim() === '') {
       throw new Error(`Configuration field "${key}" must be a non-empty string.`);
     }
-  }
-  if (merged.workspaceCourse !== APPROVED_WORKSPACE_COURSE) {
-    throw new Error(`Configuration field "workspaceCourse" must be exactly "${APPROVED_WORKSPACE_COURSE}".`);
   }
   for (const key of ['expectedAENodes', 'expectedAEGates'] as const) {
     if (!Number.isInteger(merged[key]) || Number(merged[key]) < 0) {

@@ -2,7 +2,7 @@ import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { loadConfig } from './config.js';
 import { findLessonId } from './lams/monitoring.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 /**
  * Opens LAMS in the persistent profile and prints every URL the browser visits, in any
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   // the browser is left open to click through manually rather than opening a guess.
   if (process.argv.includes('--monitor')) {
     try {
-      await verifyWorkspaceCourse(page, config);
+      await selectWorkspaceCourse(page, config);
       // --lesson opens a lesson other than the configured one, for observing a page
       // shape on whatever lessons the course actually has today.
       const title = readArgument('--lesson') ?? config.lessonTitle;

@@ -10,14 +10,14 @@ Pass a compact JSON object as one shell-quoted argument:
 npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
 ```
 
-The scripts merge these permitted request values in memory and derive `destinationFolder` from `destinationFolderPath` when omitted. They reject attempts to override stable `baseUrl`, `workspaceCourse`, browser settings, or selectors.
+The scripts merge these permitted request values in memory and derive `destinationFolder` from `destinationFolderPath` when omitted. They reject attempts to override stable `baseUrl`, browser settings, or selectors.
 
 ## Copy fields
 
 | Field | Meaning |
 |---|---|
 | `baseUrl` | Stable LAMS entry URL; keep in local configuration |
-| `workspaceCourse` | Stable safety boundary; must remain exactly `DL Playground 2026/2027 [internal]` |
+| `workspaceCourse` | Course to open; can be supplied per run with no fixed allowlist |
 | `sourceFolderPath` | Ordered folder names leading to the source lesson |
 | `sourceLessonTitle` | Exact existing lesson title |
 | `openSourceAsCopy` | Optional explicit instruction to use LAMS's **Open a copy** control for a read-only source |
@@ -117,6 +117,5 @@ Before running a committed copy or rename, reject the merged request when:
 - a source or destination path is empty;
 - the source lesson or destination is not exact;
 - the destination already contains the new title;
-- the workspace course differs from the approved playground.
 
 For a rename, also reject the operation when the same folder already contains the new title. After saving, verify that the new title exists and the old title is absent.

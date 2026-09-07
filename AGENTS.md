@@ -6,9 +6,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the ini
 
 ## LAMS safety boundary
 
-- Perform all development and live UI testing only inside the LAMS course **DL Playground 2026/2027 [internal]**.
-- Before any live LAMS action, verify that this exact course heading is visible.
-- Do not modify content in another course, cohort, folder, or production area.
+- Use the course requested by the user through `workspaceCourse`; there is no fixed playground allowlist. Select the configured course as part of navigation.
 - Treat navigation and DOM inspection as read-only.
 - Do not create, copy, rename, move, save, publish, delete, or restructure a lesson unless the user has supplied the exact source lesson, new title, and destination and has asked for that operation.
 - Never delete or automatically restructure authoring nodes.
@@ -21,7 +19,7 @@ Work incrementally.
 
 ### First box: lesson copy workflow
 
-1. Verify the playground course.
+1. Open the configured course.
 2. Open the global LAMS **Author** interface.
 3. Find the configured previous-academic-year TBL sequence in the Authoring library.
 4. Open the exact sequence.
@@ -48,7 +46,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Use CSS only as an evidence-backed fallback.
 - Do not guess LAMS-specific selectors. Inspect the real DOM first and record why a selector is stable.
 - Avoid positional selectors such as `nth-child` unless no stable alternative exists and the limitation is documented.
-- Require a unique visible match before clicking.
+- Shared navigation uses the first visible matching control in DOM order. Missing controls still stop the workflow. Content-specific lesson and graph checks remain in place.
 - Verify the resulting page, dialog, folder, title, or other expected state after every action.
 - Handle new tabs, popups, and iframes explicitly when observed.
 - If the UI structure is unknown, stop without mutation and capture diagnostics: screenshot, HTML, frame URLs, accessible controls, and relevant data attributes.
@@ -92,10 +90,12 @@ For a live headed run, use:
 npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
-This command is a dry run and must not save a copy. The final Save action requires both exact configured targets and the explicit `--commit` flag:
+This command is a dry run and must not save a copy. Write commands save by default for the requested operation; `--commit` remains accepted for compatibility. Use `--dry-run` to preview copy, rename, gate-fix, or iRAT work:
 
 ```bash
-npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 A live run is not considered successful merely because a click completed. Report which expected states were verified and where diagnostics were saved when it stops.
+
+Local input files may be supplied by filename or partial filename. Resolve DOCX and JSON inputs through `src/input-file.ts`; ask the user to choose a listed candidate when multiple files match. Do not require a full path when a name resolves uniquely.

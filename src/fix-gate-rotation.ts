@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const gateName = readArgument('--gate');
   const rotation = Number(readArgument('--rotation-seconds'));
-  const commit = process.argv.includes('--commit');
+  const commit = !process.argv.includes('--dry-run');
   if (!gateName || !Number.isInteger(rotation) || rotation <= 0) {
     throw new Error('Usage: fix:gate -- --config <path> --gate <exact gate name> --rotation-seconds <n> --request-json <json> [--commit]');
   }

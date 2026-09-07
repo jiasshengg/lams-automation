@@ -1,11 +1,11 @@
+import { resolveInputFile } from './input-file.js';
 import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import { buildAEPlan, formatAEPlanSummary } from './ae/plan.js';
 
 async function main(): Promise<void> {
   const inputPath = readArgument('--ae-json');
   if (!inputPath) throw new Error('Usage: npm run plan:ae -- --ae-json <path> [--json]');
-  const absolutePath = path.resolve(inputPath);
+  const absolutePath = await resolveInputFile(inputPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
   const plan = buildAEPlan(parsed);
   console.log(process.argv.includes('--json') ? JSON.stringify(plan, null, 2) : formatAEPlanSummary(plan));

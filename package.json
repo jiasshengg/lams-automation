@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
-    "milestone1": "tsx src/main.ts",
+    "milestone1": "tsx src/main.ts --dry-run",
     "copy:lesson": "tsx src/main.ts",
     "rename:lesson": "tsx src/rename-lesson.ts",
     "inspect:authoring": "tsx src/inspect-authoring.ts",

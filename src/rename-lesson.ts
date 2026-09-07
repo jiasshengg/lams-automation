@@ -8,7 +8,7 @@ import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
-  const commit = process.argv.includes('--commit');
+  const commit = !process.argv.includes('--dry-run');
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   if (config.baseUrl.includes('replace-with-your-lams-host.example')) {
     throw new Error(`Edit ${path.resolve(configPath)} and set the real LAMS baseUrl before running the rename flow.`);

@@ -1,3 +1,4 @@
+import { resolveInputFile } from './input-file.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { analyzeAESOT, extractSOTParagraphs, formatAESOTSummary, readDocumentXmlFromDocx } from './ae/sot-docx.js';
@@ -9,7 +10,7 @@ async function main(): Promise<void> {
   }
   if (process.argv.includes('--commit')) throw new Error('AE SOT extraction is read-only and does not accept --commit.');
 
-  const absoluteInput = path.resolve(inputPath);
+  const absoluteInput = await resolveInputFile(inputPath, '.docx');
   if (path.extname(absoluteInput).toLowerCase() !== '.docx') throw new Error('AE SOT input must be a .docx file.');
   const documentXml = readDocumentXmlFromDocx(await readFile(absoluteInput));
   const analysis = analyzeAESOT(extractSOTParagraphs(documentXml), path.basename(absoluteInput, path.extname(absoluteInput)));

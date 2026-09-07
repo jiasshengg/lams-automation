@@ -2,9 +2,9 @@
 
 ## Dry-run copy
 
-Run `npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_JSON>'` before every committed copy. It must verify:
+Run `npm run milestone1 -- --config configs/local.json --request-json '<REQUEST_JSON>'` for an optional copy preview. It must verify:
 
-- the exact `DL Playground 2026/2027 [internal]` heading;
+- the configured course heading;
 - every configured source folder;
 - the exact source lesson;
 - the Save As dialog;
@@ -15,11 +15,11 @@ For an explicitly requested missing final destination folder, the dry run instea
 
 For an explicitly requested final-folder rename, the dry run verifies the exact parent and old folder, confirms the new folder name is absent, and verifies Rename is enabled. It must not open or confirm the Rename dialog. For an explicitly identified read-only source, it may use **Open a copy** to obtain the unsaved writable authoring clone; this is not a saved library mutation.
 
-If any state is missing or non-unique, stop without mutation.
+If an expected state is missing, stop. Shared navigation uses the first visible match; content-specific checks still reject ambiguous lessons and nodes.
 
 ## Committed copy
 
-Run `npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` only after a successful dry run and an explicit user request to create the copy. Use the same request JSON for both commands. Report the exact new title and verified destination. Never publish or start the copied lesson.
+Run `npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'` when the user requests the copy. A separate dry run is optional. Report the exact new title and verified destination. Never publish or start the copied lesson.
 
 If the identical request includes `createDestinationFolder: true`, the committed run may create only the exact missing final segment. It must validate LAMS's observed native folder prompt, then reopen the full destination to verify both folder and copied lesson.
 
@@ -27,9 +27,9 @@ If the identical request includes `renameDestinationFolderFrom`, the committed r
 
 ## Existing-lesson rename
 
-Run `npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'` first. The dry run must verify the approved playground, exact folder path, exact current lesson, inline title textbox, confirmation control, and cancellation without changing or saving the lesson.
+For an optional preview, run `npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --dry-run`. The dry run must verify the configured course, exact folder path, exact current lesson, inline title textbox, confirmation control, and cancellation without changing or saving the lesson.
 
-Run the identical command with `--commit` only after a successful dry run and explicit authorization to rename/save the exact lesson. It updates the inline title, uses the normal Authoring Save control, then reopens the same folder and verifies that the new exact title exists and the old title is absent. It never moves, publishes, starts, or restructures the lesson.
+Omit `--dry-run` to perform the requested rename. It updates the inline title, uses the normal Authoring Save control, then reopens the same folder and verifies that the new exact title exists and the old title is absent. It never moves, publishes, starts, or restructures the lesson.
 
 ## Inspection and validation
 
@@ -58,7 +58,7 @@ It does not cover branching/merging topology or automatic correction.
 
 ## AE settings inspection
 
-`npm run inspect:ae -- --config configs/local.json --ae-json '<AE_JSON_PATH>' --node '<EXACT_AE_NODE_TITLE>' --request-json '<REQUEST_JSON>'` is read-only. It verifies the approved course, exact lesson, AE graph, and exact node before opening the activity and checking all required checkbox labels. It rejects `--commit` and never clicks the activity Save control.
+`npm run inspect:ae -- --config configs/local.json --ae-json '<AE_JSON_PATH>' --node '<EXACT_AE_NODE_TITLE>' --request-json '<REQUEST_JSON>'` is read-only. It verifies the configured course, exact lesson, AE graph, and exact node before opening the activity and checking all required checkbox labels. It rejects `--commit` and never clicks the activity Save control.
 
 An exit code of `2` means the browser inspection completed but the graph or activity settings did not match. A missing or ambiguous selector/control is an automation stop and must include diagnostics. Question content/version inspection and AE mutation remain unsupported until authenticated DOM evidence is captured.
 
@@ -68,9 +68,9 @@ An exit code of `2` means the browser inspection completed but the graph or acti
 
 ## Continuous copy and iRAT
 
-`npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit` keeps one Playwright context open for the full operation. It verifies the playground, copies the exact source lesson, updates the iRAT Gate, Team Setup association, multiple-choice questions and answer weights, mandatory flags, advanced settings, Print View, and saves the tool and copied design.
+`npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>'` keeps one Playwright context open for the full operation. It opens the configured course, copies the exact source lesson, updates the iRAT Gate, Team Setup association, multiple-choice questions and answer weights, mandatory flags, advanced settings, Print View, and saves the tool and copied design.
 
-The command refuses to run without `--commit`, exact copy targets, and the structured `irat` request. It stops on unsupported question/distribution types and saves diagnostics on failure. It never deletes, restructures, publishes, or starts a lesson.
+The command requires resolved copy targets and the structured `irat` request. It saves by default. `--dry-run` previews the copy and stops before iRAT editing. It stops on unsupported question/distribution types and saves diagnostics on failure. It never deletes, restructures, publishes, or starts a lesson.
 
 ## Failures
 

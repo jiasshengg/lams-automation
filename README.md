@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the safe playground course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: extract structural evidence from an AE Source-of-Truth `.docx`, validate reviewed AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not automatically import questions, edit question rows, restructure nodes, or save AE changes yet.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, opens LAMS Authoring, traverses configurable folder paths, copies exact source designs with Save As, and can rename an exact existing design in place. It also carries an incremental AE foundation: extract structural evidence from an AE Source-of-Truth `.docx`, validate reviewed AE data before opening LAMS, normalize question text and options into a deterministic execution plan, compare exact AE node/gate names and connections with the authoring graph, and inspect AE-level checkbox settings without saving. It does not automatically import questions, edit question rows, restructure nodes, or save AE changes yet.
 
 ## Agent skill
 
@@ -18,7 +18,7 @@ Courses > Cohort_2026Y1 > FOM, then validate the supplied linear flow with
 5 AE nodes and 4 AE gates.
 ```
 
-The agent passes changing lesson values directly to the scripts as per-run JSON, runs the safe dry run first, and calls the existing Playwright commands. It does not rewrite `configs/local.json` for every lesson. That ignored file holds stable local LAMS/browser settings and fallback defaults. The skill requires exact copy targets and explicit authorization before the committed Save action. Automatic Source-of-Truth parsing and automatic node correction remain out of scope.
+The agent passes changing lesson values directly to the scripts as per-run JSON and calls the existing Playwright commands. It does not rewrite `configs/local.json` for every lesson. That ignored file holds stable local LAMS/browser settings and fallback defaults. The skill requires exact copy targets and explicit authorization before the committed Save action. Automatic Source-of-Truth parsing and automatic node correction remain out of scope.
 
 ## Setup
 
@@ -38,13 +38,13 @@ npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolder
 
 The skill constructs this per-run JSON automatically from the user's prompt. The command opens and verifies the source lesson, Save As dialog, and requested destination, but does not save.
 
-After a successful dry run, reuse the identical request JSON and explicitly enable the final Save action with:
+Copy, rename, gate-fix, and iRAT commands save by default. Add `--dry-run` for an optional preview; `--commit` is accepted for compatibility. `milestone1` always previews. To save a copy:
 
 ```bash
-npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
-`--commit` refuses to run when the new title matches the source or still contains a placeholder such as `REPLACE`.
+Saving is refused when the new title matches the source or still contains a placeholder such as `REPLACE`.
 It also refuses to overwrite an existing destination title and reopens the destination after saving to verify the copy exists.
 
 When the user explicitly requests one missing final destination folder, add `"createDestinationFolder": true` and include that exact folder name as the final `destinationFolderPath` segment. The dry run verifies the parent is writable, the folder is absent, and the live New Folder control is enabled without opening or accepting its prompt. The committed run validates the exact native prompt, creates only that final folder, then verifies the folder and copied lesson by reopening the destination. It refuses an existing final folder or a read-only parent.
@@ -57,8 +57,8 @@ design; the committed run changes only that select, verifies nothing else about 
 moved, saves, and reopens the lesson to confirm the value persisted:
 
 ```bash
+npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>' --dry-run
 npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>'
-npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>' --commit
 ```
 
 It refuses a gate that is not an exact unique match or is not a dynamic-password gate, and
@@ -68,13 +68,13 @@ automation edits a gate, and only when explicitly asked; validation itself stays
 Dry-run an in-place rename of an already-duplicated lesson:
 
 ```bash
-npm run rename:lesson -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","DL Playground 2026/2027 [internal]","FOM"],"sourceLessonTitle":"FOM TBL06 old title","lessonTitle":"FOM TBL06 new title"}'
+npm run rename:lesson -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","DL Playground 2026/2027 [internal]","FOM"],"sourceLessonTitle":"FOM TBL06 old title","lessonTitle":"FOM TBL06 new title"}' --dry-run
 ```
 
-The dry run opens and cancels the inline title editor without changing the lesson. After it passes, reuse the identical request JSON and explicitly save the rename:
+The optional dry run opens and cancels the inline title editor without changing the lesson. Omit `--dry-run` to save the requested rename:
 
 ```bash
-npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 The committed rename saves in the same folder, then verifies the new exact title exists and the old one is absent. It does not move, publish, start, or restructure the lesson.
@@ -101,10 +101,10 @@ npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSO
 
 The request supplies a changing `irat` object with the exact gate, Team Setup, question content, answer correctness/weights, formatting, and advanced-setting expectations. The preflight opens the exact copied lesson, verifies one iRAT Gate and one iRAT node, proves the gate-to-iRAT transition and Team Setup association, and prints every planned change without writing to LAMS. Correct-answer weights must total 100 for each question; incorrect answers must have zero weight.
 
-Run the full copy → iRAT workflow only with exact per-run values and an explicit commit:
+Run the full copy → iRAT workflow only with exact per-run values and the requested structured iRAT data:
 
 ```bash
-npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>' --commit
+npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 The live adapter uses the observed authoring-canvas controls and the stable Assessment authoring IDs from the official LAMS v4.8 source. It updates the password gate, Team Setup association, configured multiple-choice questions as new versions, answer weights, mandatory state, advanced settings, Print View verification, the iRAT tool, and finally the design. It deliberately refuses non-multiple-choice questions and non-`all questions` distribution settings until an exact configuration model exists for those alternatives.
@@ -161,13 +161,13 @@ The preflight refuses invalid data and derives a deterministic plan that:
 - fixes all video-specified AE activity settings, with optional SoT overrides only for attempts and passing mark;
 - checks every gate against its adjacent AE nodes and following question number.
 
-To inspect one exact AE activity in the playground without saving, first add an evidence-backed `selectors.aeOpenActivity` to ignored `configs/local.json`. Then run:
+To inspect one exact AE activity in the configured course without saving, first add an evidence-backed `selectors.aeOpenActivity` to ignored `configs/local.json`. Then run:
 
 ```bash
 npm run inspect:ae -- --config configs/local.json --ae-json <AE_JSON> --node "<EXACT_AE_NODE_TITLE>" --request-json '<REQUEST_JSON>'
 ```
 
-The command verifies the exact playground heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
+The command verifies the configured course heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
 
 The next implementation gate is authenticated DOM evidence for the question table, rich-text editor, Advanced question settings, version selector, and final Save action. Do not add selectors for those controls from the video alone.
 
@@ -276,3 +276,16 @@ Once known, add `openLesson`, `openAuthoring`, `authoringRoot`, and `authoringNo
 ```
 
 The final block is only a schema example. Replace it with evidence from the DOM diagnostics.
+
+## Filename lookup
+
+`--sot-docx`, `--ae-json`, and `--config` accept paths, filenames, or case-insensitive parts of filenames:
+
+```bash
+npm run extract:ae-sot -- --sot-docx 'FOM TBL01'
+npm run plan:ae -- --ae-json 'ae-example'
+```
+
+Lookup searches the current project, Documents, Downloads, and Desktop recursively. Hidden and generated directories and symlink entries are skipped. Exact filenames take priority; multiple remaining matches are listed for selection. In conversation, choose a candidate by number or distinguishing name and the agent passes its resolved path. Outputs such as `--out` still use literal paths.
+
+The course is configurable through `workspaceCourse` in `--request-json`; there is no playground allowlist. Navigation still selects the configured course and verifies resulting states. The shared navigation helper uses the first visible matching control in DOM order. Content-specific lesson and graph checks remain. Learner-facing `lesson:index` retains its separate `--commit` requirement.

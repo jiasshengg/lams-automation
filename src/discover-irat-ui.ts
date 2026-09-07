@@ -4,7 +4,7 @@ import { loadConfig, type LamsConfig } from './config.js';
 import { inspectAuthoringGraph, openActivityProperties, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { traverseFolderPath } from './lams/lesson-copy.js';
-import { openLams, verifyWorkspaceCourse, waitForUniqueVisible } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse, waitForVisibleTarget } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await activePage.locator('#openButton').click();
     const dialog = activePage.getByRole('dialog', { name: 'Open design', exact: true });
@@ -34,8 +34,7 @@ async function main(): Promise<void> {
     }
     const lessonTitle = tblCandidates[0]!;
     const lesson = dialog.getByRole('treeitem').filter({ hasText: new RegExp(`^\\s*${escapeRegExp(lessonTitle)}\\s*$`) });
-    await waitForUniqueVisible(lesson, activePage, config, `representative lesson: ${lessonTitle}`, false);
-    await lesson.click();
+    await (await waitForVisibleTarget(lesson, activePage, config, `representative lesson: ${lessonTitle}`, false)).click();
     const openButton = dialog.locator('#ldStoreDialogOpenButton');
     if (!(await openButton.isEnabled())) throw new Error(`Open remained disabled for "${lessonTitle}".`);
     await openButton.click();

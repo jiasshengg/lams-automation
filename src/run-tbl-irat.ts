@@ -6,12 +6,10 @@ import { saveDiagnostics } from './lams/diagnostics.js';
 import { executeIratAutomation, requireIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
 import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
-  if (!process.argv.includes('--commit')) {
-    throw new Error('The continuous copy → iRAT workflow requires --commit and exact per-run source, title, destination, and irat data.');
-  }
+  const commit = !process.argv.includes('--dry-run');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   const irat = requireIratRequest(config);
@@ -25,17 +23,21 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openSourceLesson(activePage, config);
-    const copy = await copyLesson(activePage, config, { commit: true });
+    const copy = await copyLesson(activePage, config, { commit });
+    if (!commit) {
+      console.log('Copy dry run complete; iRAT changes were not applied.');
+      return;
+    }
     const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs);
-    const result = await executeIratAutomation(editor, irat, { commit: true });
+    const result = await executeIratAutomation(editor, irat, { commit });
     console.log('\nContinuous TBL workflow: COMPLETE');
     console.log(`Copied: ${copy.sourceTitle} → ${copy.newTitle}`);
     console.log(`Destination: ${copy.destinationFolderPath.join(' > ')}`);
     console.log(`iRAT questions updated: ${result.updatedQuestions.join(', ')}`);
-    console.log('Verified: playground, copy destination, iRAT graph readiness, Print View, and post-save gate state.');
+    console.log('Verified: configured course, copy destination, iRAT graph readiness, Print View, and post-save gate state.');
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'continuous-tbl-irat-failure').catch(() => undefined);
     if (directory) console.error(`Workflow diagnostics: ${directory}`);

@@ -1,3 +1,4 @@
+import { resolveInputFile } from './input-file.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
@@ -8,7 +9,7 @@ import { applyAEActivitySettings } from './lams/ae-settings.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { formatValidationReport, validateAEPlanGraph } from './lams/validation.js';
 
 async function main(): Promise<void> {
@@ -21,7 +22,7 @@ async function main(): Promise<void> {
   if (process.argv.includes('--commit')) throw new Error('inspect:ae is read-only and does not accept --commit');
 
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
-  const plan = buildAEPlan(JSON.parse(await readFile(path.resolve(aePath), 'utf8')) as unknown);
+  const plan = buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aePath, '.json'), 'utf8')) as unknown);
   if (!plan.nodes.some((node) => node.title === nodeTitle)) {
     throw new Error(`--node must exactly match one planned AE node; received "${nodeTitle}"`);
   }
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
   let activePage = page;
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
 

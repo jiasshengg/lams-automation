@@ -5,7 +5,7 @@ import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { prepareIratAutomation } from './lams/irat.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   if (process.argv.includes('--commit')) {
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
     const report = await prepareIratAutomation(activePage, config);

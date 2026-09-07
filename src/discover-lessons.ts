@@ -3,7 +3,7 @@ import { chromium } from '@playwright/test';
 import { loadConfig } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
-import { openLams, verifyWorkspaceCourse } from './lams/navigation.js';
+import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
@@ -18,7 +18,7 @@ async function main(): Promise<void> {
 
   try {
     await openLams(page, config);
-    await verifyWorkspaceCourse(page, config);
+    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await activePage.locator('#openButton').click();
     const dialog = activePage.getByRole('dialog', { name: 'Open design', exact: true });
