@@ -1,4 +1,4 @@
-import type { Frame, Locator, Page } from '@playwright/test';
+import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { AENodePlan, AEPlan, AEQuestionPlan } from '../ae/plan.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 import { applyAEActivitySettings } from './ae-settings.js';
@@ -43,6 +43,7 @@ export class LamsAEEditor {
 
   async writeNode(node: GraphNode, nodePlan: AENodePlan): Promise<AEWriteResult> {
     const activityFrame = await this.openActivityFrame(node.uiid, node.name);
+    await expandAuthoringSections(activityFrame, this.timeoutMs);
     const title = activityFrame.locator('#assessment\\.title');
     await title.waitFor({ state: 'visible', timeout: this.timeoutMs });
     await title.fill(nodePlan.title);
@@ -276,7 +277,7 @@ async function setCkEditor(frame: Frame, id: string, html: string): Promise<void
   }, { editorId: id, value: html });
 }
 
-async function resizeOptions(frame: Frame, expectedCount: number, timeoutMs: number): Promise<void> {
+export async function resizeOptions(frame: Frame, expectedCount: number, timeoutMs: number): Promise<void> {
   let count = await frame.locator('.single-option-table').count();
   while (count < expectedCount) {
     await frame.locator('a[onclick*="addOption"]').click();
@@ -284,10 +285,32 @@ async function resizeOptions(frame: Frame, expectedCount: number, timeoutMs: num
     await frame.locator('.single-option-table').nth(count - 1).waitFor({ state: 'visible', timeout: timeoutMs });
   }
   while (count > expectedCount) {
-    await frame.locator('.single-option-table').nth(count - 1).locator('.delete-button').evaluate((element: HTMLElement) => element.click());
-    count -= 1;
-    await frame.waitForFunction((value) => document.querySelectorAll('.single-option-table').length === value, count, { timeout: timeoutMs });
+    // qb-option.js removeOption() gates the deletion behind confirm(). Playwright
+    // auto-dismisses unhandled dialogs, which silently answered "no" and left the
+    // option in place, so the confirmation is accepted explicitly for each removal.
+    const page = frame.page();
+    const acceptDeletion = (dialog: Dialog) => { void dialog.accept(); };
+    page.on('dialog', acceptDeletion);
+    try {
+      await frame.locator('.single-option-table').nth(count - 1).locator('.delete-button').evaluate((element: HTMLElement) => element.click());
+      count -= 1;
+      await frame.waitForFunction((value) => document.querySelectorAll('.single-option-table').length === value, count, { timeout: timeoutMs });
+    } finally {
+      page.off('dialog', acceptDeletion);
+    }
   }
+}
+
+/**
+ * Attempts, passing mark, and several canonical toggles live inside accordion
+ * sections that load collapsed, where Playwright never sees them as visible.
+ * "Expand all" opens every section through the page's own Bootstrap instances.
+ */
+export async function expandAuthoringSections(frame: Frame, timeoutMs: number): Promise<void> {
+  const expandAll = frame.locator('#expandAllButton');
+  await expandAll.waitFor({ state: 'visible', timeout: timeoutMs });
+  await expandAll.click();
+  await frame.locator('#advancedCollapse').waitFor({ state: 'visible', timeout: timeoutMs });
 }
 
 async function setHiddenValue(locator: Locator, value: number): Promise<void> {
