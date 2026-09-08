@@ -14,7 +14,8 @@ export async function resolveInputFile(
   if (!value) throw new Error('Supply a filename, part of a filename, or a path.');
   const expanded = value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value;
   const direct = path.resolve(expanded);
-  const explicitPath = expanded.includes(path.sep);
+  // Windows accepts both separators; path.sep alone would misread "sot/plan.json" as a bare name.
+  const explicitPath = expanded.includes(path.sep) || expanded.includes('/');
   const matchesExtension = (name: string) => path.extname(name).toLowerCase() === extension.toLowerCase();
   if (explicitPath) {
     if (!matchesExtension(direct)) throw new Error(`Input must be a ${extension} file.`);
