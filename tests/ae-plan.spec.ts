@@ -167,3 +167,27 @@ test('rejects an AE gate that precedes the first AE node', () => {
 
   expect(() => buildAEPlan(input)).toThrow(/requires 1 AE gates; found 2|afterNodeTitle/i);
 });
+
+test('node description defaults to the node title', () => {
+  const plan = buildAEPlan(validInput());
+  expect(plan.nodes.map((node) => node.description)).toEqual(['AE Case 1', 'AE Case 2']);
+});
+
+test('honors an explicit node description and rejects an empty one', () => {
+  const input = validInput() as Record<string, unknown>;
+  const nodes = input.nodes as Array<Record<string, unknown>>;
+  nodes[0]!.description = 'Case 1: A Patient with Changing Antibiotic Exposure';
+  const plan = buildAEPlan(input);
+  expect(plan.nodes[0]!.description).toBe('Case 1: A Patient with Changing Antibiotic Exposure');
+  expect(plan.nodes[1]!.description).toBe('AE Case 2');
+
+  nodes[0]!.description = '   ';
+  expect(() => buildAEPlan(input)).toThrow('nodes[0].description');
+});
+
+test('marks MCQ questions for sequential answer letters and essays against it', () => {
+  const plan = buildAEPlan(validInput());
+  const questions = plan.nodes.flatMap((node) => node.questions);
+  expect(questions.map((question) => `${question.type}:${question.prefixSequentialLetters}`))
+    .toEqual(['mcq:true', 'essay:false', 'mcq:true']);
+});

@@ -12,6 +12,11 @@ import {
 } from './irat-editor.js';
 
 const QUESTION_MODAL = '#qb-question-authoring-modal';
+// Observed in the Assessment activity frame: the description is a CKEditor-backed
+// textarea, so it must be set through the editor instance rather than filled.
+const ACTIVITY_DESCRIPTION_EDITOR = 'assessment.instructions';
+// Observed in the question authoring modal's advanced settings for MCQ questions.
+const PREFIX_ANSWERS_TOGGLE = '#prefixAnswersWithLetters';
 
 export interface AEWriteResult {
   nodeTitle: string;
@@ -41,6 +46,7 @@ export class LamsAEEditor {
     const title = activityFrame.locator('#assessment\\.title');
     await title.waitFor({ state: 'visible', timeout: this.timeoutMs });
     await title.fill(nodePlan.title);
+    await setCkEditor(activityFrame, ACTIVITY_DESCRIPTION_EDITOR, `<p>${escapeHtml(nodePlan.description)}</p>`);
 
     const rows = activityFrame.locator('#referencesTable tbody tr');
     const existingCount = await rows.count();
@@ -152,6 +158,7 @@ export class LamsAEEditor {
     if (question.type === 'mcq') {
       await resizeOptions(frame, question.options.length, this.timeoutMs);
       await frame.locator('#multipleAnswersAllowed').selectOption('false');
+      await this.applyPrefixToggle(frame, question);
       for (let index = 0; index < question.options.length; index += 1) {
         const option = question.options[index]!;
         await setCkEditor(frame, `optionName${index}`, `<p>${escapeHtml(option.text)}</p>`);
@@ -163,6 +170,18 @@ export class LamsAEEditor {
     await save.waitFor({ state: 'visible', timeout: this.timeoutMs });
     await save.click();
     return uploaded.map((image) => image.url);
+  }
+
+  /** LAMS only exposes the answer-prefix toggle for multiple choice questions. */
+  private async applyPrefixToggle(frame: Frame, question: AEQuestionPlan): Promise<void> {
+    const toggle = frame.locator(PREFIX_ANSWERS_TOGGLE);
+    await toggle.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    await toggle.setChecked(question.prefixSequentialLetters);
+    if (await toggle.isChecked() !== question.prefixSequentialLetters) {
+      throw new Error(
+        `Question "${question.title}" answer-letter prefix did not remain ${question.prefixSequentialLetters ? 'enabled' : 'disabled'}.`
+      );
+    }
   }
 
   private async applyReferenceFields(activityFrame: Frame, question: AEQuestionPlan): Promise<void> {

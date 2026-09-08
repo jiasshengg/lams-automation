@@ -6,6 +6,7 @@
   "nodes": [
     {
       "title": "AE Case 1",
+      "description": "Case 1: optional; defaults to the node title when omitted",
       "questions": [
         {
           "number": 1,

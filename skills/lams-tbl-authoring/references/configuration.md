@@ -108,7 +108,7 @@ Pass the local path separately with `--ae-json`; do not merge AE question conten
 - `mcq` or `essay` question type, prompt text, and MCQ options with exactly one `correct: true`;
 - exact gate title, adjacent node titles, and the first question number after each gate.
 
-Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
+Each node also accepts an optional `description` (default: the node title), written to the Assessment activity's description on `apply:ae`. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
 
 `marks` defaults to 4. `attempts` defaults to 1 and `passingMark` to null; supply them only when the SoT explicitly overrides those defaults. `expectedTotalMarks` is optional but recommended.
 

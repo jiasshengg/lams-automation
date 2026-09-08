@@ -20,6 +20,7 @@ export interface AEQuestionInput {
 
 export interface AENodeInput {
   title: string;
+  description?: string;
   questions: AEQuestionInput[];
 }
 
@@ -138,7 +139,7 @@ export function buildAEPlan(value: unknown): AEPlan {
   let expectedQuestionNumber = 1;
   const nodes = input.nodes.map<AENodePlan>((node) => ({
     title: node.title,
-    description: node.title,
+    description: node.description ?? node.title,
     questions: node.questions.map((question) => {
       if (question.number !== expectedQuestionNumber) {
         throw new Error(
@@ -328,6 +329,8 @@ function parseInput(value: unknown): AEPlanInput {
   const nodes = value.nodes.map((node, nodeIndex): AENodeInput => {
     if (!isRecord(node)) throw new Error(`nodes[${nodeIndex}] must be an object`);
     const title = nonEmptyString(node.title, `nodes[${nodeIndex}].title`);
+    const description =
+      node.description === undefined ? undefined : nonEmptyString(node.description, `nodes[${nodeIndex}].description`);
     if (!Array.isArray(node.questions) || node.questions.length === 0) {
       throw new Error(`nodes[${nodeIndex}].questions must be a non-empty array`);
     }
@@ -365,7 +368,7 @@ function parseInput(value: unknown): AEPlanInput {
       }
       return parsedQuestion;
     });
-    return { title, questions };
+    return description === undefined ? { title, questions } : { title, description, questions };
   });
 
   const gates = value.gates.map((gate, index): AEGateInput => {
