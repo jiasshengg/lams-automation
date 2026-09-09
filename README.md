@@ -35,6 +35,18 @@ Setup replaces local dependencies using the lockfile, installs Chromium, preserv
 
 After the runtime checks pass, configure the real LAMS URL and course in `configs/local.json` and sign in separately. Runtime readiness is not login verification. Do not distribute `node_modules` or saved login profiles with the project.
 
+### Find a lesson without its exact title or folder
+
+Use read-only discovery with partial details:
+
+```bash
+npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"Your course name"}' --query 'FOM TBL06 2025'
+```
+
+The command selects the configured/requested course and searches the global Authoring library under `Courses`, including accessible folders outside that course. Every search term must occur in the lesson title or its folder path (case-insensitive). Omit `--query` to list all lessons, or use `--roots 'Exact folder A|Exact folder B'` to restrict the search to direct child folders under `Courses`. There is no hardcoded playground folder.
+
+Results contain the exact `sourceLessonTitle` and `sourceFolderPath` needed by later commands. The agent resolves these for the user; multiple plausible matches require a choice. Discovery never opens or changes a lesson. Traversal is limited to 1000 folder expansions by default; `--max-expansions` changes the limit. A limit, unknown tree state, or missing root produces an error and diagnostics rather than a misleading complete result.
+
 For individual operations, pass changing lesson values without editing the file:
 
 ```bash

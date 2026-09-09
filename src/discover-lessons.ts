@@ -1,13 +1,18 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { loadConfig } from './config.js';
+import { loadConfig, parseRequestOverrides } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
+import { discoverLessons } from './lams/lesson-discovery.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
-  const configPath = readArgument('--config') ?? 'configs/local.json';
-  const config = await loadConfig(configPath);
+  if (process.argv.includes('--commit')) throw new Error('discover:lessons is read-only and does not accept --commit.');
+  const config = await loadConfig(readArgument('--config') ?? 'configs/local.json', parseRequestOverrides(readArgument('--request-json')));
+  const maxExpansions = Number(readArgument('--max-expansions') ?? 1000);
+  if (!Number.isInteger(maxExpansions) || maxExpansions < 1) throw new Error('--max-expansions must be a positive integer.');
+  const roots = readArgument('--roots')?.split('|').map(root => root.trim()).filter(Boolean);
+  if (roots && !roots.length) throw new Error('--roots must contain at least one folder name.');
   const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
     headless: config.browser.headless,
     viewport: null
@@ -15,63 +20,26 @@ async function main(): Promise<void> {
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;
-
   try {
     await openLams(page, config);
     await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
-    await activePage.locator('#openButton').click();
-    const dialog = activePage.getByRole('dialog', { name: 'Open design', exact: true });
-    await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
-    const courses = dialog.getByRole('treeitem').filter({ hasText: /^\s*Courses\s*/ });
-    if ((await courses.count()) !== 1) throw new Error(`Expected one Courses folder; found ${await courses.count()}.`);
-    await courses.click();
-    await activePage.waitForTimeout(750);
-    const playground = dialog.getByRole('treeitem').filter({ hasText: /^\s*DL Playground 2026\/2027 \[internal\]\s*/ });
-    if ((await playground.count()) !== 1) throw new Error(`Expected one approved playground folder; found ${await playground.count()}.`);
-    await playground.click();
-    await activePage.waitForTimeout(750);
-    for (let expansion = 0; expansion < 100; expansion += 1) {
-      const items = dialog.getByRole('treeitem');
-      const metadata = await items.evaluateAll((elements) =>
-        elements.map((element) => ({
-          text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
-          level: element.querySelectorAll(':scope > .indent').length,
-          expanded: element.getAttribute('aria-expanded'),
-          folder: element.classList.contains('tree-parent')
-        }))
-      );
-      const playgroundIndex = metadata.findIndex((item) => item.text === config.workspaceCourse);
-      if (playgroundIndex < 0) throw new Error('Approved playground disappeared during discovery.');
-      const playgroundLevel = metadata[playgroundIndex]!.level;
-      let expandableIndex = -1;
-      for (let index = playgroundIndex + 1; index < metadata.length; index += 1) {
-        const item = metadata[index]!;
-        if (item.level <= playgroundLevel) break;
-        if (item.folder && item.expanded === 'false') {
-          expandableIndex = index;
-          break;
-        }
-      }
-      if (expandableIndex < 0) break;
-      await items.nth(expandableIndex).click();
-      await activePage.waitForTimeout(250);
-    }
-    const treeItems = await dialog.getByRole('treeitem').evaluateAll((elements) =>
-      elements.map((element) => ({
-        text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
-        expanded: element.getAttribute('aria-expanded'),
-        level: element.querySelectorAll(':scope > .indent').length,
-        id: element.id || null,
-        className: element.getAttribute('class')
-      }))
-    );
+    const candidates = await discoverLessons(activePage, {
+      ...(roots ? { roots } : {}),
+      query: readArgument('--query') ?? '',
+      maxExpansions,
+      timeoutMs: config.browser.actionTimeoutMs
+    });
+    console.log(`\nRead-only Authoring library discovery: ${candidates.length} matching lesson(s).`);
+    console.log('Scope: Courses' + (roots ? ` > ${roots.join(' | ')}` : ' (all accessible folders; may include other courses)'));
+    console.log(JSON.stringify({ complete: true, candidates }, null, 2));
+    console.log('No lesson was opened or changed. Resolve the intended candidate before a write; matches are not automatically selected.');
     const directory = await saveDiagnostics(activePage, 'lesson-library-discovery');
-    console.log('\nRead-only Authoring library discovery');
-    console.log(`Visible tree items: ${treeItems.length}`);
-    treeItems.forEach((item) => console.log(JSON.stringify(item)));
     console.log(`Diagnostics: ${directory}`);
-    console.log('No lesson was opened or changed.');
+  } catch (error) {
+    const directory = await saveDiagnostics(activePage, 'lesson-library-discovery-failure').catch(() => undefined);
+    if (directory) console.error(`Diagnostics: ${directory}`);
+    throw error;
   } finally {
     await context.close();
   }
@@ -79,10 +47,13 @@ async function main(): Promise<void> {
 
 function readArgument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : undefined;
+  if (index < 0) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value.`);
+  return value;
 }
 
 main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.stack ?? error.message : error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
   process.exitCode = 1;
 });

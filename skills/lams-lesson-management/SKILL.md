@@ -9,13 +9,23 @@ Read [shared operating rules](../lams-tbl-authoring/references/shared.md) and th
 
 Resolve the source lesson and folder, requested new title, and copy destination from the user's request and available evidence. An existing-lesson rename uses `sourceFolderPath`, `sourceLessonTitle`, and `lessonTitle` and stays in the same folder. Local filename lookup is separate from LAMS library folder resolution.
 
-If the lesson folder is unknown but the exact title and candidate top-level folders are known, use read-only discovery:
+If the exact lesson title or folder is unknown, use read-only discovery. Users may supply course, module, TBL number, and academic year rather than exact internal fields:
+
+```bash
+npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"<EXACT_COURSE>"}' --query 'FOM TBL06 2025'
+```
+
+This selects the requested course, opens the global Authoring library, and searches all accessible folders under `Courses`. It is not limited to that course's folder. Every whitespace-separated query term must occur somewhere in the combined title and folder path, case-insensitively. Do not invent a calendar year for an ambiguous “last year”; resolve it from context or ask. Omit `--query` to list all lessons. Optional `--roots '<ROOT_A>|<ROOT_B>'` limits traversal to exact direct child folders under `Courses`; these folder names need not equal the course name. `--max-expansions` defaults to 1000; hitting the limit fails rather than presenting partial results as complete.
+
+The output lists every matching candidate with `sourceLessonTitle` and `sourceFolderPath`. Resolve the intended candidate from the request and evidence; ask the user to choose when several plausible matches remain. Pass the resolved fields to the write command. Never choose the first match automatically or claim that discovery itself copies a lesson.
+
+The older exact-title locator remains available when the title and candidate roots are already known:
 
 ```bash
 npm run find:lesson -- --config configs/local.json --title '<EXACT_TITLE>' --roots '<ROOT_A>|<ROOT_B>'
 ```
 
-This discovery command uses the course in the configuration and does not accept per-run request overrides. It returns the first exact title found; do not treat that as proof of uniqueness across the whole library. Resolve the intended lesson before mutation.
+Unlike `discover:lessons`, `find:lesson` uses only the course in local configuration and returns the first exact title found. It does not prove uniqueness across the library.
 
 ```bash
 npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'

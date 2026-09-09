@@ -12,6 +12,10 @@ npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolder
 
 The scripts merge these permitted request values in memory and derive `destinationFolder` from `destinationFolderPath` when omitted. They reject attempts to override stable `baseUrl`, browser settings, or selectors.
 
+## Resolving lesson identity
+
+Users need not supply an exact source title or folder if they can be resolved from library evidence. `npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"<COURSE>"}' --query 'FOM TBL06 2025'` searches title and folder-path terms across accessible folders under `Courses`. Optional `--roots 'Folder A|Folder B'` narrows the search to exact direct child folders under `Courses`. The selected course does not itself restrict the global library scope. Use the returned candidate's exact title/path in the mutation request; ask for a choice when ambiguous. No automatic first-match selection occurs.
+
 ## Copy fields
 
 | Field | Meaning |
