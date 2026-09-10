@@ -42,7 +42,8 @@ async function main(): Promise<void> {
       console.log(`Missing AE gates: ${graphPlan.missingGateTitles.join(', ') || 'none'}`);
       console.log(`Missing transitions: ${graphPlan.missingTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
       console.log(`Gate-bypass transitions: ${graphPlan.bypassTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
-      if (!graphPlan.ready) throw new Error(`AE graph is not ready: ${graphPlan.invalidGates.join('; ') || 'gate-bypass transitions exist'}`);
+      console.log(`Gates requiring replacement: ${graphPlan.gatesToReplace.join(', ') || 'none'}`);
+      if (graphPlan.invalidGates.length > 0) throw new Error(`AE graph has unsupported gate conflicts: ${graphPlan.invalidGates.join('; ')}`);
       return;
     }
     const images = await resolveAEQuestionImages(plan);
@@ -53,6 +54,8 @@ async function main(): Promise<void> {
     console.log(`Nodes written: ${result.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);
     console.log(`Nodes created: ${result.createdNodes.join(', ') || 'none'}`);
     console.log(`Gates created: ${result.createdGates.join(', ') || 'none'}`);
+    console.log(`Gates replaced: ${result.replacedGates.join(', ') || 'none'}`);
+    console.log(`Transitions removed: ${result.removedTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
     console.log(`Transitions created: ${result.createdTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
     console.log(`Questions created/updated: ${result.writtenNodes.reduce((sum, node) => sum + node.createdQuestions.length + node.updatedQuestions.length, 0)}`);
     console.log(`Images imported: ${result.writtenNodes.reduce((sum, node) => sum + node.importedImages, 0)}`);

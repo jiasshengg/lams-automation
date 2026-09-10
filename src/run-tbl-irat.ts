@@ -63,6 +63,8 @@ async function main(): Promise<void> {
     if (aeResult) {
       console.log(`AE nodes written: ${aeResult.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);
       console.log(`AE nodes/gates created: ${aeResult.createdNodes.length}/${aeResult.createdGates.length}`);
+      console.log(`AE gates replaced: ${aeResult.replacedGates.join(', ') || 'none'}`);
+      console.log(`AE transitions removed: ${aeResult.removedTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
       console.log(`AE images imported: ${aeResult.writtenNodes.reduce((sum, node) => sum + node.importedImages, 0)}`);
     }
     console.log(

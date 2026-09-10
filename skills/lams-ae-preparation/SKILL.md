@@ -1,6 +1,6 @@
 ---
 name: lams-ae-preparation
-description: Extract AE Source-of-Truth structure and images, preflight reviewed AE JSON, inspect AE settings, or write/reconcile AE Assessment activities. Use for AE planning, media extraction, content writing, and append-only graph additions. Does not delete questions/nodes or remove/rewire transitions.
+description: Extract AE Source-of-Truth structure and images, preflight reviewed AE JSON, inspect AE settings, or write/reconcile AE Assessment activities. Use for AE planning, media extraction, content writing, and verified graph repair. Does not delete questions or arbitrary unrelated nodes.
 ---
 
 # AE preparation and inspection
@@ -23,6 +23,6 @@ For preflight or writing, prepare reviewed structured JSON using [AE configurati
 
 Inspection requires `destinationFolderPath`, `lessonTitle`, and an exact AE node title. It checks the graph and required checkbox settings and never saves; exit code 2 means an expectation mismatch. Do not guess missing UI selectors: inspect diagnostics and the current adapter. All three commands are read-only in LAMS; extraction can write a local report with `--out`. Inspection and extraction reject `--commit`.
 
-`apply:ae` saves by default; `--dry-run` reports missing AE nodes, gates, transitions, and gate-bypass edges without mutation. A committed run writes every reviewed AE question, creates missing questions, imports images into CKEditor, applies canonical settings, associates Team Setup, creates missing Assessment/gate nodes, adds missing reviewed linear connections, saves, and verifies. It refuses extra questions requiring deletion and direct transitions requiring removal/rewiring.
+`apply:ae` saves by default; `--dry-run` reports missing AE nodes, gates, transitions, gate-bypass edges, and planned gates requiring replacement without mutation. A committed run writes every reviewed AE question, creates missing questions, imports images into CKEditor, applies canonical settings, associates Team Setup, creates missing Assessment/gate nodes, removes exact gate-bypass transitions, replaces exact misconfigured planned gates, adds the reviewed linear connections, saves, and verifies. It still refuses extra questions requiring deletion and ambiguous/non-gate title conflicts.
 
 Report exact nodes/questions/images written, graph additions, verified results, and diagnostics. Route independent topology checks to [authoring validation](../lams-authoring-validation/SKILL.md).

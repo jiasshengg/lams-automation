@@ -6,10 +6,10 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
 
 ## LAMS safety boundary
 
-- Use the course requested by the user through `workspaceCourse`; there is no fixed playground allowlist. Select the configured course as part of navigation.
+- Find, open, and verify the course specified by `workspaceCourse` before opening the Author interface.
 - Treat navigation and DOM inspection as read-only.
-- Perform lesson changes only when requested. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
-- Never delete or automatically restructure authoring nodes.
+- When a lesson is in scope for a requested workflow, automatically fix any supported, verified issues found within that lesson; the user does not need to request the fixes separately. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
+- Automatically remove exact gate-bypass transitions and replace exact planned AE gates whose verified type/settings are wrong. Delete or rewire only elements that the reviewed plan proves must change; never infer that unrelated nodes are extra.
 - Never publish or start a copied lesson as a learner-facing lesson unless explicitly requested.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.
 
@@ -37,7 +37,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Validate required nodes, counts, connections, Team Setup associations, and gate names.
 - Extract embedded DOCX images with question associations and import them through the observed CKEditor upload endpoint.
 - Write reviewed AE MCQ/essay questions and canonical activity settings.
-- Reconcile missing AE Assessment nodes, permission gates, Team Setup associations, and reviewed linear transitions without deleting or rewiring existing graph elements.
+- Reconcile missing AE Assessment nodes, permission gates, Team Setup associations, and reviewed linear transitions; remove exact gate-bypass transitions and replace exact misconfigured planned AE gates when verified.
 - Extend the vendor-neutral skill only with behavior already supported by the reusable automation.
 
 ## Browser automation rules
@@ -78,7 +78,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - `src/lams/authoring.ts`: Authoring-page inspection and node extraction.
 - `src/lams/validation.ts`: later validation rules and reporting.
 - `src/lams/ae-editor.ts`: AE Assessment question/settings mutation.
-- `src/lams/ae-graph.ts`: append-only AE node/gate/transition reconciliation.
+- `src/lams/ae-graph.ts`: verified AE node/gate/transition reconciliation and targeted graph repair.
 - `src/docx/`: DOCX archive, embedded-media, and question-assignment handling.
 - `src/lams/diagnostics.ts`: non-mutating DOM and screenshot evidence.
 - `skills/lams-tbl-authoring/`: overall workflow skill and shared operational references.

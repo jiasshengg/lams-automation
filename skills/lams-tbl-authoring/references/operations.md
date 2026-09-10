@@ -68,7 +68,7 @@ An exit code of `2` means the browser inspection completed but the graph or acti
 
 Set `sourceDocx` in reviewed iRAT or AE input to import all images assigned to each question. The live adapter uploads each image to the active Assessment content folder, inserts the returned same-origin URL into CKEditor, and verifies iRAT images in Print View. Per-question `images` can add explicit local image files.
 
-## AE writing and append-only reconciliation
+## AE writing and verified graph reconciliation
 
 `npm run apply:ae -- --config configs/local.json --ae-json '<AE_JSON>' --request-json '<REQUEST_JSON>'` writes an existing lesson. `--dry-run` reports the graph diff without saving. A committed run:
 
@@ -81,7 +81,7 @@ Set `sourceDocx` in reviewed iRAT or AE input to import all images assigned to e
 - adds missing transitions in the reviewed linear AE flow;
 - saves and verifies the resulting graph.
 
-The reconciler does not delete extra questions/nodes or remove/rewire transitions. It stops when an existing direct transition would bypass a planned gate.
+The reconciler removes an exact direct transition that bypasses a planned gate, replaces an exact planned gate whose verified type/settings are wrong, and then creates the reviewed linear transitions. It does not delete extra questions, infer that unrelated nodes are extra, or resolve ambiguous/non-gate title conflicts destructively.
 
 ## iRAT preflight
 
@@ -93,7 +93,7 @@ The reconciler does not delete extra questions/nodes or remove/rewire transition
 
 The command requires resolved copy targets and the structured `irat` request. It saves by default. `--dry-run` previews the copy and stops before iRAT editing. It stops on unsupported question/distribution types and saves diagnostics on failure. It never deletes, restructures, publishes, or starts a lesson.
 
-Pass `--ae-json '<AE_JSON>'` or use the `run:tbl` alias to continue in the same browser context through AE writing and append-only graph reconciliation after iRAT is saved.
+Pass `--ae-json '<AE_JSON>'` or use the `run:tbl` alias to continue in the same browser context through AE writing and verified graph reconciliation after iRAT is saved.
 
 ## Failures
 

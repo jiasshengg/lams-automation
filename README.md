@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, copies or renames exact designs, writes iRAT and AE Assessment questions, imports embedded DOCX images into CKEditor, applies activity settings and Team Setup associations, and reconciles missing AE Assessment nodes, permission gates, and reviewed linear transitions. It validates the resulting authoring graph and keeps learner publishing separate. Graph reconciliation is append-only: it does not delete questions/nodes or remove/rewire transitions.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, copies or renames exact designs, writes iRAT and AE Assessment questions, imports embedded DOCX images into CKEditor, applies activity settings and Team Setup associations, and reconciles AE Assessment nodes, permission gates, and reviewed linear transitions. It can remove an exact transition that bypasses a planned gate and replace an exact planned gate with verified incorrect settings. It does not infer that unrelated nodes are extra, delete arbitrary nodes/questions, or publish learner lessons.
 
 ## Agent skills
 
@@ -17,7 +17,7 @@ Use `lams-tbl-authoring` for the overall supported authoring flow. Focused skill
 
 Canonical instructions live under `skills/`. Thin adapters under `.agents/skills/` and `.claude/skills/` expose every skill to Codex and Claude Code. Invoke `$lams-irat-editing` in Codex or `/lams-irat-editing` in Claude Code, for example, or describe the matching task naturally.
 
-Examples: “Copy this TBL and configure its iRAT” uses the overall skill; “Set the iRAT Gate rotation to 10 seconds” uses gate settings; “Check why Team Setup is wrong” uses graph validation. “Correct question 3” routes to iRAT editing, whose current bulk adapter still requires complete current data and a compatible write scope. AE reconciliation can add missing reviewed nodes/gates/transitions, but it does not delete or rewire existing graph elements.
+Examples: “Copy this TBL and configure its iRAT” uses the overall skill; “Set the iRAT Gate rotation to 10 seconds” uses gate settings; “Check why Team Setup is wrong” uses graph validation. “Correct question 3” routes to iRAT editing, whose current bulk adapter still requires complete current data and a compatible write scope. AE reconciliation adds missing reviewed nodes/gates/transitions, removes exact gate-bypass transitions, and replaces exact misconfigured planned gates.
 
 All skills use [shared operating rules](skills/lams-tbl-authoring/references/shared.md). Changing request data stays in `--request-json`; local input files accept filenames and partial names. Saving remains the default for supported authoring write commands, with optional `--dry-run`. An overall authoring request does not implicitly publish the lesson.
 

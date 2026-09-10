@@ -1,6 +1,6 @@
 ---
 name: lams-tbl-authoring
-description: Orchestrate LAMS TBL authoring across lesson copying, iRAT and AE writing, SOT image import, append-only AE graph reconciliation, and validation. Use for an overall or multi-stage TBL authoring request. For one targeted operation, route to the matching focused skill. Does not publish learner lessons or delete/rewire nodes.
+description: Orchestrate LAMS TBL authoring across lesson copying, iRAT and AE writing, SOT image import, verified AE graph reconciliation, and validation. Use for an overall or multi-stage TBL authoring request. For one targeted operation, route to the matching focused skill. Does not publish learner lessons or delete arbitrary nodes.
 ---
 
 # Overall TBL authoring workflow
@@ -38,8 +38,8 @@ Read the relevant focused instructions directly; routing does not require a new 
    npm run run:tbl -- --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
    ```
 
-   The AE stage writes existing exact Assessment nodes and adds missing AE Assessment nodes, permission gates, and reviewed linear transitions. It does not delete questions/nodes or remove/rewire transitions. A direct transition that bypasses a planned gate stops the run and is reported.
+   The AE stage writes existing exact Assessment nodes, adds missing AE Assessment nodes, permission gates, and reviewed linear transitions, removes exact direct transitions that bypass planned gates, and replaces exact planned gates whose verified type/settings are wrong. It does not delete questions or infer that unrelated nodes are extra.
 6. Inspect or validate the resulting authoring graph when required for the requested outcome, using expectations from the source/request rather than inventing values to match the observed graph.
 6. Report completed stages, verified results, remaining mismatches, and any partial saved state.
 
-The supported overall flow is authoring, not automatic completion of every TBL activity. AE writing and append-only graph reconciliation are implemented; deletion and rewiring are not. Learner publishing is a separate explicit operation. See [operation details](references/operations.md) when needed.
+The supported overall flow is authoring, not automatic completion of every TBL activity. AE writing and targeted verified graph repair are implemented. Arbitrary node deletion or rewiring outside the reviewed AE plan is not. Learner publishing is a separate explicit operation. See [operation details](references/operations.md) when needed.
