@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { chromium } from '@playwright/test';
 import { buildAEPlan } from './ae/plan.js';
-import { loadConfig, parseRequestOverrides } from './config.js';
+import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { resolveAEQuestionImages } from './docx/question-images.js';
 import { resolveInputFile } from './input-file.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
@@ -23,10 +23,7 @@ async function main(): Promise<void> {
   );
   const plan = buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown);
   const teamSetup = readArgument('--team-setup') ?? config.irat?.teamSetupName ?? 'Team Setup';
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
-    headless: config.browser.headless,
-    viewport: null
-  });
+  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? await context.newPage();
   let activePage = page;

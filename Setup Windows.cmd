@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 where powershell.exe >nul 2>nul
 if errorlevel 1 goto missing_powershell
-powershell.exe -NoLogo -NoProfile -File "%~dp0scripts\setup\bootstrap-windows.ps1"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup\bootstrap-windows.ps1"
 set "setup_result=%errorlevel%"
 pause
 exit /b %setup_result%

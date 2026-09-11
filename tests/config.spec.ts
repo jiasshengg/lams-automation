@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { LamsConfig } from '../src/config.js';
-import { DEFAULT_LAMS_BASE_URL, interpolate, loadConfig, parseRequestOverrides } from '../src/config.js';
+import { browserLaunchOptions, DEFAULT_LAMS_BASE_URL, interpolate, loadConfig, parseRequestOverrides } from '../src/config.js';
 
 test('interpolates lesson-specific selector values from configuration', () => {
   const config = {
@@ -165,4 +165,24 @@ test('copy does not interpret a missing folder-operation target as the source', 
     .rejects.toThrow('requires an explicit destinationFolderPath');
   await expect(loadConfig('configs/example.json', { destinationFolderPath: [] }, { defaultDestinationToSource: true }))
     .rejects.toThrow(/destinationFolder/);
+});
+
+test('drives an installed system browser only when browser.channel is configured', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-config-channel-'));
+  try {
+    const configPath = path.join(directory, 'config.json');
+    const example = JSON.parse(await readFile('configs/example.json', 'utf8')) as { browser: Record<string, unknown> };
+    const bundled = await loadConfig('configs/example.json');
+    expect(bundled.browser.channel).toBeUndefined();
+    expect(browserLaunchOptions(bundled)).toEqual({ headless: false, viewport: null });
+
+    example.browser.channel = 'chrome';
+    await writeFile(configPath, JSON.stringify(example), 'utf8');
+    const system = await loadConfig(configPath);
+    expect(system.browser.channel).toBe('chrome');
+    expect(browserLaunchOptions(system)).toEqual({ headless: false, viewport: null, channel: 'chrome' });
+    expect(browserLaunchOptions(system, { headless: true }).headless).toBe(true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

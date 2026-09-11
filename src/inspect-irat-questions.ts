@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { loadConfig, parseRequestOverrides } from './config.js';
+import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
@@ -23,10 +23,7 @@ async function main(): Promise<void> {
   const lessonTitle = source ? config.sourceLessonTitle : config.lessonTitle;
   const activityName = readArgument('--node') ?? 'iRAT';
 
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
-    headless: config.browser.headless,
-    viewport: null
-  });
+  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;

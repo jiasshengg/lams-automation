@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { loadConfig } from './config.js';
+import { browserLaunchOptions, loadConfig } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
@@ -26,10 +26,7 @@ async function main(): Promise<void> {
   if (roots.length === 0) throw new Error('find:lesson requires --roots as a "|"-separated list of top-level folder names.');
 
   const config = await loadConfig(configPath);
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
-    headless: config.browser.headless,
-    viewport: null
-  });
+  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;

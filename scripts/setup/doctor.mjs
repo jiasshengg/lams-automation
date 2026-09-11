@@ -27,7 +27,7 @@ export function doctor() {
     ['esbuild native executable', () => ['--input-type=module', '-e', "import { transformSync } from 'esbuild'; const result = transformSync('const n: number = 1', { loader: 'ts' }); if (!result.code) process.exit(1);"], 'Run npm run setup to reinstall local dependencies. If macOS still blocks a fresh download, ask IT to inspect it; do not disable Gatekeeper or remove quarantine automatically.'],
     ['TypeScript runtime (tsx)', () => [require.resolve('tsx/cli'), '--no-cache', '-e', 'const value: number = 7; if (value !== 7) process.exit(1);'], 'Run npm run setup. A build-only check cannot prove tsx works.'],
     ['TypeScript build', () => [require.resolve('typescript/bin/tsc'), '--noEmit'], 'Check the error above. Reinstall missing dependencies with npm run setup; report source errors to the maintainer.'],
-    ['Headed Chromium launch', () => [fileURLToPath(new URL('./browser-check.mjs', import.meta.url))], 'Run npm run install:browsers and retry from a local desktop session. Ask IT about blocked downloads or executables.']
+    ['Headed browser launch', () => [fileURLToPath(new URL('./browser-check.mjs', import.meta.url))], 'Run npm run install:browsers and retry from a local desktop session. If Playwright does not support this OS version, rerun npm run setup so it records an installed Chrome/Edge as browser.channel in configs/local.json. Ask IT about blocked downloads or executables.']
   ];
   let passed = true;
   for (const [label, args, hint] of checks) {

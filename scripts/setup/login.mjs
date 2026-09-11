@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { root } from './doctor.mjs';
+import { readBrowserChannel } from './local-config.mjs';
 
 export const DEFAULT_LAMS_BASE_URL = 'https://ilams.lamsinternational.com/lams/index.do';
 const MINIMUM_SETUP_LOGIN_TIMEOUT_MS = 5 * 60_000;
@@ -28,12 +29,12 @@ export async function readLoginSettings(configPath = path.join(root, 'configs/lo
     ? Math.max(configuredTimeout, MINIMUM_SETUP_LOGIN_TIMEOUT_MS)
     : MINIMUM_SETUP_LOGIN_TIMEOUT_MS;
 
-  return { baseUrl, userDataDir: path.resolve(root, userDataDir), timeoutMs };
+  return { baseUrl, userDataDir: path.resolve(root, userDataDir), timeoutMs, channel: readBrowserChannel(configPath) };
 }
 
 export async function openLamsSignIn() {
   const settings = await readLoginSettings();
-  const context = await chromium.launchPersistentContext(settings.userDataDir, { headless: false });
+  const context = await chromium.launchPersistentContext(settings.userDataDir, { headless: false, ...(settings.channel ? { channel: settings.channel } : {}) });
   try {
     const page = context.pages()[0] ?? await context.newPage();
     await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });

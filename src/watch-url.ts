@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
-import { loadConfig } from './config.js';
+import { browserLaunchOptions, loadConfig } from './config.js';
 import { findLessonId } from './lams/monitoring.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
@@ -12,10 +12,7 @@ import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath);
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
-    headless: false,
-    viewport: null
-  });
+  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config, { headless: false }));
 
   const seen = new Set<string>();
   const report = (url: string, label: string) => {

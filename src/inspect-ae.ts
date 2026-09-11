@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { buildAEPlan } from './ae/plan.js';
-import { loadConfig, parseRequestOverrides } from './config.js';
+import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { openExactAEActivity } from './lams/ae.js';
 import { applyAEActivitySettings } from './lams/ae-settings.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
@@ -27,10 +27,7 @@ async function main(): Promise<void> {
     throw new Error(`--node must exactly match one planned AE node; received "${nodeTitle}"`);
   }
 
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), {
-    headless: config.browser.headless,
-    viewport: null
-  });
+  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;

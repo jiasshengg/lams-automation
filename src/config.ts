@@ -122,6 +122,11 @@ export interface LamsConfig {
     manualLoginTimeoutMs: number;
     actionTimeoutMs: number;
     readyTimeoutMs: number;
+    /**
+     * Playwright browser channel such as "chrome" or "msedge". Setup records it when the
+     * bundled Chromium is unsupported on this OS, so an installed browser is driven instead.
+     */
+    channel?: string;
   };
   selectors: {
     previousCohort?: LocatorSpec;
@@ -249,11 +254,24 @@ export async function loadConfig(
     actionTimeoutMs: config.browser?.actionTimeoutMs ?? 15_000,
     // LAMS initialises the authoring canvas well after the toolbar paints, so surface
     // readiness needs a longer budget than an ordinary action.
-    readyTimeoutMs: config.browser?.readyTimeoutMs ?? 60_000
+    readyTimeoutMs: config.browser?.readyTimeoutMs ?? 60_000,
+    ...(config.browser?.channel ? { channel: config.browser.channel } : {})
   };
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);
   return config;
+}
+
+/**
+ * Launch options shared by every persistent-profile entry point. `channel` is only
+ * present when configured so Playwright otherwise keeps using its bundled Chromium.
+ */
+export function browserLaunchOptions(config: LamsConfig, overrides: { headless?: boolean } = {}) {
+  return {
+    headless: overrides.headless ?? config.browser.headless,
+    viewport: null,
+    ...(config.browser.channel ? { channel: config.browser.channel } : {})
+  };
 }
 
 function validateIratRequest(value: unknown): void {

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runCheck, root } from './doctor.mjs';
 import { DEFAULT_LAMS_BASE_URL, readLoginSettings } from './login.mjs';
+import { SYSTEM_BROWSER_CHANNELS, readBrowserChannel, writeBrowserChannel } from './local-config.mjs';
 
 test('runtime probes fail on nonzero exit and killed processes', () => {
   assert.equal(runCheck('failure fixture', ['-e', 'process.exit(3)'], 'fixture'), false);
@@ -63,4 +64,43 @@ test('clean setup defers loading Playwright until after dependencies are install
   const setup = readFileSync(path.join(root, 'scripts/setup/setup.mjs'), 'utf8');
   assert.match(setup, /await import\('\.\/login\.mjs'\)/);
   assert.doesNotMatch(setup, /^import .*login\.mjs/m);
+});
+
+test('system browser channel is read from and written to local config without disturbing other settings', () => {
+  const temporary = mkdtempSync(path.join(os.tmpdir(), 'lams-channel-config-'));
+  try {
+    const configPath = path.join(temporary, 'local.json');
+    assert.equal(readBrowserChannel(configPath), undefined, 'missing config means bundled Chromium');
+    writeFileSync(configPath, '{"baseUrl":"https://example.test/lams","browser":{"headless":false,"channel":""}}');
+    assert.equal(readBrowserChannel(configPath), undefined, 'blank channel means bundled Chromium');
+    writeBrowserChannel('chrome', configPath);
+    assert.equal(readBrowserChannel(configPath), 'chrome');
+    const saved = JSON.parse(readFileSync(configPath, 'utf8'));
+    assert.equal(saved.baseUrl, 'https://example.test/lams');
+    assert.equal(saved.browser.headless, false);
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+});
+
+test('login setup passes the configured system browser channel through', async () => {
+  const temporary = mkdtempSync(path.join(os.tmpdir(), 'lams-login-channel-'));
+  try {
+    const configPath = path.join(temporary, 'local.json');
+    writeFileSync(configPath, '{"browser":{"channel":"msedge"}}');
+    assert.equal((await readLoginSettings(configPath)).channel, 'msedge');
+    writeFileSync(configPath, '{}');
+    assert.equal((await readLoginSettings(configPath)).channel, undefined);
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+});
+
+test('setup falls back to an installed system browser when the bundled Chromium is unsupported', () => {
+  const setup = readFileSync(path.join(root, 'scripts/setup/setup.mjs'), 'utf8');
+  assert.match(setup, /SYSTEM_BROWSER_CHANNELS/);
+  assert.match(setup, /writeBrowserChannel/);
+  assert.doesNotMatch(setup, /^import .*login\.mjs/m);
+  assert.deepEqual(SYSTEM_BROWSER_CHANNELS, ['chrome', 'msedge']);
+});
+
+test('Windows launcher runs the bootstrap with a process-scoped execution policy', () => {
+  const windowsLauncher = readFileSync(path.join(root, 'Setup Windows.cmd'), 'utf8');
+  assert.match(windowsLauncher, /-ExecutionPolicy Bypass/);
 });
