@@ -69,9 +69,54 @@ test('selects a course result that overrides its button role with listitem', asy
   await expect(page.getByRole('heading', { name: workspaceCourse })).toBeVisible();
 });
 
-function config(): LamsConfig {
+test('selects one case-insensitive partial course match and verifies its full heading', async ({ page }) => {
+  await page.setContent(`
+    <button aria-label="Toggle course menu" onclick="document.querySelector('[role=dialog]').hidden = false">Menu</button>
+    <div role="dialog" hidden>
+      <input type="search" aria-label="Search for courses">
+      <button onclick="this.closest('[role=dialog]').hidden = true; document.querySelector('h2').hidden = false">
+        User-selected Course 2026/2027
+      </button>
+    </div>
+    <h2 hidden>User-selected Course 2026/2027</h2>
+  `);
+
+  await selectWorkspaceCourse(page, config('SELECTED course 2026'));
+  await expect(page.getByRole('heading', { name: 'User-selected Course 2026/2027', exact: true })).toBeVisible();
+  await expect(page.locator('input[aria-label="Search for courses"]')).toHaveValue('SELECTED course 2026');
+});
+
+test('prefers an exact course over other partial matches', async ({ page }) => {
+  await page.setContent(`
+    <button aria-label="Toggle course menu" onclick="document.querySelector('[role=dialog]').hidden = false">Menu</button>
+    <div role="dialog" hidden>
+      <input type="search" aria-label="Search for courses">
+      <button id="exact" onclick="this.closest('[role=dialog]').hidden = true; document.querySelector('h2').textContent = this.textContent; document.querySelector('h2').hidden = false">Medicine</button>
+      <button id="partial">Medicine 2026/2027</button>
+    </div>
+    <h2 hidden></h2>
+  `);
+
+  await selectWorkspaceCourse(page, config('Medicine'));
+  await expect(page.getByRole('heading', { name: 'Medicine', exact: true })).toBeVisible();
+});
+
+test('refuses ambiguous partial course matches', async ({ page }) => {
+  await page.setContent(`
+    <button aria-label="Toggle course menu" onclick="document.querySelector('[role=dialog]').hidden = false">Menu</button>
+    <div role="dialog" hidden>
+      <input type="search" aria-label="Search for courses">
+      <button>Medicine 2025/2026</button>
+      <button>Medicine 2026/2027</button>
+    </div>
+  `);
+
+  await expect(selectWorkspaceCourse(page, config('Medicine'))).rejects.toThrow(/Ambiguous workspace course result/);
+});
+
+function config(course = workspaceCourse): LamsConfig {
   return {
-    workspaceCourse,
+    workspaceCourse: course,
     browser: { manualLoginTimeoutMs: 2_000, actionTimeoutMs: 2_000, readyTimeoutMs: 2_000 }
   } as LamsConfig;
 }

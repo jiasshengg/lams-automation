@@ -22,7 +22,8 @@ export async function openLams(page: Page, config: LamsConfig): Promise<void> {
 }
 
 export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Promise<void> {
-  const heading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
+  const exactHeading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
+  const partialHeading = page.getByRole('heading', { name: config.workspaceCourse, exact: false });
   const toggle = page.getByRole('button', { name: 'Toggle course menu', exact: true });
 
   // The dashboard heading paints after domcontentloaded, so an instantaneous check can
@@ -31,9 +32,10 @@ export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Pro
   // gate, then give the heading a short grace period before deciding the configured
   // course still has to be selected.
   const toggleTarget = await waitForVisibleTarget(toggle, page, config, 'course menu', true);
-  await heading.first().waitFor({ state: 'visible', timeout: HEADING_SETTLE_MS }).catch(() => undefined);
-  if (await hasOneVisibleMatch(heading)) {
-    console.log(`Opened configured course: ${config.workspaceCourse}`);
+  await partialHeading.first().waitFor({ state: 'visible', timeout: HEADING_SETTLE_MS }).catch(() => undefined);
+  const activeHeading = await preferExactUniqueMatch(exactHeading, partialHeading, page, 'active workspace course', false);
+  if (activeHeading) {
+    console.log(`Opened configured course: ${normaliseVisibleText(await activeHeading.innerText())}`);
     return;
   }
 
@@ -44,19 +46,30 @@ export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Pro
 
   // Each observed course entry is a <button> that overrides its implicit role with
   // role="listitem", so a button-role lookup alone never matches it. listitem takes no
-  // name from its contents either, so that variant is matched on its exact label node.
-  // Only the configured course is eligible for selection here.
-  const course = page
+  // name from its contents either, so that variant is matched on its label node.
+  // Prefer one exact result; otherwise require exactly one partial result.
+  const exactCourse = page
     .getByRole('button', { name: config.workspaceCourse, exact: true })
     .or(
       page
         .getByRole('listitem')
         .filter({ has: page.getByText(config.workspaceCourse, { exact: true }) })
     );
-  await (await waitForVisibleTarget(course, page, config, 'workspace course result', false)).click();
+  const partialCourse = page
+    .getByRole('button', { name: config.workspaceCourse, exact: false })
+    .or(
+      page
+        .getByRole('listitem')
+        .filter({ has: page.getByText(config.workspaceCourse, { exact: false }) })
+    );
+  await waitForVisibleTarget(partialCourse, page, config, 'workspace course result', false);
+  const course = await preferExactUniqueMatch(exactCourse, partialCourse, page, 'workspace course result', true);
+  if (!course) throw new Error(`No visible workspace course matches "${config.workspaceCourse}".`);
+  const selectedCourseName = normaliseVisibleText(await course.innerText());
+  await course.click();
 
-  await waitForVisibleTarget(heading, page, config, 'workspaceCourse', false);
-  console.log(`Opened configured course: ${config.workspaceCourse}`);
+  await waitForVisibleTarget(page.getByRole('heading', { name: selectedCourseName, exact: true }), page, config, 'workspaceCourse', false);
+  console.log(`Opened configured course: ${selectedCourseName}`);
 }
 
 export async function navigateToPreviousCohort(page: Page, config: LamsConfig): Promise<void> {
@@ -126,12 +139,41 @@ async function assertNextTarget(
   console.log(`Verified expected next target: ${name}.`);
 }
 
-async function hasOneVisibleMatch(locator: Locator): Promise<boolean> {
-  let visible = 0;
+async function preferExactUniqueMatch(
+  exact: Locator,
+  partial: Locator,
+  page: Page,
+  label: string,
+  requirePartial: boolean
+): Promise<Locator | undefined> {
+  const exactMatches = await visibleMatches(exact);
+  if (exactMatches.length === 1) return exactMatches[0];
+  if (exactMatches.length > 1) throw await ambiguousMatch(page, label, exactMatches);
+
+  const partialMatches = await visibleMatches(partial);
+  if (partialMatches.length === 1) return partialMatches[0];
+  if (partialMatches.length > 1) throw await ambiguousMatch(page, label, partialMatches);
+  if (requirePartial) throw new Error(`No visible ${label} matches the supplied course search.`);
+  return undefined;
+}
+
+async function visibleMatches(locator: Locator): Promise<Locator[]> {
+  const matches: Locator[] = [];
   for (let index = 0; index < (await locator.count()); index += 1) {
-    if (await locator.nth(index).isVisible()) visible += 1;
+    const candidate = locator.nth(index);
+    if (await candidate.isVisible()) matches.push(candidate);
   }
-  return visible === 1;
+  return matches;
+}
+
+async function ambiguousMatch(page: Page, label: string, matches: Locator[]): Promise<Error> {
+  const names = await Promise.all(matches.map(async (match) => normaliseVisibleText(await match.innerText())));
+  const directory = await saveDiagnostics(page, `${label.replaceAll(' ', '-')}-ambiguous`);
+  return new Error(`Ambiguous ${label}; matched ${names.map((name) => `"${name}"`).join(', ')}. Diagnostics: ${directory}`);
+}
+
+function normaliseVisibleText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 async function missingSelector(page: Page, name: string): Promise<SelectorRequiredError> {

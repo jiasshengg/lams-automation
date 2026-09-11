@@ -12,10 +12,10 @@ Resolve the source lesson and folder, requested new title, and copy destination 
 If the exact lesson title or folder is unknown, use read-only discovery. Users may supply course, module, TBL number, and academic year rather than exact internal fields:
 
 ```bash
-npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"<EXACT_COURSE>"}' --query 'FOM TBL06 2025'
+npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"<COURSE_QUERY>"}' --query 'FOM TBL06 2025'
 ```
 
-This selects the requested course, opens the global Authoring library, and searches all accessible folders under `Courses`. It is not limited to that course's folder. Every whitespace-separated query term must occur somewhere in the combined title and folder path, case-insensitively. Do not invent a calendar year for an ambiguous “last year”; resolve it from context or ask. Omit `--query` to list all lessons. Optional `--roots '<ROOT_A>|<ROOT_B>'` limits traversal to exact direct child folders under `Courses`; these folder names need not equal the course name. `--max-expansions` defaults to 1000; hitting the limit fails rather than presenting partial results as complete.
+This selects an exact course match when available, otherwise requires one unique case-insensitive partial match. It opens the global Authoring library and searches all accessible folders under `Courses`; it is not limited to that course's folder. Every whitespace-separated lesson-query term must occur somewhere in the combined title and folder path, case-insensitively. Do not invent a calendar year for an ambiguous “last year”; resolve it from context or ask. Omit `--query` to list all lessons. Optional `--roots '<ROOT_A>|<ROOT_B>'` limits traversal to exact direct child folders under `Courses`; these folder names need not equal the course name. `--max-expansions` defaults to 1000; hitting the limit fails rather than presenting partial results as complete.
 
 The output lists every matching candidate with `sourceLessonTitle` and `sourceFolderPath`. Resolve the intended candidate from the request and evidence; ask the user to choose when several plausible matches remain. Pass the resolved fields to the write command. Never choose the first match automatically or claim that discovery itself copies a lesson.
 

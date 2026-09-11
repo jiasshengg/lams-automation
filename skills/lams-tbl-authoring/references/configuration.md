@@ -14,14 +14,14 @@ The scripts merge these permitted request values in memory and derive `destinati
 
 ## Resolving lesson identity
 
-Users need not supply an exact source title or folder if they can be resolved from library evidence. `npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"<COURSE>"}' --query 'FOM TBL06 2025'` searches title and folder-path terms across accessible folders under `Courses`. Optional `--roots 'Folder A|Folder B'` narrows the search to exact direct child folders under `Courses`. The selected course does not itself restrict the global library scope. Use the returned candidate's exact title/path in the mutation request; ask for a choice when ambiguous. No automatic first-match selection occurs.
+Users need not supply an exact source title or folder if they can be resolved from library evidence. `npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"<COURSE_QUERY>"}' --query 'FOM TBL06 2025'` accepts an exact course or one unique case-insensitive partial course match, then searches title and folder-path terms across accessible folders under `Courses`. Optional `--roots 'Folder A|Folder B'` narrows the search to exact direct child folders under `Courses`. The selected course does not itself restrict the global library scope. Use the returned candidate's exact title/path in the mutation request; ask for a choice when ambiguous. No automatic first-match selection occurs.
 
 ## Copy fields
 
 | Field | Meaning |
 |---|---|
 | `baseUrl` | Stable LAMS entry URL; keep in local configuration |
-| `workspaceCourse` | Course to open; can be supplied per run with no fixed allowlist |
+| `workspaceCourse` | Course search to open; an exact match wins, otherwise one unique case-insensitive partial match is accepted |
 | `sourceFolderPath` | Ordered folder names leading to the source lesson |
 | `sourceLessonTitle` | Exact existing lesson title |
 | `openSourceAsCopy` | Optional explicit instruction to use LAMS's **Open a copy** control for a read-only source |
