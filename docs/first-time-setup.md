@@ -7,6 +7,7 @@ You do not need to know how to code, install Homebrew, or install Node.js yourse
 3. Wait while setup installs fresh project dependencies and Chromium. A temporary browser window opens and closes for a local runtime check. Existing local configuration is preserved. If none exists, setup creates `configs/local.json` from the example.
 4. If the operating system or organisation blocks the launcher, do not bypass its security controls. Ask IT, or ask your coding agent to run `bash "./Setup Mac.command"` on macOS or `powershell.exe -NoProfile -File ".\\scripts\\setup\\bootstrap-windows.ps1"` on Windows. If PowerShell, downloads, or project-local executable files are prohibited, IT must provide Node.js 24 LTS and allow the project dependencies to run.
 5. Setup then opens the default URL, `https://ilams.lamsinternational.com/lams/index.do`, in the headed persistent automation browser. Complete sign-in yourself in that browser window; never give credentials to the agent. Setup waits up to five minutes and verifies the authenticated course menu without opening or changing a lesson. If needed, rerun only this step with `npm run login:lams`. The configured `baseUrl` can still select another deployment.
+6. Courses are selected per job. Tell the agent which exact course that job should use; it passes `workspaceCourse` in the job's `--request-json`. The value in `configs/local.json` is only a fallback and does not lock future jobs to one course.
 
 For example, you can tell your agent:
 

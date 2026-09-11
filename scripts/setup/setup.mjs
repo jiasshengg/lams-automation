@@ -14,7 +14,7 @@ async function main() {
   }
   try {
     copyFileSync(path.join(root, 'configs/example.json'), path.join(root, 'configs/local.json'), constants.COPYFILE_EXCL);
-    console.log('Created configs/local.json from the example with the shared LAMS URL. Ask your agent to set your course; do not put passwords in this file.');
+    console.log('Created configs/local.json from the example with the shared LAMS URL. Supply workspaceCourse with each job when it differs from the fallback; do not put passwords in this file.');
   } catch (error) { if (error.code !== 'EEXIST') throw error; }
   if (!doctor()) {
     process.exitCode = 1;

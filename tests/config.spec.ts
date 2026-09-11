@@ -45,12 +45,12 @@ test('uses the shared iLAMS URL when baseUrl is omitted', async () => {
 });
 
 test('rejects attempts to override stable environment fields per run', () => {
-  expect(() =>
-    parseRequestOverrides(JSON.stringify({ workspaceCourse: 'Another course', baseUrl: 'https://example.invalid' }))
-  ).toThrow('cannot override stable environment fields');
+  expect(() => parseRequestOverrides(JSON.stringify({ baseUrl: 'https://example.invalid' }))).toThrow(
+    'cannot override stable environment fields'
+  );
 });
 
-test('accepts another configured course', async () => {
+test('accepts a different workspace course for each run', async () => {
   await expect(
     loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ workspaceCourse: 'Another course' })))
   ).resolves.toMatchObject({ workspaceCourse: 'Another course' });
