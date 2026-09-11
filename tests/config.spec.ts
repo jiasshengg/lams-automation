@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { LamsConfig } from '../src/config.js';
-import { interpolate, loadConfig, parseRequestOverrides } from '../src/config.js';
+import { DEFAULT_LAMS_BASE_URL, interpolate, loadConfig, parseRequestOverrides } from '../src/config.js';
 
 test('interpolates lesson-specific selector values from configuration', () => {
   const config = {
@@ -25,6 +28,20 @@ test('applies per-run lesson values without editing the environment config', asy
   expect(config.lessonTitle).toBe('FOM TBL06 Current');
   expect(config.destinationFolder).toBe('Courses/Current cohort/FOM');
   expect(config.workspaceCourse).toBe('DL Playground 2026/2027 [internal]');
+});
+
+test('uses the shared iLAMS URL when baseUrl is omitted', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-config-'));
+  try {
+    const configPath = path.join(directory, 'config.json');
+    const example = JSON.parse(await readFile('configs/example.json', 'utf8')) as Record<string, unknown>;
+    delete example.baseUrl;
+    await writeFile(configPath, JSON.stringify(example), 'utf8');
+
+    await expect(loadConfig(configPath)).resolves.toMatchObject({ baseUrl: DEFAULT_LAMS_BASE_URL });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('rejects attempts to override stable environment fields per run', () => {

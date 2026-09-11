@@ -1,6 +1,8 @@
 import { resolveInputFile } from './input-file.js';
 import { readFile } from 'node:fs/promises';
 
+export const DEFAULT_LAMS_BASE_URL = 'https://ilams.lamsinternational.com/lams/index.do';
+
 export type RoleName =
   | 'button'
   | 'link'
@@ -178,7 +180,7 @@ export async function loadConfig(
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
 
   if (!isRecord(parsed)) throw new Error('Configuration must be a JSON object.');
-  const merged: Record<string, unknown> = { ...parsed, ...overrides };
+  const merged: Record<string, unknown> = { baseUrl: DEFAULT_LAMS_BASE_URL, ...parsed, ...overrides };
   // Copy commands default to the actual source, not a stale local-config destination.
   if (options.defaultDestinationToSource && !Object.hasOwn(overrides, 'destinationFolderPath')) {
     if (merged.createDestinationFolder === true || merged.renameDestinationFolderFrom !== undefined) {

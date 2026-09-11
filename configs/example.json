@@ -1,5 +1,5 @@
 {
-  "baseUrl": "https://replace-with-your-lams-host.example/lams/",
+  "baseUrl": "https://ilams.lamsinternational.com/lams/index.do",
   "workspaceCourse": "DL Playground 2026/2027 [internal]",
   "previousCohort": "Cohort_2025Y1",
   "currentCohort": "Cohort_2026Y1",
