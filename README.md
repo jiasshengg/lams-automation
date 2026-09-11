@@ -31,9 +31,9 @@ With Node/npm already available, run:
 npm run setup
 ```
 
-Setup replaces local dependencies using the lockfile, installs Chromium, preserves existing local configuration, and checks actual esbuild/tsx execution, the build, and a headed browser launch. It creates the example local configuration only if missing. Run `npm run doctor` later to repeat the checks without reinstalling.
+Setup replaces local dependencies using the lockfile, installs Chromium, preserves existing local configuration, and checks actual esbuild/tsx execution, the build, and a headed browser launch. It creates the example local configuration only if missing. After the runtime checks pass, it opens LAMS in the persistent automation browser and waits up to five minutes for the user to sign in. Run `npm run doctor` later to repeat only the runtime checks, or `npm run login:lams` to reopen the sign-in flow.
 
-After the runtime checks pass, configure the real LAMS URL and course in `configs/local.json` and sign in separately. Runtime readiness is not login verification. Do not distribute `node_modules` or saved login profiles with the project.
+Configure the course in `configs/local.json`. The shared LAMS URL defaults to `https://ilams.lamsinternational.com/lams/index.do`; `baseUrl` can still be set explicitly for another deployment. The user enters credentials only in the opened browser window, and setup verifies the authenticated course menu without opening or changing a lesson. Runtime readiness and login verification are reported separately. Do not distribute `node_modules` or saved login profiles with the project.
 
 ### Find a lesson without its exact title or folder
 

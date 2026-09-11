@@ -35,7 +35,7 @@ export function doctor() {
     catch (error) { console.error(`FAIL ${label}: ${error.message}\nNext step: ${hint}`); passed = false; }
   }
   console.log(passed
-    ? 'Local runtime checks passed. LAMS URL/configuration and login have NOT been verified.'
+    ? 'Local runtime checks passed. LAMS login is verified separately by the setup login step.'
     : 'Setup is incomplete. Resolve the failed checks above before running lesson automation.');
   return passed;
 }

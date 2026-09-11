@@ -32,6 +32,7 @@
     "send:code": "tsx src/send-code.ts",
     "watch:url": "tsx src/watch-url.ts",
     "setup": "node scripts/setup/setup.mjs",
+    "login:lams": "node scripts/setup/login.mjs",
     "doctor": "node scripts/setup/doctor.mjs",
     "test:setup": "node --test scripts/setup/setup.test.mjs"
   },

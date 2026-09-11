@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { runCheck, root } from './doctor.mjs';
+import { DEFAULT_LAMS_BASE_URL, readLoginSettings } from './login.mjs';
 
 test('runtime probes fail on nonzero exit and killed processes', () => {
   assert.equal(runCheck('failure fixture', ['-e', 'process.exit(3)'], 'fixture'), false);
@@ -43,4 +44,23 @@ test('beginner launchers bootstrap the same pinned, checksummed local Node runti
   assert.match(gitignore, /^\.tools\/$/m);
   assert.match(windowsLauncher, /bootstrap-windows\.ps1/);
   assert.doesNotMatch(windowsLauncher, /where node/i);
+});
+
+test('login setup uses the shared URL and persistent local profile defaults', async () => {
+  const temporary = mkdtempSync(path.join(os.tmpdir(), 'lams-login-config-'));
+  try {
+    const configPath = path.join(temporary, 'local.json');
+    writeFileSync(configPath, '{}');
+    const settings = await readLoginSettings(configPath);
+
+    assert.equal(settings.baseUrl, DEFAULT_LAMS_BASE_URL);
+    assert.equal(settings.userDataDir, path.join(root, '.playwright/lams-profile'));
+    assert.equal(settings.timeoutMs, 5 * 60_000);
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+});
+
+test('clean setup defers loading Playwright until after dependencies are installed', () => {
+  const setup = readFileSync(path.join(root, 'scripts/setup/setup.mjs'), 'utf8');
+  assert.match(setup, /await import\('\.\/login\.mjs'\)/);
+  assert.doesNotMatch(setup, /^import .*login\.mjs/m);
 });

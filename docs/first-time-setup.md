@@ -4,9 +4,9 @@ You do not need to know how to code, install Homebrew, or install Node.js yourse
 
 1. Download and unzip a clean source copy of this project, or obtain it through your organisation's approved repository access. Keep `package-lock.json` and the hidden `.agents`/`.claude` skill folders. Do not transfer someone else's `node_modules`, `.playwright`, `.env`, or `configs/local.json`; dependencies and login sessions belong to each computer/user. Git is not needed if you use a source ZIP.
 2. Open the project folder and double-click **Setup Mac.command** on Mac or **Setup Windows.cmd** on Windows. The launcher uses a compatible Node.js already on the computer when available. Otherwise, it downloads the pinned official Node.js 24 LTS archive, verifies its SHA-256 checksum, and installs it under this project's ignored `.tools` folder. It does not need Homebrew, a system-wide Node installation, or an administrator password.
-3. Wait while setup installs fresh project dependencies and Chromium. A temporary browser window opens and closes for a local check; it does not visit LAMS. Existing local configuration is preserved. If none exists, setup creates `configs/local.json` from the example.
+3. Wait while setup installs fresh project dependencies and Chromium. A temporary browser window opens and closes for a local runtime check. Existing local configuration is preserved. If none exists, setup creates `configs/local.json` from the example.
 4. If the operating system or organisation blocks the launcher, do not bypass its security controls. Ask IT, or ask your coding agent to run `bash "./Setup Mac.command"` on macOS or `powershell.exe -NoProfile -File ".\\scripts\\setup\\bootstrap-windows.ps1"` on Windows. If PowerShell, downloads, or project-local executable files are prohibited, IT must provide Node.js 24 LTS and allow the project dependencies to run.
-5. Ask your agent: “Set up my LAMS URL and course in the local configuration.” Supply those details when asked. No passwords belong in that configuration file. Then request a separate login check and complete any sign-in prompts yourself. Runtime readiness does not mean you are already logged in.
+5. Setup then opens the default URL, `https://ilams.lamsinternational.com/lams/index.do`, in the headed persistent automation browser. Complete sign-in yourself in that browser window; never give credentials to the agent. Setup waits up to five minutes and verifies the authenticated course menu without opening or changing a lesson. If needed, rerun only this step with `npm run login:lams`. The configured `baseUrl` can still select another deployment.
 
 For example, you can tell your agent:
 
@@ -24,7 +24,7 @@ The double-click launcher bootstraps Node.js when necessary and then starts `npm
 - The TypeScript build.
 - A real headed Chromium launch using a temporary context and local page.
 
-It exits unsuccessfully if any check fails. It does not open a saved browser profile, verify the LAMS configuration, or check login status.
+It exits unsuccessfully if any runtime check fails. The subsequent setup login step opens the saved browser profile and verifies sign-in separately; `npm run doctor` alone does not open LAMS or check login status.
 
 ## If setup fails
 
