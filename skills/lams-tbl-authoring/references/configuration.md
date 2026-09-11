@@ -83,6 +83,8 @@ Use the per-run `irat` object for the changing iRAT Source-of-Truth data. It con
 
 Do not put this changing content in `configs/local.json`. Pass it in `--request-json`. Automatic parsing of a Source-of-Truth document is not implemented.
 
+Optional question fields `feedback` (string, including empty to clear) and `prefixAnswersWithLetters` (boolean) write rationale feedback and answer-letter display. When omitted, existing values are preserved and new questions retain LAMS defaults. Content, answer text and feedback accept basic inline `sub`, `sup`, `strong`, `b`, `em`, `i`, `u`, and `br` tags without attributes. The complete question list may include missing titles to create; unexpected existing or duplicate titles are rejected.
+
 Optional image fields are `irat.sourceDocx` for embedded images assigned by question order, per-question `sourceQuestionNumber` to override the default one-based source position, and per-question `images` containing local `{ "path", "altText"?, "widthPx"? }` files. Question text/answer parsing from an iRAT Source-of-Truth document is not implemented; image extraction is.
 
 ## Browser fields

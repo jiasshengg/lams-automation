@@ -44,6 +44,7 @@ export interface IratEditor {
   updateGate(gate: IratRequest['gate']): Promise<void>;
   associateWithTeamSetup(teamSetupName: string): Promise<void>;
   updateQuestion(question: IratQuestionRequest): Promise<void>;
+  createQuestion(question: IratQuestionRequest): Promise<void>;
   updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void>;
   verifyPrintView(request: IratRequest): Promise<void>;
   save(): Promise<void>;
@@ -53,6 +54,7 @@ export interface IratAutomationResult {
   committed: boolean;
   readiness: IratReadinessReport;
   updatedQuestions: string[];
+  createdQuestions: string[];
 }
 
 export async function prepareIratAutomation(page: Page, config: LamsConfig): Promise<IratReadinessReport> {
@@ -113,7 +115,7 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
     steps.push({
       phase: 'question',
       questionTitle: question.title,
-      action: `Update ${question.type} question; mandatory=${question.mandatory}; marks=${question.marks}; font=${question.fontFamily} ${question.fontSize}; correct weights total 100; save as a new version`
+      action: `Update existing ${question.type} question as a new version, or create it when missing; mandatory=${question.mandatory}; marks=${question.marks}; font=${question.fontFamily} ${question.fontSize}; correct weights total 100`
     });
   });
   steps.push(
@@ -137,19 +139,26 @@ export async function executeIratAutomation(
   if (!readiness.passed) {
     throw new Error(`iRAT preflight failed: ${readiness.checks.filter((check) => !check.passed).map((check) => check.detail).join('; ')}`);
   }
-  if (!options.commit) return { committed: false, readiness, updatedQuestions: [] };
+  if (!options.commit) return { committed: false, readiness, updatedQuestions: [], createdQuestions: [] };
 
   await editor.updateGate(request.gate);
   await editor.associateWithTeamSetup(request.teamSetupName);
   const updatedQuestions: string[] = [];
+  const createdQuestions: string[] = [];
+  const existingTitles = new Set(observed.questions.map((question) => normalizeQuestionTitle(question.title)));
   for (const question of request.questions) {
-    await editor.updateQuestion(question);
-    updatedQuestions.push(question.title);
+    if (existingTitles.has(normalizeQuestionTitle(question.title))) {
+      await editor.updateQuestion(question);
+      updatedQuestions.push(question.title);
+    } else {
+      await editor.createQuestion(question);
+      createdQuestions.push(question.title);
+    }
   }
   await editor.updateAdvancedSettings(request.advanced);
   await editor.verifyPrintView(request);
   await editor.save();
-  return { committed: true, readiness, updatedQuestions };
+  return { committed: true, readiness, updatedQuestions, createdQuestions };
 }
 
 export function requireIratRequest(config: LamsConfig): IratRequest {
@@ -167,21 +176,37 @@ function validateObservedState(observed: IratObservedState, request: IratRequest
       label: 'Team Setup association',
       passed: observed.teamSetupAssociated,
       detail: observed.teamSetupAssociated ? 'iRAT is associated with Team Setup' : 'iRAT is not associated with Team Setup'
-    },
-    {
-      label: 'Question count',
-      passed: observed.questions.length === request.questions.length,
-      detail: `Expected ${request.questions.length}; found ${observed.questions.length}`
     }
   ];
-  const observedTitles = new Set(observed.questions.map((question) => question.title));
-  for (const question of request.questions) {
+  const requestedTitles = request.questions.map((question) => normalizeQuestionTitle(question.title));
+  checks.push({
+    label: 'Unique requested question titles',
+    passed: new Set(requestedTitles).size === requestedTitles.length,
+    detail: 'Requested question titles must be unique after whitespace normalization'
+  });
+  for (const question of observed.questions) {
     checks.push({
-      label: `Question — ${question.title}`,
-      passed: observedTitles.has(question.title),
-      detail: observedTitles.has(question.title) ? 'Found exactly by title' : 'Question title not found'
+      label: `Existing question — ${question.title}`,
+      passed: requestedTitles.includes(normalizeQuestionTitle(question.title)),
+      detail: `Existing question "${question.title}" must be included in the complete request; deletion is unsupported`
     });
   }
+  for (const question of request.questions) {
+    const matches = observed.questions.filter((candidate) => normalizeQuestionTitle(candidate.title) === normalizeQuestionTitle(question.title));
+    const supported = question.type === 'multiple-choice' && matches.every((candidate) => candidate.type === question.type);
+    checks.push({
+      label: `Question — ${question.title}`,
+      passed: matches.length <= 1 && supported,
+      detail: !supported ? 'Only matching multiple-choice types are supported'
+        : matches.length > 1 ? 'Duplicate existing question title; target is ambiguous'
+        : matches.length === 1 ? 'Found exactly by title; update as new version' : 'Missing question; create Multiple choice'
+    });
+  }
+  checks.push({
+    label: 'Question distribution',
+    passed: request.advanced.displayAllQuestions,
+    detail: 'The live adapter requires displayAllQuestions=true'
+  });
   return { passed: checks.every((check) => check.passed), checks, plan: createIratPlan(request) };
 }
 
@@ -202,4 +227,8 @@ function uniqueNode(
     detail: matches.length === 1 ? `Found exactly one ${type}` : `Expected one ${type}; found ${matches.length}`
   });
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function normalizeQuestionTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').trim();
 }

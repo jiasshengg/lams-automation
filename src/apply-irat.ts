@@ -44,6 +44,7 @@ async function main(): Promise<void> {
     console.log(`Lesson: ${config.lessonTitle}`);
     console.log(`Folder: ${config.destinationFolderPath.join(' > ')}`);
     console.log(`Questions updated (${result.updatedQuestions.length}): ${result.updatedQuestions.join(', ')}`);
+    console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`Question images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
     console.log('Verified: configured course, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
   } catch (error) {

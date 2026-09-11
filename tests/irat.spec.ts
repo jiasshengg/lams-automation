@@ -134,6 +134,9 @@ function fakeEditor(calls: string[]): IratEditor {
     async associateWithTeamSetup(name) {
       calls.push(`team:${name}`);
     },
+    async createQuestion(question) {
+      calls.push(`create:${question.title}`);
+    },
     async updateQuestion(question) {
       calls.push(`question:${question.title}`);
     },
@@ -166,4 +169,50 @@ function graphNode(uiid: number, name: string, type: GraphNode['type']): GraphNo
     stopAtPrecedingActivity: null,
     gradebookOutput: null
   };
+}
+
+
+test('missing questions are planned in dry run and created on commit', async () => {
+  const calls: string[] = [];
+  const editor = fakeEditor(calls);
+  const inspect = editor.inspect.bind(editor);
+  editor.inspect = async () => ({ ...await inspect(), questions: [] });
+  const preview = await executeIratAutomation(editor, request, { commit: false });
+  expect(preview.readiness.passed).toBe(true);
+  expect(preview.createdQuestions).toEqual([]);
+  expect(calls).toEqual(['inspect']);
+  calls.length = 0;
+  const result = await executeIratAutomation(editor, request, { commit: true });
+  expect(result.createdQuestions).toEqual(['Question 1']);
+  expect(result.updatedQuestions).toEqual([]);
+  expect(calls).toContain('create:Question 1');
+});
+
+test('SoT-sized run updates matching questions and creates the remaining 24', async () => {
+  const calls: string[] = [];
+  const fullRequest = { ...request, questions: Array.from({ length: 25 }, (_, i) => ({ ...request.questions[0]!, title: `Question ${i+1}`, answers: Array.from({length: 5}, (_, a) => ({text: `Option ${a+1}`, correct: a===0, weight: a===0 ? 100 : 0})) })) };
+  const result = await executeIratAutomation(fakeEditor(calls), fullRequest, { commit: true });
+  expect(result.updatedQuestions).toEqual(['Question 1']);
+  expect(result.createdQuestions).toHaveLength(24);
+  expect(calls.at(-1)).toBe('save');
+});
+
+for (const scenario of ['extra', 'duplicate', 'wrong type', 'duplicate request', 'unsupported distribution']) {
+  test(`preflight rejects ${scenario} before any writes`, async () => {
+    const calls: string[] = [];
+    const editor = fakeEditor(calls);
+    const inspect = editor.inspect.bind(editor);
+    editor.inspect = async () => {
+      const state = await inspect();
+      if (scenario === 'extra') state.questions.push({ ...state.questions[0]!, title: 'Unrelated' });
+      if (scenario === 'duplicate') state.questions.push({ ...state.questions[0]!, title: '  Question   1 ' });
+      if (scenario === 'wrong type') state.questions[0]!.type = 'essay';
+      return state;
+    };
+    const input = structuredClone(request);
+    if (scenario === 'duplicate request') input.questions.push({ ...input.questions[0]!, title: ' Question  1 ' });
+    if (scenario === 'unsupported distribution') input.advanced.displayAllQuestions = false;
+    await expect(executeIratAutomation(editor, input, { commit: true })).rejects.toThrow('preflight failed');
+    expect(calls).toEqual(['inspect']);
+  });
 }

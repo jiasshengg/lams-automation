@@ -1,6 +1,6 @@
 ---
 name: lams-irat-editing
-description: Inspect or apply corrected multiple-choice questions, answer weights, marks, mandatory flags, and supported settings to an existing LAMS iRAT activity. Use for iRAT content or settings changes without copying the lesson. The adapter requires a complete iRAT request, not a single-question patch.
+description: Inspect, update, or create missing multiple-choice questions with answer weights, marks, mandatory flags, feedback, and supported settings in an existing LAMS iRAT activity. Use for iRAT content or settings changes without copying the lesson. The adapter requires a complete iRAT request, not a single-question patch.
 ---
 
 # iRAT inspection and updates
@@ -17,9 +17,11 @@ npm run inspect:irat-questions -- --config configs/local.json --node '<IRAT_NODE
 
 ## Match the adapter's actual scope
 
-The current `apply:irat` command requires a complete `irat` object and an observed question count equal to the request. It updates every configured question as a new version, the gate, Team Setup association, and advanced settings. It is not a minimal single-question patch endpoint.
+The current `apply:irat` command requires a complete `irat` object and a complete inventory of the intended questions. It updates existing questions as new versions and creates missing multiple-choice questions through Create question → Multiple choice → Save, including an initially empty activity. Duplicate titles, unexpected existing questions, and type mismatches stop before writes. It also updates the gate, Team Setup association, and advanced settings. It is not a minimal single-question patch endpoint.
 
 For a targeted correction, preserve unrelated values from reliable current evidence or a current reviewed full request; never fill them from arbitrary example/default data. Only use the bulk adapter when its complete write scope fits the user's request. If that cannot be established, explain the specific missing data or that a narrower adapter is needed; do not claim this skill adds unsupported patching capability.
+
+Optional per-question `feedback` writes a supplied rationale to general feedback; omission preserves existing feedback. Optional `prefixAnswersWithLetters` controls answer-letter prefixes. Basic inline HTML (`sub`, `sup`, `strong`, `b`, `em`, `i`, `u`, `br`) is retained in content, answers, and feedback; attributes and other tags are removed. DOCX text/rationale parsing is still manual/reviewed; `sourceDocx` imports associated images only. Missing questions append in request order; this operation does not reorder existing questions.
 
 Only multiple-choice questions and `displayAllQuestions=true` are supported by the live adapter. Correct answer weights must total 100; incorrect answers have zero weight. Preflight can reject an incorrect Team Setup association before the association-writing step, so this is not a general repair path for missing grouping or broken graph structure.
 

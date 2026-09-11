@@ -56,6 +56,7 @@ async function main(): Promise<void> {
     console.log(`Copied: ${copy.sourceTitle} → ${copy.newTitle}`);
     console.log(`Destination: ${copy.destinationFolderPath.join(' > ')}`);
     console.log(`iRAT questions updated: ${result.updatedQuestions.join(', ')}`);
+    console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`iRAT images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
     if (aeResult) {
       console.log(`AE nodes written: ${aeResult.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);

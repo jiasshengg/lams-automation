@@ -41,3 +41,12 @@ test('resolves a supplied DOCX path outside the repository', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test('mid-sentence marks do not shift later iRAT image associations', () => {
+  const questions = Array.from({ length: 25 }, (_, i) => paragraph(
+    i === 5 ? 'Which interpretation is most (mark 1) appropriate?' : `Prompt ${i+1} (mark 1)`,
+    i === 22 ? drawing : ''
+  )).join('');
+  expect(inspectDocxImages(mediaDocx(questions)).map(image => image.questionNumber)).toEqual([23]);
+});

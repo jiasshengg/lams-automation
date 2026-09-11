@@ -42,7 +42,9 @@ export interface DocxMediaManifest {
 }
 
 const QUESTION_START = /^\s*(\d+)[.)]\s+\S/;
-const UNNUMBERED_MARKED_QUESTION = /(?:\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*marks?\s*\])\s*$/i;
+// Mark annotations can occur inside a question sentence (the iRAT baseline Q6 does so).
+// Requiring the marker at the paragraph end shifts every later image association.
+const UNNUMBERED_MARKED_QUESTION = /(?:\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*marks?\s*\])/i;
 
 export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const entries = readZipEntries(buffer);

@@ -61,6 +61,10 @@ export interface IratQuestionRequest {
   marks: number;
   type: string;
   content: string;
+  /** Optional supplied rationale, written to general question feedback. */
+  feedback?: string;
+  /** Optional answer-letter display, independent of option count. */
+  prefixAnswersWithLetters?: boolean;
   mandatory: boolean;
   fontFamily: string;
   fontSize: number;
@@ -305,6 +309,12 @@ function validateIratRequest(value: unknown): void {
       if (typeof question[key] !== 'string' || question[key].trim() === '') {
         throw new Error(`irat.questions[${questionIndex}].${key} must be a non-empty string.`);
       }
+    }
+    if (question.feedback !== undefined && typeof question.feedback !== 'string') {
+      throw new Error(`irat.questions[${questionIndex}].feedback must be a string.`);
+    }
+    if (question.prefixAnswersWithLetters !== undefined && typeof question.prefixAnswersWithLetters !== 'boolean') {
+      throw new Error(`irat.questions[${questionIndex}].prefixAnswersWithLetters must be a boolean.`);
     }
     if (titles.has(question.title)) throw new Error(`Duplicate iRAT question title: "${question.title}".`);
     titles.add(question.title);

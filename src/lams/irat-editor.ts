@@ -1,4 +1,4 @@
-import type { Frame, Locator, Page } from '@playwright/test';
+import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
 import type { IratEditor, IratObservedQuestion, IratObservedState } from './irat.js';
@@ -33,6 +33,10 @@ export const MAX_MARK_INPUT = 'input.max-mark-input';
  * addressed by its stable editReference.do source instead.
  */
 export const QUESTION_EDITOR_IFRAME = 'iframe[src*="editReference.do"]';
+/** Observed via Create question → Multiple choice on 2026-09-11 (test iRAT).
+ * Creation uses initNewReference.do and plain Save inside the question-bank modal.
+ */
+export const NEW_QUESTION_IFRAME = '#qb-question-authoring-modal.show iframe[src*="initNewReference.do"]';
 /**
  * The tool activity opens in a Bootstrap modal on the parent authoring page, whose only
  * dismissal control is the header close button. The frame itself exposes no cancel.
@@ -136,13 +140,32 @@ export class LamsIratEditor implements IratEditor {
   }
 
   async updateQuestion(question: IratQuestionRequest): Promise<void> {
+    await this.writeQuestion(question, true);
+  }
+
+  async createQuestion(question: IratQuestionRequest): Promise<void> {
+    await this.writeQuestion(question, false);
+  }
+
+  private async writeQuestion(question: IratQuestionRequest, existing: boolean): Promise<void> {
     if (question.type !== 'multiple-choice') {
       throw new Error(`Live iRAT editing supports only multiple-choice questions; found "${question.type}".`);
     }
     const frame = await this.ensureActivityFrame();
-    const row = await exactQuestionRow(frame, question.title);
-    await row.locator('.edit-reference-link').click();
-    const questionFrame = await waitForChildFrame(frame, QUESTION_EDITOR_IFRAME, this.timeoutMs);
+    const previousTitles = await questionTitles(frame);
+    const matches = previousTitles.filter((title) => title === normalizeText(question.title)).length;
+    if (matches !== (existing ? 1 : 0)) {
+      throw new Error(`Expected ${existing ? 'one existing' : 'no existing'} question named "${question.title}"; found ${matches}.`);
+    }
+    if (existing) {
+      const row = await exactQuestionRow(frame, question.title);
+      await row.locator('.edit-reference-link').click();
+    } else {
+      await frame.getByRole('button', { name: 'Create question', exact: true }).click();
+      await frame.getByRole('button', { name: 'Multiple choice', exact: true }).click();
+    }
+    const editorSelector = existing ? QUESTION_EDITOR_IFRAME : NEW_QUESTION_IFRAME;
+    const questionFrame = await waitForChildFrame(frame, editorSelector, this.timeoutMs);
     await questionFrame.locator('#assessmentQuestionForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
 
     // "Default question grade" and "One or multiple answers?" both live inside the
@@ -167,6 +190,13 @@ export class LamsIratEditor implements IratEditor {
       'description',
       `${formattedHtml(question.content, question.fontFamily, question.fontSize)}${imageHtml(uploaded)}`
     );
+    if (question.feedback !== undefined) {
+      await questionFrame.getByRole('button', { name: 'Feedback for students (optional)', exact: true }).click();
+      await setCkEditor(questionFrame, 'feedback', formattedHtml(question.feedback, question.fontFamily, question.fontSize));
+    }
+    if (question.prefixAnswersWithLetters !== undefined) {
+      await questionFrame.locator('#prefixAnswersWithLetters').setChecked(question.prefixAnswersWithLetters);
+    }
     await resizeOptions(questionFrame, question.answers.length, this.timeoutMs);
     await questionFrame.locator('#multipleAnswersAllowed').selectOption(
       question.answers.filter((answer) => answer.correct).length > 1 ? 'true' : 'false'
@@ -189,16 +219,25 @@ export class LamsIratEditor implements IratEditor {
     // control forks a new question-bank version. Plain Save rewrites the shared question
     // in place, which would also change the source lesson this copy came from, so the run
     // stops rather than falling back to it.
-    const saveAsNewVersion = questionFrame.locator('#saveAsButton');
+    const saveQuestion = questionFrame.locator(existing ? '#saveAsButton' : '#saveButton');
     try {
-      await saveAsNewVersion.waitFor({ state: 'visible', timeout: this.timeoutMs });
+      await saveQuestion.waitFor({ state: 'visible', timeout: this.timeoutMs });
     } catch {
-      throw new Error(
-        `"Save as new version" never appeared for "${question.title}"; refusing to save the shared question in place.`
-      );
+      throw new Error(existing
+        ? `"Save as new version" never appeared for "${question.title}"; refusing to save the shared question in place.`
+        : `New-question Save did not appear for "${question.title}".`);
     }
-    await saveAsNewVersion.click();
-    await frame.locator(QUESTION_EDITOR_IFRAME).waitFor({ state: 'detached', timeout: this.timeoutMs });
+    await saveQuestion.click();
+    if (existing) {
+      await frame.locator(editorSelector).waitFor({ state: 'detached', timeout: this.timeoutMs });
+    } else {
+      await frame.locator('#qb-question-authoring-modal').waitFor({ state: 'hidden', timeout: this.timeoutMs });
+    }
+    const expectedTitles = existing ? previousTitles : [...previousTitles, normalizeText(question.title)];
+    await frame.waitForFunction(({ titles, selector }) => {
+      const actual = Array.from(document.querySelectorAll(selector)).map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim());
+      return JSON.stringify(actual) === JSON.stringify(titles);
+    }, { titles: expectedTitles, selector: `#referencesTable tbody tr ${QUESTION_TITLE}` }, { timeout: this.timeoutMs });
     const updatedRow = await exactQuestionRow(frame, question.title);
 
     // The visible "Mark" column is the assessment reference's own maxMark input, which is
@@ -301,6 +340,12 @@ export class LamsIratEditor implements IratEditor {
     await this.page.waitForTimeout(500);
     const graph = await inspectAuthoringGraph(this.page);
     const gate = uniqueGraphNode(graph, this.request.gate.name, 'gate');
+    const savedQuestions = await this.inspectQuestionsAndClose(uniqueGraphNode(graph, this.request.activityName, 'tool'));
+    const expectedTitles = this.request.questions.map((question) => normalizeText(question.title)).sort();
+    const savedTitles = savedQuestions.map((question) => question.title).sort();
+    if (JSON.stringify(savedTitles) !== JSON.stringify(expectedTitles) || savedQuestions.some((question) => question.type !== 'multiple-choice')) {
+      throw new Error('Post-save iRAT question inventory did not match the request.');
+    }
     if (
       gate.gateType !== this.request.gate.type ||
       gate.description !== this.request.gate.description ||
@@ -314,7 +359,8 @@ export class LamsIratEditor implements IratEditor {
   private async inspectQuestionsAndClose(activity: GraphNode): Promise<IratObservedQuestion[]> {
     const frame = await this.openActivityFrame(activity);
     const rows = frame.locator('#referencesTable tbody tr');
-    await rows.first().waitFor({ state: 'visible', timeout: this.timeoutMs });
+    // A ready empty activity has Create question but no reference rows.
+    await frame.getByRole('button', { name: 'Create question', exact: true }).waitFor({ state: 'visible', timeout: this.timeoutMs });
     const questions: IratObservedQuestion[] = [];
     for (let index = 0; index < (await rows.count()); index += 1) {
       const row = rows.nth(index);
@@ -412,9 +458,18 @@ async function resizeOptions(frame: Frame, expectedCount: number, timeoutMs: num
     await frame.locator('.single-option-table').nth(count - 1).waitFor({ state: 'visible', timeout: timeoutMs });
   }
   while (count > expectedCount) {
-    await frame.locator('.single-option-table').nth(count - 1).locator('.delete-button').evaluate((element: HTMLElement) => element.click());
-    count -= 1;
-    await frame.waitForFunction((value) => document.querySelectorAll('.single-option-table').length === value, count, { timeout: timeoutMs });
+    // New MCQs start with four options; removing surplus answers triggers LAMS's
+    // confirmation, also observed/tested by the AE adapter. Scope the handler to removal.
+    const page = frame.page();
+    const acceptDeletion = (dialog: Dialog) => { void dialog.accept(); };
+    page.on('dialog', acceptDeletion);
+    try {
+      await frame.locator('.single-option-table').nth(count - 1).locator('.delete-button').evaluate((element: HTMLElement) => element.click());
+      count -= 1;
+      await frame.waitForFunction((value) => document.querySelectorAll('.single-option-table').length === value, count, { timeout: timeoutMs });
+    } finally {
+      page.off('dialog', acceptDeletion);
+    }
   }
 }
 
@@ -471,12 +526,13 @@ async function waitForMandatoryState(frame: Frame, title: string, mandatory: boo
   );
 }
 
-function formattedHtml(value: string, fontFamily: string, fontSize: number): string {
-  return `<span style="font-family:${escapeHtml(fontFamily)};font-size:${fontSize}px">${escapeHtml(stripHtml(value))}</span>`;
+export function formattedHtml(value: string, fontFamily: string, fontSize: number): string {
+  return `<span style="font-family:${escapeHtml(fontFamily)};font-size:${fontSize}px">${escapeHtml(value.replace(/<(?!\/?(?:sub|sup|strong|b|em|i|u|br)\s*\/?\s*>)[^>]*>/gi, ''))
+    .replace(/&lt;(\/?(?:sub|sup|strong|b|em|i|u|br)\s*\/?)&gt;/gi, '<$1>')}</span>`;
 }
 
 function stripHtml(value: string): string {
-  return value.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ');
+  return value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ');
 }
 
 function escapeHtml(value: string): string {
@@ -519,4 +575,8 @@ async function waitForToggleResponse(toggle: Locator, timeoutMs: number): Promis
       { timeout: timeoutMs }
     )
     .catch(() => undefined);
+}
+
+async function questionTitles(frame: Frame): Promise<string[]> {
+  return (await frame.locator(`#referencesTable tbody tr ${QUESTION_TITLE}`).allTextContents()).map(normalizeText);
 }
