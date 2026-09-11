@@ -5,6 +5,8 @@ export type AEQuestionType = 'mcq' | 'essay';
 export interface AEOptionInput {
   text: string;
   correct?: boolean;
+  /** Optional percentage credit. Correct-option weights must total 100. */
+  weight?: number;
 }
 
 export interface AEQuestionInput {
@@ -44,7 +46,7 @@ export interface AEPlanInput {
 
 export interface AEOptionPlan {
   text: string;
-  creditPercent: 0 | 100;
+  creditPercent: number;
 }
 
 export interface AEQuestionPlan {
@@ -55,6 +57,7 @@ export interface AEQuestionPlan {
   marks: number;
   answerRequired: true;
   prefixSequentialLetters: boolean;
+  multipleAnswersAllowed: boolean;
   saveAsNewVersion: true;
   selectLatestVersion: true;
   options: AEOptionPlan[];
@@ -216,6 +219,7 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
       marks,
       answerRequired: true,
       prefixSequentialLetters: false,
+      multipleAnswersAllowed: false,
       saveAsNewVersion: true,
       selectLatestVersion: true,
       options: [],
@@ -226,10 +230,30 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
 
   const options = question.options ?? [];
   if (options.length < 2) throw new Error(`Question ${question.number} must have at least two answer options`);
-  const correctCount = options.filter((option) => option.correct === true).length;
-  if (correctCount !== 1) {
-    throw new Error(`Question ${question.number} must have exactly one correct answer; found ${correctCount}`);
+  const correctOptions = options.filter((option) => option.correct === true);
+  if (correctOptions.length === 0) throw new Error(`Question ${question.number} must have at least one correct answer`);
+  const hasExplicitWeights = correctOptions.some((option) => option.weight !== undefined);
+  if (hasExplicitWeights && correctOptions.some((option) => option.weight === undefined)) {
+    throw new Error(`Question ${question.number} must supply a weight for every correct answer when any correct weight is explicit`);
   }
+  options.forEach((option, index) => {
+    if (option.weight !== undefined && (!Number.isFinite(option.weight) || option.weight < 0 || option.weight > 100)) {
+      throw new Error(`Question ${question.number} option ${index + 1} weight must be between 0 and 100`);
+    }
+    if (option.correct !== true && option.weight !== undefined && option.weight !== 0) {
+      throw new Error(`Question ${question.number} option ${index + 1} is incorrect and must have weight 0`);
+    }
+    if (option.correct === true && option.weight !== undefined && option.weight <= 0) {
+      throw new Error(`Question ${question.number} option ${index + 1} is correct and must have a positive weight`);
+    }
+  });
+  if (hasExplicitWeights) {
+    const total = correctOptions.reduce((sum, option) => sum + option.weight!, 0);
+    if (Math.abs(total - 100) > 1e-9) {
+      throw new Error(`Question ${question.number} correct-answer weights must total 100; found ${total}`);
+    }
+  }
+  const defaultCorrectWeight = 100 / correctOptions.length;
   return {
     number: question.number,
     title: question.title ?? `Question ${question.number}`,
@@ -238,12 +262,16 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
     marks,
     answerRequired: true,
     prefixSequentialLetters: true,
+    multipleAnswersAllowed: correctOptions.length > 1,
     saveAsNewVersion: true,
     selectLatestVersion: true,
     options: options.map((option, index) => {
       const text = stripOptionPrefix(option.text);
       if (text === '') throw new Error(`Question ${question.number} option ${index + 1} is empty after removing its prefix`);
-      return { text, creditPercent: option.correct === true ? 100 : 0 };
+      return {
+        text,
+        creditPercent: option.correct === true ? (hasExplicitWeights ? option.weight! : defaultCorrectWeight) : 0
+      };
     }),
     sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
     images: question.images ?? []
@@ -356,6 +384,7 @@ function parseInput(value: unknown): AEPlanInput {
             if (typeof option.correct !== 'boolean') throw new Error(`Question ${number} option ${optionIndex + 1} correct must be boolean`);
             parsedOption.correct = option.correct;
           }
+          if (option.weight !== undefined) parsedOption.weight = numberValue(option.weight, `Question ${number} option ${optionIndex + 1} weight`);
           return parsedOption;
         });
       }

@@ -109,10 +109,10 @@ Pass the local path separately with `--ae-json`; do not merge AE question conten
 
 - `sourceLabel`, `breakMarkerCount`, non-empty `nodes`, and `gates`;
 - exact node titles and globally sequential question numbers;
-- `mcq` or `essay` question type, prompt text, and MCQ options with exactly one `correct: true`;
+- `mcq` or `essay` question type, prompt text, and MCQ options with one or more `correct: true` values;
 - exact gate title, adjacent node titles, and the first question number after each gate.
 
-Each node also accepts an optional `description` (default: the node title), written to the Assessment activity's description on `apply:ae`. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
+Each node also accepts an optional `description` (default: the node title), written to the Assessment activity's description on `apply:ae`. MCQ options may supply `weight` percentages. If omitted, correct options split 100% equally; if any correct weight is explicit, every correct option needs a positive weight and those weights must total 100. Incorrect options have zero weight. More than one correct option enables LAMS's multiple-answer mode. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
 
 `marks` defaults to 4. `attempts` defaults to 1 and `passingMark` to null; supply them only when the SoT explicitly overrides those defaults. `expectedTotalMarks` is optional but recommended.
 

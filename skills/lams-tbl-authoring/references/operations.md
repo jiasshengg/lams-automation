@@ -54,7 +54,7 @@ It does not cover branching/merging topology or automatic correction.
 
 ## AE preflight
 
-`npm run plan:ae -- --ae-json '<AE_JSON_PATH>'` is local and non-mutating. It validates break-derived node/gate counts, question numbering, marks, MCQ correctness, gate adjacency, and SoT-supported attempts/passing-mark overrides. It also emits normalized question HTML/options and the canonical activity settings when called with `--json`.
+`npm run plan:ae -- --ae-json '<AE_JSON_PATH>'` is local and non-mutating. It validates break-derived node/gate counts, question numbering, marks, single- or multiple-answer MCQ correctness and weights, gate adjacency, and SoT-supported attempts/passing-mark overrides. It also emits normalized question HTML/options and the canonical activity settings when called with `--json`.
 
 ## AE settings inspection
 

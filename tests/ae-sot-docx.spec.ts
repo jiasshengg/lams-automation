@@ -67,7 +67,8 @@ test('derives variable AE node and gate counts from literal break markers', () =
   expect(analysis.questions[0]?.correctAnswerLabels).toEqual(['B']);
   expect(analysis.questions[1]?.correctAnswerLabels).toEqual(['A', 'B']);
   expect(analysis.questionsWithoutExplicitMarks).toEqual([2, 3]);
-  expect(analysis.warnings.join('\n')).toContain('Multiple-select questions detected: Q2');
+  expect(analysis.reviewRequired.join('\n')).toContain('multiple-select questions Q2');
+  expect(analysis.warnings.join('\n')).not.toContain('requires exactly one correct');
 });
 
 test('does not use page or Case headings as AE separators', () => {

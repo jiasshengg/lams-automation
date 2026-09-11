@@ -71,6 +71,7 @@ test('builds a deterministic AE execution plan from validated structured input',
       marks: 4,
       answerRequired: true,
       prefixSequentialLetters: true,
+      multipleAnswersAllowed: false,
       saveAsNewVersion: true,
       selectLatestVersion: true
     })
@@ -128,10 +129,45 @@ test('rejects non-sequential question numbers', () => {
   expect(() => buildAEPlan(input)).toThrow('Question numbers must be sequential from 1; expected 3, found 4');
 });
 
-test('rejects an MCQ without exactly one correct answer', () => {
+test('rejects an MCQ without a correct answer', () => {
   const input = validInput();
   input.nodes[0]!.questions[0]!.options![1]!.correct = false;
-  expect(() => buildAEPlan(input)).toThrow('Question 1 must have exactly one correct answer; found 0');
+  expect(() => buildAEPlan(input)).toThrow('Question 1 must have at least one correct answer');
+});
+
+test('supports multiple correct answers with equal default weights', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.options![0]!.correct = true;
+
+  const question = buildAEPlan(input).nodes[0]!.questions[0]!;
+  expect(question.multipleAnswersAllowed).toBe(true);
+  expect(question.options).toEqual([
+    { text: 'First option', creditPercent: 50 },
+    { text: 'Correct option', creditPercent: 50 },
+    { text: 'Third option', creditPercent: 0 }
+  ]);
+});
+
+test('supports explicit multiple-answer weights and rejects invalid totals', () => {
+  const input = validInput();
+  const options = input.nodes[0]!.questions[0]!.options! as Array<Record<string, unknown>>;
+  Object.assign(options[0]!, { correct: true, weight: 60 });
+  Object.assign(options[1]!, { weight: 40 });
+
+  expect(buildAEPlan(input).nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([60, 40, 0]);
+  options[1]!.weight = 30;
+  expect(() => buildAEPlan(input)).toThrow('Question 1 correct-answer weights must total 100; found 90');
+});
+
+test('rejects incomplete multiple-answer weights and credit on an incorrect option', () => {
+  const input = validInput();
+  const options = input.nodes[0]!.questions[0]!.options! as Array<Record<string, unknown>>;
+  Object.assign(options[0]!, { correct: true, weight: 60 });
+  expect(() => buildAEPlan(input)).toThrow('must supply a weight for every correct answer');
+
+  options[1]!.weight = 40;
+  options[2]!.weight = 10;
+  expect(() => buildAEPlan(input)).toThrow('option 3 is incorrect and must have weight 0');
 });
 
 test('rejects a total that differs from the SoT expectation', () => {

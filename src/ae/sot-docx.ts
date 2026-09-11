@@ -177,11 +177,6 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
   if (questionsWithoutExplicitMarks.length > 0) {
     warnings.push(`Questions without explicit marks: ${formatNumberList(questionsWithoutExplicitMarks)}.`);
   }
-  if (multipleSelectQuestions.length > 0) {
-    warnings.push(
-      `Multiple-select questions detected: ${formatNumberList(multipleSelectQuestions)}. The current AE execution-plan schema requires exactly one correct MCQ option.`
-    );
-  }
   if (missingAnswerKeys.length > 0) {
     warnings.push(`Selectable questions without a confidently detected answer key: ${formatNumberList(missingAnswerKeys)}.`);
   }
@@ -218,6 +213,9 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
     reviewRequired: [
       'Confirm exact AE node titles; suggested titles are not authority for existing LAMS nodes.',
       'Confirm exact AE gate titles and build the linear expectedFlow from the approved naming convention.',
+      ...(multipleSelectQuestions.length > 0
+        ? [`Confirm correct answers and scoring for multiple-select questions ${formatNumberList(multipleSelectQuestions)}; correct weights default to an equal split unless explicitly supplied.`]
+        : []),
       'Review question text, answers, marks, tables, images, and links before creating AE plan JSON.'
     ],
     warnings

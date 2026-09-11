@@ -31,7 +31,7 @@ Requirements were derived from the user's AE workflow description and the suppli
 | Break count determines exact AE node and gate counts | `tests/ae-plan.spec.ts` | unit | PASS |
 | Questions are sequential, marks default to 4, and totals are checked | `tests/ae-plan.spec.ts` | unit | PASS |
 | Case/QUESTION formatting, mark annotations, and typed option prefixes are normalized | `tests/ae-plan.spec.ts` | unit | PASS |
-| One MCQ answer receives 100%; malformed correctness is rejected | `tests/ae-plan.spec.ts` | unit | PASS |
+| Single- and multiple-answer MCQs receive validated weights totaling 100%; missing correctness is rejected | `tests/ae-plan.spec.ts`, `tests/ae-editor-ui.spec.ts` | unit/browser integration | PASS |
 | Canonical activity settings are reported in dry-run and applied/verified in commit-capable library code | `tests/ae-settings.spec.ts` | browser integration | PASS |
 | Missing semantic setting controls stop instead of guessing | `tests/ae-settings.spec.ts` | browser integration | PASS |
 | Exact AE node/gate titles and node→gate→node connections match the plan | `tests/validation.spec.ts` | unit | PASS |

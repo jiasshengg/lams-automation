@@ -158,13 +158,12 @@ export class LamsAEEditor {
     await mark.fill(String(question.marks));
     if (question.type === 'mcq') {
       await resizeOptions(frame, question.options.length, this.timeoutMs);
-      await frame.locator('#multipleAnswersAllowed').selectOption('false');
       await this.applyPrefixToggle(frame, question);
       for (let index = 0; index < question.options.length; index += 1) {
         const option = question.options[index]!;
         await setCkEditor(frame, `optionName${index}`, `<p>${escapeHtml(option.text)}</p>`);
-        await setHiddenValue(frame.locator(`#optionMaxMark${index}`), option.creditPercent / 100);
       }
+      await applyAEAnswerScoring(frame, question);
     }
 
     const save = existing ? frame.locator('#saveAsButton') : frame.locator('#saveButton');
@@ -239,6 +238,28 @@ export class LamsAEEditor {
     await frame.locator('#authoringForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
     console.log(`Opened AE Assessment activity: ${title}`);
     return frame;
+  }
+}
+
+export async function applyAEAnswerScoring(
+  frame: Frame,
+  question: Pick<AEQuestionPlan, 'title' | 'multipleAnswersAllowed' | 'options'>
+): Promise<void> {
+  const expectedMode = question.multipleAnswersAllowed ? 'true' : 'false';
+  const mode = frame.locator('#multipleAnswersAllowed');
+  await mode.selectOption(expectedMode);
+  if (await mode.inputValue() !== expectedMode) {
+    throw new Error(`Question "${question.title}" did not retain its one-or-multiple-answers setting.`);
+  }
+
+  for (let index = 0; index < question.options.length; index += 1) {
+    const expected = question.options[index]!.creditPercent / 100;
+    const field = frame.locator(`#optionMaxMark${index}`);
+    await setHiddenValue(field, expected);
+    const actual = Number(await field.inputValue());
+    if (!Number.isFinite(actual) || Math.abs(actual - expected) > 1e-9) {
+      throw new Error(`Question "${question.title}" option ${index + 1} did not retain its configured weight.`);
+    }
   }
 }
 

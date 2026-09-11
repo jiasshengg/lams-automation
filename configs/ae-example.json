@@ -32,10 +32,11 @@
         {
           "number": 3,
           "type": "mcq",
-          "prompt": "Case 2\n[4 marks]\nQUESTION 3\nWhat should happen next?",
+          "prompt": "Case 2\n[4 marks]\nQUESTION 3\nWhich actions should happen next? Select all that apply.",
           "options": [
-            { "text": "A) Continue", "correct": true },
-            { "text": "B) Stop", "correct": false }
+            { "text": "A) Continue", "correct": true, "weight": 50 },
+            { "text": "B) Escalate", "correct": true, "weight": 50 },
+            { "text": "C) Stop", "correct": false }
           ]
         }
       ]

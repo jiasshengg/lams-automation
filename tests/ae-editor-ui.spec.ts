@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Frame, Page } from '@playwright/test';
-import { expandAuthoringSections, resizeOptions } from '../src/lams/ae-editor.js';
+import { applyAEAnswerScoring, expandAuthoringSections, resizeOptions } from '../src/lams/ae-editor.js';
 
 // Reproduces qb-option.js: removeOption() gates the deletion behind confirm(), and the
 // delete control stays hidden until its option row is expanded. resizeOptions attaches
@@ -89,4 +89,31 @@ test('expands collapsed authoring sections so attempt settings become actionable
 test('fails loudly when the expand control is missing', async ({ page }) => {
   const frame = await childFrameWith(page, '<div id="advancedCollapse" style="display:none"></div>');
   await expect(expandAuthoringSections(frame, 1000)).rejects.toThrow();
+});
+
+test('sets and verifies multiple-answer mode with fractional option weights', async ({ page }) => {
+  const frame = await childFrameWith(page, `
+    <select id="multipleAnswersAllowed">
+      <option value="false">One answer only</option>
+      <option value="true">Multiple answers allowed</option>
+    </select>
+    <input id="optionMaxMark0" type="hidden">
+    <input id="optionMaxMark1" type="hidden">
+    <input id="optionMaxMark2" type="hidden">
+  `);
+
+  await applyAEAnswerScoring(frame, {
+    title: 'Question 2',
+    multipleAnswersAllowed: true,
+    options: [
+      { text: 'First', creditPercent: 50 },
+      { text: 'Second', creditPercent: 50 },
+      { text: 'Third', creditPercent: 0 }
+    ]
+  });
+
+  expect(await frame.locator('#multipleAnswersAllowed').inputValue()).toBe('true');
+  expect(await frame.locator('[id^="optionMaxMark"]').evaluateAll((inputs) =>
+    inputs.map((input) => (input as HTMLInputElement).value)
+  )).toEqual(['0.5', '0.5', '0']);
 });

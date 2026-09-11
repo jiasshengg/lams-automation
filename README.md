@@ -191,7 +191,7 @@ The preflight refuses invalid data and derives a deterministic plan that:
 - defaults each question to 4 marks and checks `expectedTotalMarks` when supplied;
 - removes `[X marks]`/numeric mark annotations and typed `A)`/`A.` option prefixes;
 - emits bold-underlined `Case X` and required blank paragraphs in `promptHtml`;
-- assigns 100% to exactly one MCQ answer and 0% to the others;
+- enables LAMS multiple-answer mode when an MCQ has several correct options, assigns equal correct-answer weights by default, and accepts explicit positive weights totaling 100%;
 - sets Answer required, sequential-letter answer prefixes, Save as new version, and latest-version selection in the plan;
 - fixes all video-specified AE activity settings, with optional SoT overrides only for attempts and passing mark;
 - checks every gate against its adjacent AE nodes and following question number.
