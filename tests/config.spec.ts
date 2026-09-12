@@ -112,14 +112,18 @@ test('rejects iRAT correct-answer weights that do not total 100', async () => {
   await expect(loadConfig('configs/example.json', { irat: base.irat })).rejects.toThrow('Correct answer weights must total 100');
 });
 
-test('requires the iRAT advanced toggles the deployment guide mandates', async () => {
+test('applies the deployment-guide iRAT advanced toggles and rejects non-boolean values', async () => {
   const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
   expect(base.irat.advanced.shuffleQuestions).toBe(true);
   expect(base.irat.advanced.questionsNumbering).toBe(true);
 
   const missing = { ...base.irat, advanced: { ...base.irat.advanced } };
   delete missing.advanced.shuffleQuestions;
-  await expect(loadConfig('configs/example.json', { irat: missing })).rejects.toThrow(
+  const defaulted = await loadConfig('configs/example.json', { irat: missing });
+  expect(defaulted.irat?.advanced.shuffleQuestions).toBe(true);
+
+  const invalid = { ...base.irat, advanced: { ...base.irat.advanced, shuffleQuestions: 'yes' } };
+  await expect(loadConfig('configs/example.json', { irat: invalid })).rejects.toThrow(
     'irat.advanced.shuffleQuestions must be a boolean.'
   );
 });
@@ -185,4 +189,40 @@ test('drives an installed system browser only when browser.channel is configured
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('derives "Question N" iRAT titles from the source question number when omitted', async () => {
+  const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
+  const { title: _ignored, ...question } = base.irat.questions[0];
+  const irat = {
+    ...base.irat,
+    questions: [
+      { ...question, sourceQuestionNumber: undefined, content: 'First' },
+      { ...question, sourceQuestionNumber: 7, content: 'Seventh' },
+      { ...question, sourceQuestionNumber: undefined, title: 'Custom title', content: 'Custom' }
+    ]
+  };
+  const config = await loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ irat })));
+  expect(config.irat?.questions.map((entry) => entry.title)).toEqual(['Question 1', 'Question 7', 'Custom title']);
+});
+
+test('ignores legacy iRAT font fields so older requests still load with default formatting', async () => {
+  const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
+  const irat = { ...base.irat, questions: [{ ...base.irat.questions[0], fontFamily: 'Arial', fontSize: 12 }] };
+  const config = await loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ irat })));
+  expect(config.irat?.questions[0]?.title).toBe('Question 1');
+});
+
+test('iRAT advanced toggles default to the deployment guide values when omitted', async () => {
+  const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
+  const irat = { ...base.irat, advanced: { shuffleAnswers: false } };
+  const config = await loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ irat })));
+  expect(config.irat?.advanced).toEqual({
+    shuffleQuestions: true, shuffleAnswers: false, questionsNumbering: true, displayAllQuestions: true,
+    displayAllAfterCompletion: true, answerJustification: true, confidenceLevels: true
+  });
+  const missing = { ...base.irat };
+  delete missing.advanced;
+  const defaults = await loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ irat: missing })));
+  expect(defaults.irat?.advanced.displayAllAfterCompletion).toBe(true);
 });

@@ -63,10 +63,17 @@ export const ADVANCED_TOGGLES = {
   answerJustification: '#allowAnswerJustification',
   confidenceLevels: '#enable-confidence-levels'
 } as const;
+/**
+ * Feedback & Results checkbox. No captured iRAT markup records its id, so it is located by
+ * the label text the AE adapter already resolves live in the same Assessment tool.
+ */
+export const DISPLAY_ALL_AFTER_COMPLETION_LABEL = 'Display all questions and answers once the student finishes';
 
 export class LamsIratEditor implements IratEditor {
   private activityFrame: Frame | undefined;
   private readonly uploadedImageUrls = new Set<string>();
+  /** Messages of the browser prompts confirmed while saving, e.g. the tRAT update question. */
+  readonly confirmedDialogs: string[] = [];
 
   constructor(
     private readonly page: Page,
@@ -185,14 +192,12 @@ export class LamsIratEditor implements IratEditor {
       this.questionImages.get(question.title) ?? []
     );
     uploaded.forEach((image) => this.uploadedImageUrls.add(image.url));
-    await setCkEditor(
-      questionFrame,
-      'description',
-      `${formattedHtml(question.content, question.fontFamily, question.fontSize)}${imageHtml(uploaded)}`
-    );
+    await setCkEditor(questionFrame, 'description', `${inlineHtml(question.content)}${imageHtml(uploaded)}`);
+    await verifyDefaultFormatting(questionFrame, 'description', question.content, `"${question.title}" content`);
     if (question.feedback !== undefined) {
       await questionFrame.getByRole('button', { name: 'Feedback for students (optional)', exact: true }).click();
-      await setCkEditor(questionFrame, 'feedback', formattedHtml(question.feedback, question.fontFamily, question.fontSize));
+      await setCkEditor(questionFrame, 'feedback', inlineHtml(question.feedback));
+      await verifyDefaultFormatting(questionFrame, 'feedback', question.feedback, `"${question.title}" feedback`);
     }
     if (question.prefixAnswersWithLetters !== undefined) {
       await questionFrame.locator('#prefixAnswersWithLetters').setChecked(question.prefixAnswersWithLetters);
@@ -204,7 +209,8 @@ export class LamsIratEditor implements IratEditor {
 
     for (let index = 0; index < question.answers.length; index += 1) {
       const answer = question.answers[index]!;
-      await setCkEditor(questionFrame, `optionName${index}`, formattedHtml(answer.text, question.fontFamily, question.fontSize));
+      await setCkEditor(questionFrame, `optionName${index}`, inlineHtml(answer.text));
+      await verifyDefaultFormatting(questionFrame, `optionName${index}`, answer.text, `"${question.title}" answer ${index + 1}`);
       await setHiddenValue(questionFrame.locator(`#optionMaxMark${index}`), answer.weight / 100);
     }
 
@@ -291,6 +297,16 @@ export class LamsIratEditor implements IratEditor {
         throw new Error(`Advanced setting "${key}" did not remain ${expected ? 'enabled' : 'disabled'}.`);
       }
     }
+
+    const displayAll = frame.getByLabel(DISPLAY_ALL_AFTER_COMPLETION_LABEL, { exact: false });
+    const matches = await displayAll.count();
+    if (matches !== 1) {
+      throw new Error(`Expected one "${DISPLAY_ALL_AFTER_COMPLETION_LABEL}" checkbox in the iRAT activity; found ${matches}.`);
+    }
+    await setCheckbox(displayAll, settings.displayAllAfterCompletion);
+    if ((await displayAll.isChecked()) !== settings.displayAllAfterCompletion) {
+      throw new Error(`Feedback & Results setting "displayAllAfterCompletion" did not remain ${settings.displayAllAfterCompletion ? 'enabled' : 'disabled'}.`);
+    }
   }
 
   async verifyPrintView(request: IratRequest): Promise<void> {
@@ -323,14 +339,17 @@ export class LamsIratEditor implements IratEditor {
 
   async save(): Promise<void> {
     const frame = await this.ensureActivityFrame();
+    // Saving the iRAT asks whether the matching tRAT should receive the same changes.
+    // The deployment guide always confirms that prompt: the tRAT must mirror the iRAT,
+    // so this handler accepts every browser dialog raised by the save and never cancels.
     const dialogHandler = async (dialog: { message(): string; accept(): Promise<void>; dismiss(): Promise<void> }) => {
-      if (/sync|matching rat/i.test(dialog.message())) await dialog.dismiss();
-      else await dialog.accept();
+      this.confirmedDialogs.push(dialog.message());
+      await dialog.accept();
     };
     this.page.on('dialog', dialogHandler);
     try {
       await frame.locator('#saveButton').click();
-    await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
+      await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
     } finally {
       this.page.off('dialog', dialogHandler);
       this.activityFrame = undefined;
@@ -526,9 +545,58 @@ async function waitForMandatoryState(frame: Frame, title: string, mandatory: boo
   );
 }
 
-export function formattedHtml(value: string, fontFamily: string, fontSize: number): string {
-  return `<span style="font-family:${escapeHtml(fontFamily)};font-size:${fontSize}px">${escapeHtml(value.replace(/<(?!\/?(?:sub|sup|strong|b|em|i|u|br)\s*\/?\s*>)[^>]*>/gi, ''))
-    .replace(/&lt;(\/?(?:sub|sup|strong|b|em|i|u|br)\s*\/?)&gt;/gi, '<$1>')}</span>`;
+/**
+ * Keeps only the SoT inline formatting tags and escapes everything else. No font family,
+ * size, or block styling is ever emitted: the LAMS editor treats their absence as
+ * "Default", which the deployment guide requires for every iRAT question.
+ */
+export function inlineHtml(value: string): string {
+  return escapeHtml(value.replace(/<(?!\/?(?:sub|sup|strong|b|em|i|u|br)\s*\/?\s*>)[^>]*>/gi, ''))
+    .replace(/&lt;(\/?(?:sub|sup|strong|b|em|i|u|br)\s*\/?)&gt;/gi, '<$1>');
+}
+
+/**
+ * Normalises editor HTML so the request and CKEditor's own serialisation compare equally:
+ * bold/italic synonyms collapse, attributes and whitespace inside tags are dropped.
+ */
+export function canonicalInlineHtml(value: string): string {
+  return value
+    .replace(/<(\/?)b\b[^>]*>/gi, '<$1strong>')
+    .replace(/<(\/?)i\b[^>]*>/gi, '<$1em>')
+    .replace(/<br\b[^>]*>/gi, '<br>')
+    .replace(/<(\/?)(sub|sup|strong|em|u)\b[^>]*>/gi, '<$1$2>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*<br>\s*/g, '<br>')
+    .trim();
+}
+
+/**
+ * Reports why saved editor HTML does not match the deployment guide's formatting rules:
+ * no explicit font, size, or block style, and every SoT inline tag from the request kept.
+ */
+export function formattingProblems(savedHtml: string, requested: string): string[] {
+  const problems: string[] = [];
+  const styles = [...savedHtml.matchAll(/style\s*=\s*"([^"]*)"/gi)].map((match) => match[1] ?? '');
+  if (styles.some((style) => /font-family|font-size/i.test(style))) problems.push('explicit font family or size is present');
+  if (/<(?:font|h[1-6]|pre|blockquote)\b/i.test(savedHtml)) problems.push('a heading, font, or block format is present');
+  const canonical = canonicalInlineHtml(savedHtml);
+  for (const tag of ['strong', 'em', 'u', 'sub', 'sup']) {
+    const segments = [...canonicalInlineHtml(inlineHtml(requested)).matchAll(new RegExp(`<${tag}>(.*?)</${tag}>`, 'g'))];
+    for (const segment of segments) {
+      if (!canonical.includes(`<${tag}>${segment[1]}</${tag}>`)) problems.push(`<${tag}> formatting of "${stripHtml(segment[1] ?? '')}" was lost`);
+    }
+  }
+  return problems;
+}
+
+async function verifyDefaultFormatting(frame: Frame, id: string, requested: string, label: string): Promise<void> {
+  const saved = await frame.evaluate((editorId) => {
+    const editor = (window as typeof window & { CKEDITOR: { instances: Record<string, { getData(): string }> } }).CKEDITOR.instances[editorId];
+    return editor?.getData() ?? '';
+  }, id);
+  const problems = formattingProblems(saved, requested);
+  if (problems.length > 0) throw new Error(`Editor formatting for ${label} is not at the LAMS default: ${problems.join('; ')}.`);
 }
 
 function stripHtml(value: string): string {

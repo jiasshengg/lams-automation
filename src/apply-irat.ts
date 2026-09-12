@@ -3,7 +3,7 @@ import { chromium } from '@playwright/test';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
-import { executeIratAutomation, requireIratRequest } from './lams/irat.js';
+import { executeIratAutomation, resolveIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const commit = !process.argv.includes('--dry-run');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
-  const irat = requireIratRequest(config);
+  const irat = await resolveIratRequest(config);
 
   const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     console.log(`Questions updated (${result.updatedQuestions.length}): ${result.updatedQuestions.join(', ')}`);
     console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`Question images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
+    console.log(`Save prompts confirmed (${editor.confirmedDialogs.length}): ${editor.confirmedDialogs.join(' | ') || 'none raised'}`);
     console.log('Verified: configured course, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'apply-irat-failure').catch(() => undefined);

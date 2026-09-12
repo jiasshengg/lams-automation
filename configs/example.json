@@ -68,13 +68,10 @@
     "teamSetupName": "Team Setup",
     "questions": [
       {
-        "title": "REPLACE WITH EXACT QUESTION TITLE",
         "sourceQuestionNumber": 1,
         "type": "multiple-choice",
         "content": "REPLACE WITH SOURCE-OF-TRUTH QUESTION CONTENT",
         "mandatory": true,
-        "fontFamily": "Arial",
-        "fontSize": 12,
         "answers": [
           {
             "text": "REPLACE WITH CORRECT ANSWER",
@@ -95,6 +92,7 @@
       "shuffleAnswers": true,
       "questionsNumbering": true,
       "displayAllQuestions": true,
+      "displayAllAfterCompletion": true,
       "answerJustification": true,
       "confidenceLevels": true
     }
