@@ -1,5 +1,7 @@
 import { resolveInputFile } from './input-file.js';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 export const DEFAULT_LAMS_BASE_URL = 'https://ilams.lamsinternational.com/lams/index.do';
 
@@ -407,11 +409,15 @@ function validateQuestionImages(value: unknown, label: string): void {
   });
 }
 
+/**
+ * Accepts inline JSON or, when the value does not start with "{", the path of a JSON file.
+ * Full SoT-sized iRAT requests are too long to pass safely through the Windows shell chain.
+ */
 export function parseRequestOverrides(raw: string | undefined): Partial<LamsConfig> {
   if (raw === undefined) return {};
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(raw.trimStart().startsWith('{') ? raw : readFileSync(path.resolve(raw), 'utf8'));
   } catch (error) {
     throw new Error(`--request-json must contain valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }

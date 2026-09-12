@@ -226,3 +226,16 @@ test('iRAT advanced toggles default to the deployment guide values when omitted'
   const defaults = await loadConfig('configs/example.json', parseRequestOverrides(JSON.stringify({ irat: missing })));
   expect(defaults.irat?.advanced.displayAllAfterCompletion).toBe(true);
 });
+
+test('reads --request-json from a file when given a path instead of inline JSON', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-request-file-'));
+  try {
+    const requestPath = path.join(directory, 'request.json');
+    await writeFile(requestPath, JSON.stringify({ lessonTitle: 'From file' }), 'utf8');
+    expect(parseRequestOverrides(requestPath)).toEqual({ lessonTitle: 'From file' });
+    expect(parseRequestOverrides('  {"lessonTitle":"Inline"}')).toEqual({ lessonTitle: 'Inline' });
+    expect(() => parseRequestOverrides(path.join(directory, 'missing.json'))).toThrow(/ENOENT|no such file/i);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

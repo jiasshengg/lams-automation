@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
 import { readZipEntries, requireZipEntry } from '../src/docx/archive.js';
-import { applySotFormatting, extractStyledParagraphs, formatFromSot } from '../src/docx/sot-formatting.js';
+import { applySotFormatting, extractStyledParagraphs, formatFromSot, unwrapWholeBold } from '../src/docx/sot-formatting.js';
 import { mediaDocx } from './helpers/docx-media.js';
 
 const run = (text: string, properties = '') => `<w:r>${properties ? `<w:rPr>${properties}</w:rPr>` : ''}<w:t xml:space="preserve">${text}</w:t></w:r>`;
@@ -53,8 +53,8 @@ test('re-renders request text with the SoT formatting for the same words', () =>
   const paragraphs = extractStyledParagraphs(documentXml);
   const irat = request();
   const result = applySotFormatting(irat, paragraphs);
-  expect(irat.questions[0]!.content).toBe('The <em>lac</em> operon is <strong>repressed</strong> by glucose (mark 1)');
-  expect(irat.questions[0]!.answers.map((answer) => answer.text)).toEqual(['<strong><em>True</em></strong>', 'False']);
+  expect(irat.questions[0]!.content).toBe('The <em>lac</em> operon is <strong>repressed</strong> by glucose');
+  expect(irat.questions[0]!.answers.map((answer) => answer.text)).toEqual(['<em>True</em>', 'False']);
   expect(irat.questions[0]!.feedback).toBe('CO<sub>2</sub> and 10<sup>9</sup> with <u>"curly"</u> quotes');
   expect(irat.questions[1]!.content).toBe('Second question spans<br>two lines');
   expect(irat.questions[1]!.answers[0]!.text).toBe('<em>lac</em> again');
@@ -71,7 +71,7 @@ test('request tags are replaced by the SoT, not merged with it', () => {
   const irat = request();
   irat.questions[0]!.content = 'The lac operon is <em>repressed</em> by glucose (mark 1)';
   applySotFormatting(irat, paragraphs);
-  expect(irat.questions[0]!.content).toBe('The <em>lac</em> operon is <strong>repressed</strong> by glucose (mark 1)');
+  expect(irat.questions[0]!.content).toBe('The <em>lac</em> operon is <strong>repressed</strong> by glucose');
 });
 
 test('matches inside the numbered question before falling back to the whole document', () => {
@@ -97,4 +97,28 @@ test('reads formatting from a real DOCX archive', () => {
   const result = applySotFormatting(irat, extractStyledParagraphs(xml));
   expect(irat.questions[0]!.content).toBe('Only <em>this</em> word');
   expect(result.warnings).toHaveLength(2);
+});
+
+test('ignores mark annotations and the answer-key bold on whole options', () => {
+  const xml = [
+    p(run('A patient needs '), run('10 µg/mL', '<w:b/>'), run('. Which is most (mark 1)appropriate?')),
+    p(run('Drug is ', '<w:b/>'), run('metabolised', '<w:b/>'), run(' in the liver.', '<w:b/>')),
+    p(run('The '), run('lac', '<w:i/>'), run(' operon')),
+    p(run('Answer: A', '<w:b/>')),
+    p(run('Rationale - Because '), run('unbound', '<w:i/>'), run(' drug acts.'))
+  ].join('');
+  const irat = request();
+  irat.questions = [{
+    ...irat.questions[0]!,
+    content: 'A patient needs 10 µg/mL. Which is most appropriate?',
+    feedback: 'Because unbound drug acts.',
+    answers: [{ text: 'Drug is metabolised in the liver.', correct: true, weight: 100 }, { text: 'The lac operon', correct: false, weight: 0 }]
+  }];
+  const result = applySotFormatting(irat, extractStyledParagraphs(xml));
+  expect(irat.questions[0]!.content).toBe('A patient needs <strong>10 µg/mL</strong>. Which is most appropriate?');
+  expect(irat.questions[0]!.answers.map((answer) => answer.text)).toEqual(['Drug is metabolised in the liver.', 'The <em>lac</em> operon']);
+  expect(irat.questions[0]!.feedback).toBe('Because <em>unbound</em> drug acts.');
+  expect(result.warnings).toEqual([]);
+  expect(unwrapWholeBold('<strong>The <em>lac</em> operon</strong>')).toBe('The <em>lac</em> operon');
+  expect(unwrapWholeBold('<strong>Only</strong> this <strong>part</strong>')).toBe('<strong>Only</strong> this <strong>part</strong>');
 });

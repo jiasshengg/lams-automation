@@ -26,6 +26,8 @@ export interface SotFormattingResult {
 }
 
 const PLAIN: Omit<StyledRun, 'text'> = { bold: false, italic: false, underline: false, vertical: null };
+/** Mark annotations such as "(mark 1)" or "[2 marks]" are SoT metadata, never question text. */
+const MARK_ANNOTATION = /\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*marks?\s*\]/gi;
 
 /**
  * Reads every paragraph's runs with their direct run properties. Style-sheet formatting
@@ -82,7 +84,9 @@ export function applySotFormatting(request: IratRequest, paragraphs: StyledParag
     };
     question.content = format(question.content, `${question.title} content`);
     question.answers.forEach((answer, answerIndex) => {
-      answer.text = format(answer.text, `${question.title} answer ${answerIndex + 1}`);
+      // The SoT marks the answer key by bolding a whole option, which must never reach
+      // learners. Bold spanning the entire option is dropped; partial bold is genuine.
+      answer.text = unwrapWholeBold(format(answer.text, `${question.title} answer ${answerIndex + 1}`));
     });
     if (question.feedback !== undefined && question.feedback.trim() !== '') {
       question.feedback = format(question.feedback, `${question.title} feedback`);
@@ -139,7 +143,26 @@ function flatten(paragraphs: StyledParagraph[]): StyledCharacter[] {
     if (index > 0) push(' ', PLAIN);
     for (const { text, ...style } of paragraph.runs) push(text, style);
   });
-  return characters;
+  return removeMarkAnnotations(characters);
+}
+
+/** Drops "(mark N)" annotations so request text written without them still matches. */
+function removeMarkAnnotations(characters: StyledCharacter[]): StyledCharacter[] {
+  const text = characters.map((character) => character.text).join('');
+  const removed = new Set<number>();
+  for (const match of text.matchAll(MARK_ANNOTATION)) {
+    for (let index = match.index; index < match.index + match[0].length; index += 1) removed.add(index);
+  }
+  const kept = characters.filter((_character, index) => !removed.has(index));
+  // Removing an annotation can leave two spaces touching; collapse them like flatten does.
+  return kept.filter((character, index) => !(character.text === ' ' && kept[index - 1]?.text === ' '));
+}
+
+/** Removes a single <strong> pair that wraps the complete text, leaving inner tags intact. */
+export function unwrapWholeBold(value: string): string {
+  const match = /^<strong>([\s\S]*)<\/strong>$/.exec(value.trim());
+  if (!match || /<\/strong>/.test(match[1] ?? '')) return value;
+  return match[1] ?? value;
 }
 
 function render(characters: StyledCharacter[]): string {
@@ -179,6 +202,7 @@ function plainText(value: string): string {
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
       .replace(/&amp;/g, '&')
+      .replace(MARK_ANNOTATION, '')
   )
     .replace(/\s+/g, ' ')
     .trim();
