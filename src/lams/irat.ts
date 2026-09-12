@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest, LamsConfig } from '../config.js';
+import { applySotFormattingFromDocx } from '../docx/sot-formatting.js';
 import { inspectAuthoringGraph, type AuthoringGraph, type GraphNode } from './authoring.js';
 
 export interface IratPlanStep {
@@ -115,13 +116,13 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
     steps.push({
       phase: 'question',
       questionTitle: question.title,
-      action: `Update existing ${question.type} question as a new version, or create it when missing; mandatory=${question.mandatory}; marks=${question.marks}; font=${question.fontFamily} ${question.fontSize}; correct weights total 100`
+      action: `Update existing ${question.type} question as a new version, or create it when missing; mandatory=${question.mandatory}; marks=${question.marks}; default font and size; SoT inline formatting only; correct weights total 100`
     });
   });
   steps.push(
     {
       phase: 'advanced',
-      action: `Set shuffle questions=${request.advanced.shuffleQuestions}, shuffle answers=${request.advanced.shuffleAnswers}, questions' numbering=${request.advanced.questionsNumbering}, display all questions=${request.advanced.displayAllQuestions}, answer justification=${request.advanced.answerJustification}, confidence levels=${request.advanced.confidenceLevels}`
+      action: `Set shuffle questions=${request.advanced.shuffleQuestions}, shuffle answers=${request.advanced.shuffleAnswers}, questions' numbering=${request.advanced.questionsNumbering}, display all questions=${request.advanced.displayAllQuestions}, display all questions and answers once finished=${request.advanced.displayAllAfterCompletion}, answer justification=${request.advanced.answerJustification}, confidence levels=${request.advanced.confidenceLevels}`
     },
     { phase: 'verification', action: 'Open Print View and compare every question and correct answer with the supplied request' },
     { phase: 'verification', action: 'Save iRAT and re-inspect the resulting state' }
@@ -166,6 +167,21 @@ export function requireIratRequest(config: LamsConfig): IratRequest {
     throw new Error('The per-run request must include an exact "irat" object before iRAT automation can run.');
   }
   return config.irat;
+}
+
+/**
+ * Resolves the iRAT request and, when a SoT DOCX is supplied, replaces the request's inline
+ * formatting with the document's own before any browser work. Unmatched text is reported
+ * rather than failed: the reviewed words stay authoritative, the SoT only styles them.
+ */
+export async function resolveIratRequest(config: LamsConfig): Promise<IratRequest> {
+  const request = requireIratRequest(config);
+  const formatting = await applySotFormattingFromDocx(request);
+  if (formatting.applied.length > 0) {
+    console.log(`SoT inline formatting applied from ${request.sourceDocx} to ${formatting.applied.length} question fields.`);
+  }
+  for (const warning of formatting.warnings) console.warn(`SoT formatting warning: ${warning}`);
+  return request;
 }
 
 function validateObservedState(observed: IratObservedState, request: IratRequest): IratReadinessReport {

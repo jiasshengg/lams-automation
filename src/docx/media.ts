@@ -46,6 +46,26 @@ const QUESTION_START = /^\s*(\d+)[.)]\s+\S/;
 // Requiring the marker at the paragraph end shifts every later image association.
 const UNNUMBERED_MARKED_QUESTION = /(?:\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*marks?\s*\])/i;
 
+/**
+ * Tracks which SoT question each paragraph belongs to, in document order. Images and
+ * inline formatting share this rule so both are assigned to the same question numbers.
+ */
+export function createQuestionTracker(): (paragraphText: string) => number | null {
+  let currentQuestion: number | null = null;
+  let inferredQuestion = 0;
+  return (text) => {
+    const question = text.match(QUESTION_START);
+    if (question) {
+      currentQuestion = Number(question[1]);
+      inferredQuestion = Math.max(inferredQuestion, currentQuestion);
+    } else if (UNNUMBERED_MARKED_QUESTION.test(text)) {
+      inferredQuestion += 1;
+      currentQuestion = inferredQuestion;
+    }
+    return currentQuestion;
+  };
+}
+
 export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const entries = readZipEntries(buffer);
   const documentXml = requireZipEntry(entries, 'word/document.xml').toString('utf8');
@@ -54,8 +74,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   );
   const paragraphs = [...documentXml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)];
   const images: DocxImage[] = [];
-  let currentQuestion: number | null = null;
-  let inferredQuestion = 0;
+  const questionFor = createQuestionTracker();
   let imageIndex = 0;
 
   paragraphs.forEach((paragraphMatch, paragraphIndex) => {
@@ -65,14 +84,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
       .join('')
       .replace(/\s+/g, ' ')
       .trim();
-    const question = text.match(QUESTION_START);
-    if (question) {
-      currentQuestion = Number(question[1]);
-      inferredQuestion = Math.max(inferredQuestion, currentQuestion);
-    } else if (UNNUMBERED_MARKED_QUESTION.test(text)) {
-      inferredQuestion += 1;
-      currentQuestion = inferredQuestion;
-    }
+    const currentQuestion = questionFor(text);
 
     for (const drawing of xml.matchAll(/<(?:w:drawing|w:pict)\b[^>]*>([\s\S]*?)<\/(?:w:drawing|w:pict)>/g)) {
       const drawingXml = drawing[0];
@@ -172,7 +184,7 @@ function attribute(xml: string, name: string): string {
   return decodeXml(new RegExp(`\\b${escaped}=["']([^"']*)["']`).exec(xml)?.[1] ?? '');
 }
 
-function decodeXml(value: string): string {
+export function decodeXml(value: string): string {
   return value
     .replace(/&#x([0-9a-f]+);/gi, (_match, digits: string) => String.fromCodePoint(Number.parseInt(digits, 16)))
     .replace(/&#(\d+);/g, (_match, digits: string) => String.fromCodePoint(Number(digits)))

@@ -53,6 +53,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Handle new tabs, popups, and iframes explicitly when observed.
 - If the UI structure is unknown, stop without mutation and capture diagnostics: screenshot, HTML, frame URLs, accessible controls, and relevant data attributes.
 - Do not bypass authentication, CAPTCHA, browser warnings, or permission prompts.
+- When saving an iRAT, LAMS asks whether to update the matching tRAT with the same changes. Always confirm that prompt (the iRAT editor accepts it automatically); never cancel, dismiss, or leave it unanswered.
 
 ## Configuration and credentials
 

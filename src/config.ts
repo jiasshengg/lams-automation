@@ -56,18 +56,21 @@ export interface QuestionImageRequest {
 }
 
 export interface IratQuestionRequest {
+  /** Defaults to "Question N" from the source question number, matching the AE convention. */
   title: string;
   /** Deployment guide: iRAT questions carry 1 mark each unless stated otherwise. */
   marks: number;
   type: string;
+  /**
+   * Question stem with only SoT inline formatting (sub, sup, strong, em, u, br). Fonts and
+   * sizes are never written, so the editor keeps the LAMS defaults.
+   */
   content: string;
   /** Optional supplied rationale, written to general question feedback. */
   feedback?: string;
   /** Optional answer-letter display, independent of option count. */
   prefixAnswersWithLetters?: boolean;
   mandatory: boolean;
-  fontFamily: string;
-  fontSize: number;
   answers: IratAnswerRequest[];
   /** Defaults to this question's one-based position when irat.sourceDocx is supplied. */
   sourceQuestionNumber?: number;
@@ -87,11 +90,17 @@ export interface IratRequest {
   activityName: string;
   teamSetupName: string;
   questions: IratQuestionRequest[];
+  /**
+   * Deployment guide step 5. Every toggle defaults to true when omitted, so a request only
+   * needs to spell out a deliberate deviation. displayAllQuestions is the Advanced card's
+   * question distribution; displayAllAfterCompletion is the Feedback & Results checkbox.
+   */
   advanced: {
     shuffleQuestions: boolean;
     shuffleAnswers: boolean;
     questionsNumbering: boolean;
     displayAllQuestions: boolean;
+    displayAllAfterCompletion: boolean;
     answerJustification: boolean;
     confidenceLevels: boolean;
   };
@@ -305,7 +314,18 @@ function validateIratRequest(value: unknown): void {
   const titles = new Set<string>();
   value.questions.forEach((question, questionIndex) => {
     if (!isRecord(question)) throw new Error(`irat.questions[${questionIndex}] must be an object.`);
-    for (const key of ['title', 'type', 'content', 'fontFamily'] as const) {
+    if (
+      question.sourceQuestionNumber !== undefined &&
+      (!Number.isInteger(question.sourceQuestionNumber) || Number(question.sourceQuestionNumber) <= 0)
+    ) {
+      throw new Error(`irat.questions[${questionIndex}].sourceQuestionNumber must be a positive integer.`);
+    }
+    if (question.title === undefined) {
+      // LAMS question titles follow the SoT numbering, so an omitted title is derived
+      // rather than left for each request author to spell consistently.
+      question.title = `Question ${question.sourceQuestionNumber ?? questionIndex + 1}`;
+    }
+    for (const key of ['title', 'type', 'content'] as const) {
       if (typeof question[key] !== 'string' || question[key].trim() === '') {
         throw new Error(`irat.questions[${questionIndex}].${key} must be a non-empty string.`);
       }
@@ -326,15 +346,6 @@ function validateIratRequest(value: unknown): void {
     }
     if (typeof question.mandatory !== 'boolean') {
       throw new Error(`irat.questions[${questionIndex}].mandatory must be a boolean.`);
-    }
-    if (!Number.isFinite(question.fontSize) || Number(question.fontSize) <= 0) {
-      throw new Error(`irat.questions[${questionIndex}].fontSize must be positive.`);
-    }
-    if (
-      question.sourceQuestionNumber !== undefined &&
-      (!Number.isInteger(question.sourceQuestionNumber) || Number(question.sourceQuestionNumber) <= 0)
-    ) {
-      throw new Error(`irat.questions[${questionIndex}].sourceQuestionNumber must be a positive integer.`);
     }
     validateQuestionImages(question.images, `irat.questions[${questionIndex}].images`);
     if (!Array.isArray(question.answers) || question.answers.length < 2) {
@@ -363,16 +374,20 @@ function validateIratRequest(value: unknown): void {
   if (value.sourceDocx !== undefined && (typeof value.sourceDocx !== 'string' || value.sourceDocx.trim() === '')) {
     throw new Error('irat.sourceDocx must be a non-empty string when provided.');
   }
+  value.advanced ??= {};
   if (!isRecord(value.advanced)) throw new Error('irat.advanced must be an object.');
   for (const key of [
     'shuffleQuestions',
     'shuffleAnswers',
     'questionsNumbering',
     'displayAllQuestions',
+    'displayAllAfterCompletion',
     'answerJustification',
     'confidenceLevels'
   ] as const) {
-    if (typeof value.advanced[key] !== 'boolean') throw new Error(`irat.advanced.${key} must be a boolean.`);
+    // The deployment guide turns every iRAT setting on; only an explicit false deviates.
+    if (value.advanced[key] === undefined) value.advanced[key] = true;
+    else if (typeof value.advanced[key] !== 'boolean') throw new Error(`irat.advanced.${key} must be a boolean.`);
   }
 }
 

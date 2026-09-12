@@ -77,15 +77,17 @@ Use the per-run `irat` object for the changing iRAT Source-of-Truth data. It con
 
 - exact gate name, description, password type, dynamic-password state, and rotation seconds;
 - exact iRAT and Team Setup node names;
-- one structured entry per question with title, type, content, mandatory state, font, size, and answers;
+- one structured entry per question with type, content, mandatory state, and answers; `title` is optional and defaults to `Question N` from `sourceQuestionNumber` (or the one-based position), which is the required LAMS naming;
 - exact answer correctness and weight, where correct weights total 100 and incorrect weights are zero;
-- shuffle-answer, display-all-question, answer-justification, and confidence-level expectations.
+- `advanced` toggles: `shuffleQuestions`, `shuffleAnswers`, `questionsNumbering`, `displayAllQuestions` (Advanced card question distribution = all questions), `displayAllAfterCompletion` (Feedback & Results: "Display all questions and answers once the student finishes"), `answerJustification`, and `confidenceLevels`. Every toggle defaults to `true`, matching deployment guide step 5, so only a deliberate deviation needs to be spelled out.
 
 Do not put this changing content in `configs/local.json`. Pass it in `--request-json`. Automatic parsing of a Source-of-Truth document is not implemented.
 
-Optional question fields `feedback` (string, including empty to clear) and `prefixAnswersWithLetters` (boolean) write rationale feedback and answer-letter display. When omitted, existing values are preserved and new questions retain LAMS defaults. Content, answer text and feedback accept basic inline `sub`, `sup`, `strong`, `b`, `em`, `i`, `u`, and `br` tags without attributes. The complete question list may include missing titles to create; unexpected existing or duplicate titles are rejected.
+Optional question fields `feedback` (string, including empty to clear) and `prefixAnswersWithLetters` (boolean) write rationale feedback and answer-letter display. When omitted, existing values are preserved and new questions retain LAMS defaults. Content, answer text and feedback accept basic inline `sub`, `sup`, `strong`, `b`, `em`, `i`, `u`, and `br` tags without attributes. No font family or size is ever written: every iRAT field is left at the LAMS editor default, and the adapter reads the saved editor HTML back after each write and stops if a font, size, heading, or block format is present or an inline tag was lost. Legacy `fontFamily`/`fontSize` fields are ignored. The complete question list may include missing titles to create; unexpected existing or duplicate titles are rejected.
 
 Optional image fields are `irat.sourceDocx` for embedded images assigned by question order, per-question `sourceQuestionNumber` to override the default one-based source position, and per-question `images` containing local `{ "path", "altText"?, "widthPx"? }` files. Question text/answer parsing from an iRAT Source-of-Truth document is not implemented; image extraction is.
+
+When `irat.sourceDocx` is set, inline formatting also comes from the SoT: before any browser work, each question's content, answers, and feedback are located in the document by their plain text (inside the matching numbered question first, then anywhere) and rewritten with the document's own italic (`em`), bold (`strong`), underline (`u`), and sub/superscript marks, replacing whatever tags the request carried. Only direct run formatting counts; formatting inherited from Word styles is not detected. Text that cannot be found prints a `SoT formatting warning` and keeps the request's tags — treat such a warning as a transcription to re-check, and always supply `sourceDocx` for iRAT jobs so italics and similar styling never depend on manual transcription.
 
 ## Browser fields
 

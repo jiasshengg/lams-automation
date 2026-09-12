@@ -26,8 +26,6 @@ const request: IratRequest = {
       type: 'multiple-choice',
       content: 'Question content',
       mandatory: true,
-      fontFamily: 'Arial',
-      fontSize: 12,
       answers: [
         { text: 'Correct', correct: true, weight: 100 },
         { text: 'Incorrect', correct: false, weight: 0 }
@@ -39,6 +37,7 @@ const request: IratRequest = {
     questionsNumbering: true,
     shuffleAnswers: true,
     displayAllQuestions: true,
+    displayAllAfterCompletion: true,
     answerJustification: true,
     confidenceLevels: true
   }

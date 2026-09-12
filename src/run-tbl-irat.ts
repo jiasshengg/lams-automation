@@ -3,7 +3,7 @@ import { chromium } from '@playwright/test';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
-import { executeIratAutomation, requireIratRequest } from './lams/irat.js';
+import { executeIratAutomation, resolveIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
 import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const commit = !process.argv.includes('--dry-run');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { defaultDestinationToSource: true });
-  const irat = requireIratRequest(config);
+  const irat = await resolveIratRequest(config);
   const aeJson = readArgument('--ae-json');
   const aePlan = aeJson
     ? buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown)
@@ -58,6 +58,7 @@ async function main(): Promise<void> {
     console.log(`iRAT questions updated: ${result.updatedQuestions.join(', ')}`);
     console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`iRAT images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
+    console.log(`iRAT save prompts confirmed (${editor.confirmedDialogs.length}): ${editor.confirmedDialogs.join(' | ') || 'none raised'}`);
     if (aeResult) {
       console.log(`AE nodes written: ${aeResult.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);
       console.log(`AE nodes/gates created: ${aeResult.createdNodes.length}/${aeResult.createdGates.length}`);
