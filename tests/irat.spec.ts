@@ -84,7 +84,7 @@ test('dry run inspects but performs no iRAT writes', async () => {
   expect(calls).toEqual(['inspect']);
 });
 
-test('commit applies gate, grouping, questions, advanced settings, print verification, then save', async () => {
+test('commit applies gate, grouping, questions, answer-required, advanced settings, print verification, then save', async () => {
   const calls: string[] = [];
   const editor = fakeEditor(calls);
 
@@ -97,6 +97,9 @@ test('commit applies gate, grouping, questions, advanced settings, print verific
     'gate:iRAT Gate',
     'team:Team Setup',
     'question:Question 1',
+    // Answer required is set once the last question editor has closed: toggling it while
+    // questions are still being saved loses the flag to LAMS's reference-list rebuild.
+    'required:Question 1',
     'advanced',
     'print',
     'save'
@@ -138,6 +141,10 @@ function fakeEditor(calls: string[]): IratEditor {
     },
     async updateQuestion(question) {
       calls.push(`question:${question.title}`);
+    },
+    async applyAnswerRequired(questions) {
+      calls.push(`required:${questions.map((question) => question.title).join(',')}`);
+      return questions.map((question) => question.title);
     },
     async updateAdvancedSettings() {
       calls.push('advanced');

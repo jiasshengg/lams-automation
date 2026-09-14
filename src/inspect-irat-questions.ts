@@ -5,7 +5,7 @@ import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
-import { MAX_MARK_INPUT, QUESTION_EDITOR_IFRAME, QUESTION_TITLE, QUESTION_TYPE_BADGE, REQUIRED_TOGGLE } from './lams/irat-editor.js';
+import { MAX_MARK_INPUT, QUESTION_EDITOR_IFRAME, QUESTION_TITLE, QUESTION_TYPE_BADGE, readRequiredState, REQUIRED_TOGGLE } from './lams/irat-editor.js';
 
 /**
  * Read-only listing of one exact iRAT activity's existing question rows.
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
       const row = rows.nth(index);
       const title = (await row.locator(QUESTION_TITLE).innerText()).replace(/\s+/g, ' ').trim();
       const type = (await row.locator(QUESTION_TYPE_BADGE).innerText()).replace(/\s+/g, ' ').trim();
-      const mandatory = await row.locator(REQUIRED_TOGGLE).evaluate((element) => element.classList.contains('text-danger'));
+      const mandatory = (await row.locator(REQUIRED_TOGGLE).evaluate(readRequiredState)) === true;
       const mark = await row.locator(MAX_MARK_INPUT).inputValue();
       titles.push(title);
       console.log(`${index + 1}. ${JSON.stringify(title)} — ${type} — mark ${mark}${mandatory ? ' — mandatory' : ''}`);

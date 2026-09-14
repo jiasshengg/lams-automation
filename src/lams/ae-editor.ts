@@ -146,7 +146,7 @@ export class LamsAEEditor {
     await frame.locator('#assessmentQuestionForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
     await frame.locator('#title').fill(question.title);
     await waitForCkEditor(frame, 'description');
-    const uploaded = await uploadCkEditorImages(this.page, frame, 'description', images);
+    const uploaded = await uploadCkEditorImages(frame, 'description', images);
     await setCkEditor(frame, 'description', `${question.promptHtml}${imageHtml(uploaded)}`);
 
     const advanced = frame.locator('#advancedSettingsCollapse');

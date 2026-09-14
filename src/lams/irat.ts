@@ -46,6 +46,7 @@ export interface IratEditor {
   associateWithTeamSetup(teamSetupName: string): Promise<void>;
   updateQuestion(question: IratQuestionRequest): Promise<void>;
   createQuestion(question: IratQuestionRequest): Promise<void>;
+  applyAnswerRequired(questions: IratQuestionRequest[]): Promise<string[]>;
   updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void>;
   verifyPrintView(request: IratRequest): Promise<void>;
   save(): Promise<void>;
@@ -156,6 +157,7 @@ export async function executeIratAutomation(
       createdQuestions.push(question.title);
     }
   }
+  await editor.applyAnswerRequired(request.questions);
   await editor.updateAdvancedSettings(request.advanced);
   await editor.verifyPrintView(request);
   await editor.save();

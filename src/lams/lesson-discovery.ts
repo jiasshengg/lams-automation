@@ -19,6 +19,7 @@ interface TreeRow {
   level: number;
   folder: boolean;
   expanded: string | null;
+  empty: boolean;
   path: string[];
 }
 
@@ -29,7 +30,9 @@ async function readTree(dialog: Locator): Promise<TreeRow[]> {
     text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
     level: element.querySelectorAll(':scope > .indent').length,
     folder: element.classList.contains('tree-parent'),
-    expanded: element.getAttribute('aria-expanded')
+    expanded: element.getAttribute('aria-expanded'),
+    // Recorded in the discovery diagnostics: empty folders keep aria-expanded=false.
+    empty: element.querySelector('.node-icon.treeview-empty') !== null
   })));
   const ancestors: string[] = [];
   return rows.map(row => {
@@ -74,7 +77,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   const courses = rows.map((row, index) => ({ row, index }))
     .filter(({ row }) => row.folder && row.text === 'Courses' && row.level === 0);
   if (courses.length !== 1) throw new Error(`Expected one top-level Courses folder; found ${courses.length}.`);
-  if (courses[0]!.row.expanded !== 'true') await expand(courses[0]!.index, rows);
+  if (!courses[0]!.row.empty && courses[0]!.row.expanded !== 'true') await expand(courses[0]!.index, rows);
   rows = await readTree(dialog);
   for (const root of options.roots ?? []) {
     const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && row.text === root);
@@ -84,7 +87,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
     (!options.roots?.length || options.roots.includes(row.path[1] ?? ''));
   while (true) {
     rows = await readTree(dialog);
-    const index = rows.findIndex(row => inScope(row) && row.folder && row.expanded !== 'true');
+    const index = rows.findIndex(row => inScope(row) && row.folder && !row.empty && row.expanded !== 'true');
     if (index < 0) break;
     await expand(index, rows);
   }
