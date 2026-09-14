@@ -95,6 +95,10 @@
       "displayAllAfterCompletion": true,
       "answerJustification": true,
       "confidenceLevels": true
+    },
+    "trat": {
+      "activityName": "tRAT",
+      "confidenceSourceActivityName": "iRAT"
     }
   },
   "browser": {

@@ -82,7 +82,10 @@ export function planAEGraphReconciliation(graph: AuthoringGraph, plan: AEPlan): 
 export async function reconcileAndWriteAEGraph(
   page: Page,
   plan: AEPlan,
-  editor: Pick<LamsAEEditor, 'writeExistingNode' | 'writeNode' | 'associateWithTeamSetup' | 'saveDesign'>,
+  editor: Pick<
+    LamsAEEditor,
+    'writeExistingNode' | 'writeNode' | 'associateWithTeamSetup' | 'associateNodeWithTeamSetup' | 'saveDesign'
+  >,
   teamSetupName: string,
   timeoutMs: number
 ): Promise<AEGraphReconciliationResult> {
@@ -112,41 +115,127 @@ export async function reconcileAndWriteAEGraph(
     replacedGates.push(title);
   }
 
+  // Structure before content. LAMS disables the team-based Assessment settings until the activity
+  // is grouped and a Leader Selection precedes it in the flow, so a node that is written before it
+  // is wired in cannot receive them. Nodes are therefore created, grouped and connected first, and
+  // titled and filled afterwards. Until that second pass every new shell is still called
+  // "Assessment", so this phase addresses nodes by uiid rather than by title.
+  const nodeRefs: GraphNode[] = [];
   for (const nodePlan of plan.nodes) {
     const graph = await inspectAuthoringGraph(page);
     const existing = graph.nodes.filter((node) => node.type === 'tool' && node.name === nodePlan.title);
-    let result: AEWriteResult;
-    if (existing.length === 1) {
-      result = await editor.writeExistingNode(nodePlan);
-    } else if (existing.length === 0) {
-      const shell = await createTemplateNode(page, 'Assessment', 'tool', timeoutMs);
-      result = await editor.writeNode(shell, nodePlan);
-      createdNodes.push(nodePlan.title);
-    } else {
+    if (existing.length > 1) {
       throw new Error(`AE node title "${nodePlan.title}" is ambiguous; found ${existing.length}.`);
     }
-    await editor.associateWithTeamSetup(nodePlan.title, teamSetupName);
-    writtenNodes.push(result);
+    const node = existing.length === 1 ? existing[0]! : await createTemplateNode(page, 'Assessment', 'tool', timeoutMs);
+    if (existing.length === 0) createdNodes.push(nodePlan.title);
+    await editor.associateNodeWithTeamSetup(node, teamSetupName);
+    nodeRefs.push(node);
   }
 
+  const gateRefs = new Map<string, GraphNode>();
   for (const gatePlan of plan.gates) {
     const graph = await inspectAuthoringGraph(page);
     const matches = graph.nodes.filter((node) => node.type === 'gate' && node.name === gatePlan.title);
     if (matches.length > 1) throw new Error(`AE gate title "${gatePlan.title}" is ambiguous; found ${matches.length}.`);
-    if (matches.length === 0) {
-      const gate = await createTemplateNode(page, 'Gate', 'gate', timeoutMs);
-      await configurePermissionGate(page, gate, gatePlan.title, timeoutMs);
-      createdGates.push(gatePlan.title);
+    if (matches.length === 1) {
+      gateRefs.set(gatePlan.title, matches[0]!);
+      continue;
     }
+    const gate = await createTemplateNode(page, 'Gate', 'gate', timeoutMs);
+    await configurePermissionGate(page, gate, gatePlan.title, timeoutMs);
+    createdGates.push(gatePlan.title);
+    gateRefs.set(gatePlan.title, gate);
   }
 
-  for (const edge of consecutivePairs(buildDesiredAEFlow(plan))) {
-    const graph = await inspectAuthoringGraph(page);
-    const from = uniqueByName(graph, edge.from);
-    const to = uniqueByName(graph, edge.to);
-    if (hasTransition(graph, from.uiid, to.uiid)) continue;
-    await createTransition(page, from, to, timeoutMs);
-    createdTransitions.push(edge);
+  // The same order buildDesiredAEFlow describes, resolved to the nodes this run is working with.
+  const flow: Array<{ node: GraphNode; title: string }> = [];
+  plan.nodes.forEach((nodePlan, index) => {
+    flow.push({ node: nodeRefs[index]!, title: nodePlan.title });
+    const next = plan.nodes[index + 1];
+    if (!next) return;
+    const gatePlan = plan.gates.find(
+      (candidate) => candidate.afterNodeTitle === nodePlan.title && candidate.beforeNodeTitle === next.title
+    );
+    if (!gatePlan) throw new Error(`No reviewed AE gate connects "${nodePlan.title}" to "${next.title}".`);
+    flow.push({ node: gateRefs.get(gatePlan.title)!, title: gatePlan.title });
+  });
+
+  // The reference design is a single column - Team Setup, iRAT, tRAT, then each AE activity, every
+  // pair separated by a gate. A new AE chain therefore has to extend that flow rather than sit
+  // beside it, and not only for tidiness: LAMS enables the team-based AE settings only when a
+  // Leader Selection precedes the activity, which cannot hold while the chain is detached.
+  const plannedUiids = new Set([...nodeRefs, ...gateRefs.values()].map((node) => node.uiid));
+  const beforeWiring = await inspectAuthoringGraph(page);
+  // On a re-run the chain is already attached, so there is no loose end left to attach it to.
+  const attached = beforeWiring.transitions.some((transition) => transition.toUiid === nodeRefs[0]!.uiid);
+  const tails = attached ? [] : beforeWiring.nodes.filter(
+    (node) =>
+      !plannedUiids.has(node.uiid) &&
+      node.type !== 'grouping' &&
+      !beforeWiring.transitions.some((transition) => transition.fromUiid === node.uiid)
+  );
+  if (!attached) {
+    if (tails.length !== 1) {
+      const names = tails.map((node) => `"${node.name}"`).join(', ') || 'none';
+      throw new Error(
+        `The AE chain must extend the existing flow, so exactly one activity may be left without an ` +
+          `outgoing transition; found ${tails.length} (${names}). Connect or remove the extras first.`
+      );
+    }
+    const tail = tails[0]!;
+    console.log(`Extending the flow from "${tail.name}" into "${flow[0]!.title}".`);
+    flow.unshift({ node: tail, title: tail.name });
+  }
+
+  await withViewportShowingWholeCanvas(page, async () => {
+    for (let index = 0; index + 1 < flow.length; index += 1) {
+      const from = flow[index]!;
+      const to = flow[index + 1]!;
+      const graph = await inspectAuthoringGraph(page);
+      if (hasTransition(graph, from.node.uiid, to.node.uiid)) continue;
+      try {
+        await createTransition(page, from.node, to.node, timeoutMs);
+      } catch (error) {
+        // LAMS resolves both endpoints with document.elementFromPoint at the click position, so
+        // report what that call actually returns for each - that is the only thing it acts on.
+        const probe = await page.evaluate(([firstUiid, secondUiid]) => {
+          const results = [];
+          for (const uiid of [firstUiid, secondUiid]) {
+            const activity = document.querySelector(`#canvas > svg > g.svg-activity[uiid="${uiid}"]`);
+            const box = activity?.getBoundingClientRect();
+            if (!box) {
+              results.push(`uiid ${uiid}: not in the DOM`);
+              continue;
+            }
+            const centreX = box.left + box.width / 2;
+            const centreY = box.top + box.height / 2;
+            const hit = document.elementFromPoint(centreX, centreY);
+            const owner = hit?.closest('g[uiid]')?.getAttribute('uiid') ?? 'none';
+            results.push(
+              `uiid ${uiid}: centre (${Math.round(centreX)},${Math.round(centreY)}) hits <${hit?.tagName ?? 'nothing'} ` +
+                `class="${hit?.getAttribute('class') ?? ''}"> owned by uiid ${owner}`
+            );
+          }
+          return `scrollY ${window.scrollY}, innerHeight ${window.innerHeight}; ${results.join('; ')}`;
+        }, [from.node.uiid, to.node.uiid]);
+        throw new Error(
+          `Could not connect "${from.title}" (uiid ${from.node.uiid}) to "${to.title}" (uiid ${to.node.uiid}), ` +
+            `transition ${index + 1} of ${flow.length - 1}: ${error instanceof Error ? error.message : String(error)}
+` +
+            `Hit test: ${probe}`
+        );
+      }
+      console.log(`Connected ${from.title} -> ${to.title}`);
+      createdTransitions.push({ from: from.title, to: to.title });
+    }
+  });
+
+  await arrangeAEActivities(page, flow, plannedUiids, timeoutMs);
+
+  // Now each node sits in the flow, so its team-based settings are enabled.
+  for (const [index, nodePlan] of plan.nodes.entries()) {
+    writtenNodes.push(await editor.writeNode(nodeRefs[index]!, nodePlan));
   }
   await editor.saveDesign();
   const finalPlan = planAEGraphReconciliation(await inspectAuthoringGraph(page), plan);
@@ -247,6 +336,83 @@ function replacementGateTopologyErrors(graph: AuthoringGraph, desiredFlow: strin
   return errors;
 }
 
+/**
+ * LAMS spells the Assessment template's title capitalised but the gate template's in lower case,
+ * and CSS attribute matching is case-sensitive, so each has to be used exactly as the DOM has it.
+ */
+export const TEMPLATE_LIBRARY_TITLES = { Assessment: 'Assessment', Gate: 'gate' } as const;
+
+/**
+ * The reference design reads as one column of activities with the gates in a narrow column to
+ * their right, each gate level with the gap it bridges. Activities are dropped wherever the canvas
+ * had room while they were being created - gates end up in a block below everything, because they
+ * are made after all the nodes - so they are arranged here, once the flow is known.
+ */
+const AE_LAYOUT = { activityX: 40, gateX: 360, row: 110, gateDrop: 55 };
+
+/** LAMS snaps a moved activity onto its own grid, so an exact match is not something to wait for. */
+const AE_SNAP_TOLERANCE = 30;
+
+async function arrangeAEActivities(
+  page: Page,
+  flow: Array<{ node: GraphNode; title: string }>,
+  plannedUiids: ReadonlySet<number>,
+  timeoutMs: number
+): Promise<void> {
+  const graph = await inspectAuthoringGraph(page);
+  // Start below whatever the lesson already had, so the existing chain is never disturbed.
+  let top = 0;
+  for (const node of graph.nodes) {
+    if (plannedUiids.has(node.uiid)) continue;
+    top = Math.max(top, (node.y ?? 0) + 80);
+  }
+  const placements: Array<{ uiid: number; x: number; y: number }> = [];
+  let activityIndex = 0;
+  for (const step of flow) {
+    if (!plannedUiids.has(step.node.uiid)) continue;
+    const gate = step.node.type === 'gate';
+    // A gate bridges the activity above it, so it shares that activity's row rather than the next.
+    const row = gate ? activityIndex - 1 : activityIndex;
+    placements.push({
+      uiid: step.node.uiid,
+      x: gate ? AE_LAYOUT.gateX : AE_LAYOUT.activityX,
+      y: top + 40 + row * AE_LAYOUT.row + (gate ? AE_LAYOUT.gateDrop : 0)
+    });
+    if (!gate) activityIndex += 1;
+  }
+  if (placements.length === 0) return;
+
+  await page.evaluate((moves) => {
+    const runtime = window as typeof window & {
+      layout?: { activities?: Array<{ uiid?: number; draw?: (x: number, y: number) => void }> };
+      ActivityLib?: { redrawTransitions?: (activity: unknown) => void };
+    };
+    for (const move of moves) {
+      const activity = (runtime.layout?.activities ?? []).find((candidate) => candidate.uiid === move.uiid);
+      if (!activity || typeof activity.draw !== 'function') continue;
+      activity.draw(move.x, move.y);
+      runtime.ActivityLib?.redrawTransitions?.(activity);
+    }
+  }, placements);
+
+  // Confirm the design actually moved; a silently ignored draw would leave the canvas looking wrong.
+  // LAMS snaps a dropped activity to its own grid, so this checks the neighbourhood, not the pixel.
+  // Nothing from this module's scope exists in the page, so the tolerance travels with the moves.
+  await page.waitForFunction(
+    (check) =>
+      check.moves.every((move) => {
+        const activity = document.querySelector(`#canvas > svg > g.svg-activity[uiid="${move.uiid}"]`);
+        if (activity === null) return false;
+        const x = Number(activity.getAttribute('data-x') ?? NaN);
+        const y = Number(activity.getAttribute('data-y') ?? NaN);
+        return Math.abs(x - move.x) <= check.tolerance && Math.abs(y - move.y) <= check.tolerance;
+      }),
+    { moves: placements, tolerance: AE_SNAP_TOLERANCE },
+    { timeout: timeoutMs }
+  );
+  console.log(`Arranged ${placements.length} AE activities into the reference layout.`);
+}
+
 async function createTemplateNode(
   page: Page,
   templateTitle: 'Assessment' | 'Gate',
@@ -258,7 +424,11 @@ async function createTemplateNode(
   const heading = templateTitle === 'Assessment' ? '#collapse-heading-tool-category-3' : '#collapse-heading-tool-category-1';
   const panel = templateTitle === 'Assessment' ? '#collapse-tool-category-3' : '#collapse-tool-category-1';
   if (!(await page.locator(panel).isVisible())) await page.locator(heading).click();
-  const template = page.locator(`.template[learninglibrarytitle="${templateTitle}"]`);
+  // A properties dialog left open by an earlier step intercepts the drag onto the canvas.
+  if (await page.locator('#propertiesDialog').isVisible()) {
+    await page.locator('#canvas').click({ position: { x: 5, y: 5 } });
+  }
+  const template = page.locator(`.template[learninglibrarytitle="${TEMPLATE_LIBRARY_TITLES[templateTitle]}"]`);
   await template.waitFor({ state: 'visible', timeout: timeoutMs });
   const canvas = page.locator('#canvas');
   const maxY = Math.max(0, ...before.nodes.map((node) => node.y ?? 0));
@@ -273,11 +443,29 @@ async function createTemplateNode(
     [...beforeIds],
     { timeout: timeoutMs }
   );
+  await answerAutogroupPrompt(page, timeoutMs);
   const created = (await inspectAuthoringGraph(page)).nodes.filter((node) => !beforeIds.has(node.uiid));
   if (created.length !== 1 || created[0]!.type !== expectedType) {
     throw new Error(`Creating ${templateTitle} produced ${created.length} new node(s); expected one ${expectedType}.`);
   }
   return created[0]!;
+}
+
+/**
+ * The first time each activity type is dropped, LAMS asks whether to autogroup it. The prompt is
+ * modal and intercepts pointer events, so every later canvas action fails until it is answered.
+ * Decline: the answer is stored as a lasting account preference, and grouping is handled
+ * explicitly by associateNodeWithTeamSetup before any settings are written, so the run must not
+ * depend on whichever way this prompt was answered before.
+ */
+async function answerAutogroupPrompt(page: Page, timeoutMs: number): Promise<void> {
+  const modal = page.locator('#autogroupPromptModal.show');
+  // The prompt renders with the new activity, not before it; a short wait avoids missing the race.
+  await modal.waitFor({ state: 'visible', timeout: 1500 }).catch(() => undefined);
+  if (!(await modal.isVisible().catch(() => false))) return;
+  await modal.locator('#autogroupPromptDecline').click();
+  await modal.waitFor({ state: 'hidden', timeout: timeoutMs });
+  console.log('Declined the LAMS autogrouping prompt; Team Setup is associated explicitly.');
 }
 
 async function configurePermissionGate(page: Page, gate: GraphNode, title: string, timeoutMs: number): Promise<void> {
@@ -354,13 +542,119 @@ export async function removeAuthoringNode(page: Page, node: GraphNode, timeoutMs
   );
 }
 
+/**
+ * LAMS picks transition endpoints with Snap.getElementByPoint(event.pageX, event.pageY), and Snap
+ * forwards those to document.elementFromPoint, which expects viewport coordinates. Page and
+ * viewport coordinates agree only at scroll offset 0, so on a scrolled page LAMS hit-tests a point
+ * scrollY pixels away and selects nothing. Scrolling an activity into view therefore cannot work:
+ * the viewport has to be tall enough to show the whole canvas at once instead.
+ */
+async function withViewportShowingWholeCanvas<T>(page: Page, run: () => Promise<T>): Promise<T> {
+  // The persistent context runs with viewport:null (it follows the window), so page.viewportSize()
+  // is null and cannot be used either to preserve the width or to restore afterwards.
+  const original = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  await growCanvasToFitActivities(page);
+  // Size against the whole document, not the canvas: the canvas sits below the header and toolbar,
+  // so its own height understates how far down the lowest activity actually is.
+  const documentHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+  const height = Math.min(4000, Math.max(original.height, documentHeight + 200));
+  await page.setViewportSize({ width: original.width, height });
+  // Everything LAMS draws on the canvas competes with the activities for the hit-test: the
+  // rubber-band preview line, and every transition already drawn - which run down x=380, exactly
+  // the column the gates sit in, so each new transition hides the next gate. They are decoration
+  // during this phase, so take them out of hit-testing until it is done.
+  const overlayStyle = await page.addStyleTag({
+    content: '.svg-transition, .svg-transition-element, .svg-transition-draw { pointer-events: none !important; }'
+  });
+  const applied = await page.evaluate(() => ({ inner: window.innerHeight, scroll: document.documentElement.scrollHeight }));
+  console.log(
+    `Transition viewport: ${original.width}x${height} (document ${documentHeight} -> ${applied.scroll}, innerHeight ${applied.inner})`
+  );
+  if (applied.scroll > applied.inner) {
+    throw new Error(
+      `Canvas needs ${applied.scroll}px but the viewport only reaches ${applied.inner}px. LAMS hit-tests ` +
+        'transition clicks with page coordinates, so the design cannot be scrolled to connect it.'
+    );
+  }
+  try {
+    return await run();
+  } finally {
+    await page.setViewportSize(original);
+    await overlayStyle.evaluate((element: Element) => element.remove()).catch(() => undefined);
+  }
+}
+
+/**
+ * Both the canvas div and the <svg> inside it have fixed heights, and each has to cover every
+ * activity. The div governs how far the document scrolls; the SVG clips its own contents, so an
+ * activity below its height is neither drawn nor hit-testable - LAMS's elementFromPoint lands on
+ * bare canvas and the click does nothing. createTemplateNode grows the div for the node it adds,
+ * but nothing grows the SVG, so gates dropped past it become unreachable.
+ */
+async function growCanvasToFitActivities(page: Page): Promise<void> {
+  await page.locator('#canvas').evaluate((element) => {
+    let lowest = 0;
+    for (const activity of document.querySelectorAll('#canvas > svg > g.svg-activity')) {
+      const y = Number(activity.getAttribute('data-y') ?? 0);
+      const height = Number(activity.getAttribute('data-height') ?? 0);
+      if (y + height > lowest) lowest = y + height;
+    }
+    const needed = lowest + 160;
+    if (needed > (Number.parseFloat(getComputedStyle(element).height) || 0)) {
+      (element as HTMLElement).style.height = `${needed}px`;
+    }
+    const svg = element.querySelector('svg');
+    if (svg && needed > Number(svg.getAttribute('height') ?? 0)) {
+      svg.setAttribute('height', String(needed));
+    }
+  });
+}
+
+
+
+/**
+ * Clicks an activity where LAMS thinks it is, not at the centre of its bounding box. An activity's
+ * <g> also encloses its label, so for a 40x40 gate the box centre lands in blank canvas beside the
+ * glyph and LAMS's elementFromPoint finds nothing. Tool activities are 200x80 rectangles with the
+ * label inside, which is why only gates were affected. data-x/data-y are the model coordinates the
+ * transition paths are drawn from, so they are the reliable target.
+ */
+async function clickActivityGlyph(page: Page, uiid: number): Promise<void> {
+  const point = await page.evaluate((id) => {
+    const svg = document.querySelector('#canvas > svg');
+    const activity = document.querySelector(`#canvas > svg > g.svg-activity[uiid="${id}"]`);
+    if (!svg || !activity) return null;
+    const origin = svg.getBoundingClientRect();
+    const x = Number(activity.getAttribute('data-x') ?? 0);
+    const y = Number(activity.getAttribute('data-y') ?? 0);
+    const width = Number(activity.getAttribute('data-width') ?? 0);
+    const height = Number(activity.getAttribute('data-height') ?? 0);
+    return { x: origin.left + x + width / 2, y: origin.top + y + height / 2 };
+  }, uiid);
+  if (!point) throw new Error(`Activity ${uiid} is not on the authoring canvas.`);
+  await page.mouse.click(point.x, point.y);
+}
+
+/** Chromium treats two clicks within ~500ms at the same spot as a double-click. */
+const DOUBLE_CLICK_WINDOW_MS = 600;
+
 async function createTransition(page: Page, from: GraphNode, to: GraphNode, timeoutMs: number): Promise<void> {
   if (await page.locator('#propertiesDialog').isVisible()) {
     await page.locator('#canvas').click({ position: { x: 5, y: 5 } });
   }
+  await growCanvasToFitActivities(page);
+  // Consecutive transitions share an endpoint - the target of one is the source of the next - so
+  // the same activity is clicked twice in a row, at the same position. Inside the browser's
+  // double-click window that opens the activity's editor, whose iframe then covers the canvas and
+  // wins every later hit-test. Wait the window out before starting the next pair.
+  await page.waitForTimeout(DOUBLE_CLICK_WINDOW_MS);
   await page.locator('#transitionButton').click();
-  await page.locator(`#canvas > svg > g.svg-activity[uiid="${from.uiid}"]`).click();
-  await page.locator(`#canvas > svg > g.svg-activity[uiid="${to.uiid}"]`).click();
+  // Transition mode responds only to real mouse events, and only at scroll offset 0 - see
+  // withViewportShowingWholeCanvas. Keep the page pinned at the top and never scroll between the
+  // two clicks; the caller has already sized the viewport so both endpoints are on screen.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await clickActivityGlyph(page, from.uiid);
+  await clickActivityGlyph(page, to.uiid);
   await page.waitForFunction(
     ([fromId, toId]) => {
       const activities = (window as typeof window & { layout?: { activities?: Array<{ uiid?: number; transitions?: { from?: Array<{ fromActivity?: { uiid?: number }; toActivity?: { uiid?: number } }> } }> } }).layout?.activities ?? [];

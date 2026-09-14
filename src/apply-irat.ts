@@ -17,6 +17,7 @@ import { resolveIratQuestionImages } from './docx/question-images.js';
  */
 async function main(): Promise<void> {
   const commit = !process.argv.includes('--dry-run');
+  const keepOpen = process.argv.includes('--keep-open');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   const irat = await resolveIratRequest(config);
@@ -47,13 +48,20 @@ async function main(): Promise<void> {
     console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`Question images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
     console.log(`Save prompts confirmed (${editor.confirmedDialogs.length}): ${editor.confirmedDialogs.join(' | ') || 'none raised'}`);
-    console.log('Verified: configured course, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
+    console.log('Verified: configured course, exact lesson, iRAT/tRAT graph readiness, Print View, synced tRAT questions, tRAT confidence/default settings, and post-save gate state.');
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'apply-irat-failure').catch(() => undefined);
     if (directory) console.error(`iRAT diagnostics: ${directory}`);
+    // With --keep-open the rethrow is not printed until the window closes; surface it now.
+    if (keepOpen) console.error(error instanceof Error ? error.stack ?? error.message : error);
     throw error;
   } finally {
-    await context.close();
+    if (keepOpen) {
+      console.log('\nBrowser left open for manual verification. Close the window to end the run.');
+      await new Promise<void>((resolve) => context.on('close', () => resolve()));
+    } else {
+      await context.close();
+    }
   }
 }
 

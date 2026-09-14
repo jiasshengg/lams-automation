@@ -47,7 +47,8 @@ test('preflight verifies exact iRAT nodes, connection, and Team Setup associatio
   const nodes: GraphNode[] = [
     graphNode(1, 'Team Setup', 'grouping'),
     graphNode(2, 'iRAT Gate', 'gate'),
-    { ...graphNode(3, 'iRAT', 'tool'), grouped: true, groupingUiid: 1 }
+    { ...graphNode(3, 'iRAT', 'tool'), grouped: true, groupingUiid: 1 },
+    graphNode(4, 'tRAT', 'tool')
   ];
   const graph: AuthoringGraph = {
     rendering: 'svg',
@@ -65,7 +66,12 @@ test('preflight fails when iRAT is not grouped with Team Setup', () => {
   const graph: AuthoringGraph = {
     rendering: 'svg',
     modelAvailable: true,
-    nodes: [graphNode(1, 'Team Setup', 'grouping'), graphNode(2, 'iRAT Gate', 'gate'), graphNode(3, 'iRAT', 'tool')],
+    nodes: [
+      graphNode(1, 'Team Setup', 'grouping'),
+      graphNode(2, 'iRAT Gate', 'gate'),
+      graphNode(3, 'iRAT', 'tool'),
+      graphNode(4, 'tRAT', 'tool')
+    ],
     transitions: [{ uiid: 10, fromUiid: 2, toUiid: 3 }]
   };
 
@@ -122,6 +128,7 @@ function fakeEditor(calls: string[]): IratEditor {
       rotationSeconds: null
     },
     activityName: 'iRAT',
+    tratActivityName: 'tRAT',
     teamSetupAssociated: true,
     questions: [{ title: 'Question 1', type: 'multiple-choice', mandatory: false }]
   };

@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 import type { Frame, Page } from '@playwright/test';
-import { applyAEAnswerScoring, expandAuthoringSections, resizeOptions } from '../src/lams/ae-editor.js';
+import {
+  applyAEAnswerScoring,
+  expandAuthoringSections,
+  questionDescriptionHtml,
+  resizeOptions
+} from '../src/lams/ae-editor.js';
 
 // Reproduces qb-option.js: removeOption() gates the deletion behind confirm(), and the
 // delete control stays hidden until its option row is expanded. resizeOptions attaches
@@ -106,9 +111,9 @@ test('sets and verifies multiple-answer mode with fractional option weights', as
     title: 'Question 2',
     multipleAnswersAllowed: true,
     options: [
-      { text: 'First', creditPercent: 50 },
-      { text: 'Second', creditPercent: 50 },
-      { text: 'Third', creditPercent: 0 }
+      { text: 'First', html: 'First', creditPercent: 50 },
+      { text: 'Second', html: 'Second', creditPercent: 50 },
+      { text: 'Third', html: 'Third', creditPercent: 0 }
     ]
   });
 
@@ -116,4 +121,42 @@ test('sets and verifies multiple-answer mode with fractional option weights', as
   expect(await frame.locator('[id^="optionMaxMark"]').evaluateAll((inputs) =>
     inputs.map((input) => (input as HTMLInputElement).value)
   )).toEqual(['0.5', '0.5', '0']);
+});
+
+test('keeps a figure above the stem when the Source-of-Truth printed it there', () => {
+  const pedigree = {
+    url: 'https://example.test/pedigree.png', altText: '', widthPx: null,
+    placement: 'before' as const, caption: '', source: 'sot'
+  };
+  const graph = {
+    url: 'https://example.test/graph.png', altText: '', widthPx: null,
+    placement: 'after' as const, caption: '<strong>Figure 1.</strong> Profile', source: 'sot'
+  };
+
+  expect(questionDescriptionHtml('<div>7. Study the pedigree.</div>', [pedigree])).toBe(
+    '<div><img src="https://example.test/pedigree.png" alt=""></div><div>7. Study the pedigree.</div>'
+  );
+  expect(questionDescriptionHtml('<div>4. Which explanation applies?</div>', [graph])).toBe(
+    '<div>4. Which explanation applies?</div>' +
+    '<div><img src="https://example.test/graph.png" alt=""></div><div><strong>Figure 1.</strong> Profile</div>'
+  );
+  expect(questionDescriptionHtml('<div>Stem</div>', [graph, pedigree])).toBe(
+    '<div><img src="https://example.test/pedigree.png" alt=""></div><div>Stem</div>' +
+    '<div><img src="https://example.test/graph.png" alt=""></div><div><strong>Figure 1.</strong> Profile</div>'
+  );
+});
+
+test('a figure printed above the stem sits below the case narrative that introduces it', () => {
+  const karyotype = { url: 'https://example.test/karyotype.png', caption: '', altText: '', widthPx: null, placement: 'before' as const, source: 'sot' };
+  const prompt =
+    '<div><strong><u>Case 6</u></strong></div>' +
+    '<div>A patient has been referred for fertility testing and has the resulting karyotype below:</div>' +
+    '<div>11. What syndrome does the patient have?</div>';
+  // The figure goes between the narrative and the stem, exactly where the document prints it.
+  expect(questionDescriptionHtml(prompt, [karyotype])).toBe(
+    '<div><strong><u>Case 6</u></strong></div>' +
+    '<div>A patient has been referred for fertility testing and has the resulting karyotype below:</div>' +
+    '<div><img src="https://example.test/karyotype.png" alt=""></div>' +
+    '<div>11. What syndrome does the patient have?</div>'
+  );
 });

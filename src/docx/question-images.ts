@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { IratRequest, QuestionImageRequest } from '../config.js';
 import type { AEPlan } from '../ae/plan.js';
 import { resolveInputFile } from '../input-file.js';
-import { inspectDocxImages } from './media.js';
+import { inspectDocxImages, type ImageCrop, type ImagePlacement } from './media.js';
 
 export interface QuestionImageAsset {
   filename: string;
@@ -11,6 +11,12 @@ export interface QuestionImageAsset {
   data: Buffer;
   altText: string;
   widthPx: number | null;
+  /** Whether the image precedes or follows the question stem in the source. */
+  placement: ImagePlacement;
+  /** Display crop the document applies to the embedded picture, or null for the whole file. */
+  crop: ImageCrop | null;
+  /** Inline HTML of the caption printed under the image, or '' when there is none. */
+  caption: string;
   source: string;
 }
 
@@ -53,7 +59,11 @@ async function resolveExplicitImages(images: QuestionImageRequest[]): Promise<Qu
       contentType: contentType(extension),
       data: await readFile(filename),
       altText: image.altText ?? '',
+      // An explicit local file is used exactly as supplied; only Word applies display crops.
+      crop: null,
       widthPx: image.widthPx ?? null,
+      placement: image.placement ?? 'after',
+      caption: image.caption ?? '',
       source: filename
     });
   }
@@ -67,6 +77,9 @@ function toAsset(image: ReturnType<typeof inspectDocxImages>[number]): QuestionI
     data: image.data,
     altText: image.altText,
     widthPx: image.widthPx,
+    placement: image.placement,
+    crop: image.crop,
+    caption: image.caption,
     source: `${image.sourcePart} (${image.relationshipId})`
   };
 }

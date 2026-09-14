@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
+import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
 
 const request: IratRequest = {
   activityName: 'iRAT', teamSetupName: 'Team Setup',
@@ -14,7 +14,14 @@ const request: IratRequest = {
 // four initial answers, collapsed advanced controls, and separate Save / Save as new version.
 // It deliberately removes the old edit iframe but merely hides the creation modal.
 // `transform` mimics an editor that rewrites the HTML it is given, as LAMS can when a profile carries font defaults.
-async function fixture(page: Page, existing = false, versionSave = true, transform = 'value => value', toggleDelayMs = 0) {
+async function fixture(
+  page: Page,
+  existing = false,
+  versionSave = true,
+  transform = 'value => value',
+  toggleDelayMs = 0,
+  syncPromptOnQuestionSave = false
+) {
   await page.route('https://irat.test/**', async route => {
     const toggle = /\/toggleQuestionRequired\.do\?next=(true|false)/.exec(route.request().url());
     if (toggle) {
@@ -96,6 +103,7 @@ async function fixture(page: Page, existing = false, versionSave = true, transfo
             content:CKEDITOR.instances.description.data,feedback:CKEDITOR.instances.feedback?.data,
             answers:Array.from(document.querySelectorAll('.single-option-table')).map((_,i)=>CKEDITOR.instances['optionName'+i].data)};
           if(!data.title || !data.content || data.answers.some(a=>!a))throw Error('Incomplete question');
+          if(${syncPromptOnQuestionSave} && !confirm("You've made edits to the questions. Sync with the matching tRAT?")) return;
           parent.saved(data,${editing});
         }
       </script>` });
@@ -137,6 +145,22 @@ test('existing questions still require Save as new version', async ({ page }) =>
   await editor.updateQuestion({ title: 'Question 1', type: 'multiple-choice', marks: 1, content: 'Updated', mandatory: true, answers: [{ text: 'Yes', correct: true, weight: 100 }, { text: 'No', correct: false, weight: 0 }] });
   expect(await page.evaluate(() => (window as unknown as { saves: {version:boolean}[] }).saves.map(s=>s.version))).toEqual([true]);
 });
+
+for (const existing of [false, true]) {
+  test(`confirms the tRAT sync prompt raised by an ${existing ? 'existing' : 'new'} question save`, async ({ page }) => {
+    const editor = await fixture(page, existing, true, 'value => value', 0, true);
+    const question = {
+      title: 'Question 1', type: 'multiple-choice', marks: 1, content: 'Synced', mandatory: true,
+      answers: [{ text: 'Yes', correct: true, weight: 100 }, { text: 'No', correct: false, weight: 0 }]
+    };
+    if (existing) await editor.updateQuestion(question);
+    else await editor.createQuestion(question);
+    expect(editor.confirmedDialogs).toEqual([
+      "You've made edits to the questions. Sync with the matching tRAT?"
+    ]);
+    expect(await page.evaluate(() => (window as unknown as { saves: unknown[] }).saves)).toHaveLength(1);
+  });
+}
 
 test('never falls back to shared-question Save if version Save is missing', async ({ page }) => {
   const editor = await fixture(page, true, false);
@@ -184,6 +208,14 @@ test('formatting verification tolerates CKEditor serialisation differences', () 
   expect(formattingProblems('<h2>Heading</h2>', 'Heading')).toEqual(['a heading, font, or block format is present']);
   expect(formattingProblems('<p><span style="font-size:14px">x</span></p>', 'x')).toEqual(['explicit font family or size is present']);
   expect(canonicalInlineHtml('<B class="x">a</B>  <I>b</I>')).toBe('<strong>a</strong> <em>b</em>');
+});
+
+test('tRAT Print View formatting check detects a lost inline tag', () => {
+  const printable = canonicalInlineHtml('<p>The lac operon has H<sub>2</sub>O</p>');
+  expect(missingInlineFormatting(printable, 'The <em>lac</em> operon has H<sub>2</sub>O')).toEqual([
+    '<em>lac</em>'
+  ]);
+  expect(missingInlineFormatting(printable, 'H<sub>2</sub>O')).toEqual([]);
 });
 
 // Activity-level settings mirror the observed card layout: everything sits behind

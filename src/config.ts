@@ -55,6 +55,10 @@ export interface QuestionImageRequest {
   path: string;
   altText?: string;
   widthPx?: number;
+  /** Where the image sits relative to the question text. Defaults to `after`. */
+  placement?: 'before' | 'after';
+  /** Optional caption rendered directly under the image. Inline emphasis is kept. */
+  caption?: string;
 }
 
 export interface IratQuestionRequest {
@@ -105,6 +109,13 @@ export interface IratRequest {
     displayAllAfterCompletion: boolean;
     answerJustification: boolean;
     confidenceLevels: boolean;
+  };
+  /** Matching Scratchie activity that receives every iRAT question update. */
+  trat?: {
+    /** Exact authoring-node title. Defaults to the canonical TBL title "tRAT". */
+    activityName: string;
+    /** Exact Assessment activity shown in the confidence-source dropdown. */
+    confidenceSourceActivityName: string;
   };
 }
 
@@ -404,6 +415,15 @@ function validateIratRequest(value: unknown): void {
     // The deployment guide turns every iRAT setting on; only an explicit false deviates.
     if (value.advanced[key] === undefined) value.advanced[key] = true;
     else if (typeof value.advanced[key] !== 'boolean') throw new Error(`irat.advanced.${key} must be a boolean.`);
+  }
+  value.trat ??= {};
+  if (!isRecord(value.trat)) throw new Error('irat.trat must be an object.');
+  value.trat.activityName ??= 'tRAT';
+  value.trat.confidenceSourceActivityName ??= value.activityName;
+  for (const key of ['activityName', 'confidenceSourceActivityName'] as const) {
+    if (typeof value.trat[key] !== 'string' || value.trat[key].trim() === '') {
+      throw new Error(`irat.trat.${key} must be a non-empty string.`);
+    }
   }
 }
 
