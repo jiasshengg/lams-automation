@@ -139,9 +139,12 @@ npm run run:tbl -- --config configs/local.json --request-json '<REQUEST_JSON>' -
 ```
 
 Authoring stops after the design is saved and the Author screen is closed. Publishing the
-lesson to a cohort is a separate stage - see [Lesson index and monitoring](#lesson-index-and-monitoring) -
-because `AGENTS.md` requires a learner-facing lesson to be explicitly requested. The
-authoring entry points contain no publishing code at all.
+lesson to its cohort is the final stage of the full flow and runs as a separate command -
+see [Lesson index and monitoring](#lesson-index-and-monitoring). Keeping it out of the
+authoring entry points is deliberate: `AGENTS.md` requires a learner-facing lesson to be
+explicitly requested, so a request to author, copy, or fix a lesson never publishes it,
+while a request for the full end-to-end flow does include this stage. The end date always
+comes from the user, so publishing cannot happen without their involvement.
 
 To watch a run, add `--slow-mo`:
 

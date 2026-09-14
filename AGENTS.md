@@ -11,6 +11,14 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
 - When a lesson is in scope for a requested workflow, automatically fix any supported, verified issues found within that lesson; the user does not need to request the fixes separately. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
 - Automatically remove exact gate-bypass transitions and replace exact planned AE gates whose verified type/settings are wrong. Delete or rewire only elements that the reviewed plan proves must change; never infer that unrelated nodes are extra.
 - Never publish or start a copied lesson as a learner-facing lesson unless explicitly requested.
+  A request for the full/end-to-end/complete TBL flow, or for the lesson to be deployed,
+  published, or made ready for the cohort, is such an explicit request and includes the
+  publishing stage. A request to author, copy, fix, or update a lesson is not.
+- Publishing runs as its own stage after AE, through `lesson:index` with `--commit`; it is
+  never code inside an authoring entry point. Before publishing, obtain `lessonIndex.endDate`
+  from the user for that specific lesson. Never default it, and never inherit it from a
+  configuration file, an example, or a previous run. Because that value can only come from
+  the user, publishing can never happen without their involvement.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.
 
 ## Current implementation scope
