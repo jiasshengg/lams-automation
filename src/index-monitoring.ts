@@ -1,11 +1,14 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
+import { loadEnvFile } from './load-env.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { createLessonFromMostRecentDesign, openAddLesson } from './lams/lesson-index.js';
 import { openMonitoring } from './lams/monitoring.js';
 import { sendCodeToSheet } from './sheets/code-sink.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
+
+loadEnvFile();
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/example.json';

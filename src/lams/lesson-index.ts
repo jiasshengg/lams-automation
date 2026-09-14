@@ -3,6 +3,12 @@ import type { LamsConfig, LessonIndexSettings } from '../config.js';
 
 export interface LessonIndexOptions {
   commit: boolean;
+  /**
+   * The design the authoring run just saved. "Recently used designs" is ordered by LAMS,
+   * not by this run, so without this the indexer would publish whatever happens to sit on
+   * top - a different lesson entirely if anything else was authored in between.
+   */
+  expectedDesignTitle?: string;
 }
 
 export interface LessonIndexResult {
@@ -189,6 +195,12 @@ export async function createLessonFromMostRecentDesign(
   options: LessonIndexOptions
 ): Promise<LessonIndexResult> {
   const designTitle = await selectMostRecentDesign(page, config);
+  if (options.expectedDesignTitle !== undefined && designTitle !== normalise(options.expectedDesignTitle)) {
+    throw new Error(
+      `The most recent design is "${designTitle}" but this run authored "${normalise(options.expectedDesignTitle)}". ` +
+        'Refusing to publish a lesson from a design this run did not create.'
+    );
+  }
   const lessonTitle = normalise(await page.locator(SELECTORS.lessonName).inputValue());
   const endDateTime = await configureAdvancedOptions(page, config);
   const courseGrouping = await selectCourseGrouping(page, config);

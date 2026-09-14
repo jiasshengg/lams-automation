@@ -1,0 +1,62 @@
+{
+  "sourceLessonTitle": "[Jss] TEST LESSON A 280826",
+  "sourceFolderPath": ["Courses", "! My Courses", "! Sample & Orientation Lessons"],
+  "lessonTitle": "ZZ TEST full-flow 20260914",
+  "destinationFolderPath": ["Courses", "! My Courses", "DL Playground 2026/2027 [internal]"],
+  "lessonIndex": {
+    "endDate": "2026-09-30",
+    "courseGrouping": "Y1 ALL"
+  },
+  "irat": {
+    "activityName": "iRAT",
+    "teamSetupName": "Team Setup",
+    "gate": {
+      "name": "iRAT Gate",
+      "description": "iRAT Gate",
+      "type": "password",
+      "dynamicPassword": true,
+      "rotationSeconds": 30
+    },
+    "advanced": {
+      "displayAllQuestions": true
+    },
+    "questions": [
+      {
+        "title": "iRA Test Q1",
+        "type": "multiple-choice",
+        "content": "Full-flow automation test question 1. Which option is correct?",
+        "mandatory": true,
+        "answers": [
+          { "text": "Option A (correct)", "correct": true, "weight": 100 },
+          { "text": "Option B", "correct": false, "weight": 0 },
+          { "text": "Option C", "correct": false, "weight": 0 },
+          { "text": "Option D", "correct": false, "weight": 0 }
+        ]
+      },
+      {
+        "title": "iRA Test Q2",
+        "type": "multiple-choice",
+        "content": "Full-flow automation test question 2. Which option is correct?",
+        "mandatory": true,
+        "answers": [
+          { "text": "Option A", "correct": false, "weight": 0 },
+          { "text": "Option B (correct)", "correct": true, "weight": 100 },
+          { "text": "Option C", "correct": false, "weight": 0 },
+          { "text": "Option D", "correct": false, "weight": 0 }
+        ]
+      },
+      {
+        "title": "iRAT Test Q3",
+        "type": "multiple-choice",
+        "content": "Full-flow automation test question 3. Which option is correct?",
+        "mandatory": true,
+        "answers": [
+          { "text": "Option A", "correct": false, "weight": 0 },
+          { "text": "Option B", "correct": false, "weight": 0 },
+          { "text": "Option C (correct)", "correct": true, "weight": 100 },
+          { "text": "Option D", "correct": false, "weight": 0 }
+        ]
+      }
+    ]
+  }
+}

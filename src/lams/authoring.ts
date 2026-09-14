@@ -265,3 +265,59 @@ export async function openActivityProperties(
     );
   }
 }
+
+/**
+ * Step 81 of the deployment guide: leave the Author screen once the design is saved.
+ *
+ * The toolbar's Close control follows the same id convention as #openButton and
+ * #saveButton, so it is addressed as #closeButton and overridable through
+ * selectors.closeAuthoring for a LAMS build that renames it. Authoring usually opens in
+ * its own popup; when the button is genuinely absent there, closing that page leaves the
+ * course page exactly where the button would have. A same-page authoring surface has no
+ * such fallback, so a missing button is an error rather than a silent no-op.
+ *
+ * Closing an authoring page with unsaved work raises a confirm, and every caller here has
+ * already saved and verified, so the handler accepts it rather than stranding the run.
+ */
+export async function closeAuthoring(
+  authoringPage: Page,
+  coursePage: Page,
+  config: LamsConfig
+): Promise<void> {
+  if (authoringPage.isClosed()) {
+    console.log('Authoring page was already closed.');
+    return;
+  }
+
+  const timeout = config.browser.actionTimeoutMs;
+  const selector = config.selectors.closeAuthoring ?? '#closeButton';
+  const closeButton = authoringPage.locator(selector).first();
+  const hasButton = await closeButton.isVisible().catch(() => false);
+  const separatePage = authoringPage !== coursePage;
+
+  if (!hasButton && !separatePage) {
+    const directory = await saveDiagnostics(authoringPage, 'authoring-close-button-missing');
+    throw new Error(
+      `No authoring Close control matched "${selector}" and authoring is not a separate page to close. Diagnostics: ${directory}`
+    );
+  }
+
+  const dialogHandler = async (dialog: { accept(): Promise<void> }) => dialog.accept();
+  authoringPage.on('dialog', dialogHandler);
+  try {
+    if (hasButton) {
+      await closeButton.click();
+      if (separatePage) {
+        await authoringPage.waitForEvent('close', { timeout }).catch(() => undefined);
+      } else {
+        await authoringPage.waitForURL((url) => !/authoring/i.test(url.href), { timeout }).catch(() => undefined);
+      }
+    }
+    if (separatePage && !authoringPage.isClosed()) await authoringPage.close();
+  } finally {
+    if (!authoringPage.isClosed()) authoringPage.off('dialog', dialogHandler);
+  }
+
+  await coursePage.bringToFront().catch(() => undefined);
+  console.log(`Authoring closed via ${hasButton ? selector : 'the authoring page itself'}.`);
+}

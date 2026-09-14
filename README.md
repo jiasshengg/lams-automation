@@ -138,6 +138,65 @@ For one continuous copy → iRAT → AE run, include reviewed AE JSON:
 npm run run:tbl -- --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
 ```
 
+That run continues through deployment-guide steps 81-92 in the same browser session: it
+closes the Author screen, opens Add Lesson on the course page, selects the most recent
+design, turns off "Display activity scores on completion", enables scheduling with the end
+date at `23:59`, picks the course grouping, clicks Add now, and reads the 5-digit lesson
+code from Monitoring. Publishing runs whenever the config carries a `lessonIndex` block;
+`--skip-index` stops after authoring, and without a `lessonIndex` there is no end date to
+publish with, so the run stops and says so.
+
+Publishing makes the lesson visible to learners and cannot be undone from this tool, so two
+things guard it: `--dry-run` fills and verifies the whole Add Lesson form and stops before
+"Add now", and a committed run refuses to publish unless the top "Recently used designs"
+entry is the lesson this run just created.
+
+Because "Recently used designs" is ordered by LAMS rather than by this run, publishing
+refuses to continue unless the top design is the lesson the copy step just created.
+
+| Flag | Effect |
+| --- | --- |
+| `--skip-index` | Stop after authoring instead of publishing. |
+| `--publish-code` | POST the lesson code to the Kanban sheet once the lesson exists. |
+| `--dry-run` | Stop after the copy step, then preview the Add Lesson form without submitting it. |
+| `--slow-mo <ms>` | Pause before every action and force a visible browser, to watch a run. |
+
+`lesson:index` remains available for publishing a design that was authored in an earlier
+run.
+
+`lessonIndex` is a `--request-json` field like the rest of the per-run request, so the end
+date and grouping travel with the same JSON the authoring step uses - no separate config
+edit or second command:
+
+```json
+{
+  "lessonIndex": { "endDate": "2026-09-03", "courseGrouping": "Y1 ALL" }
+}
+```
+
+`configs/request-template.json` is a working starting point with the iRAT and `lessonIndex`
+fields already in place; copy it, edit the values, and pass it with `--request-json`.
+
+To watch the whole thing run, add `--slow-mo`:
+
+```bash
+npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>' --slow-mo 500
+```
+
+### `npm run` drops flags in PowerShell
+
+npm's PowerShell shim strips `--flag` names from `npm run <script> -- --flag value`, leaving
+only the values, so the script silently falls back to its defaults. Verified with npm 10.9.2
+on Windows; Git Bash and cmd are unaffected. Either run the entry point directly, which
+always works:
+
+```bash
+npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST_JSON>'
+```
+
+or run the `npm run` form from Git Bash rather than PowerShell. If a run reports missing
+configuration you are sure you passed, check the echoed command line for dropped flags.
+
 Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the per-run request JSON:
 
 ```json

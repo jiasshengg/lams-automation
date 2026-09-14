@@ -187,3 +187,28 @@ test('commit clicks Add now after the form is complete', async ({ page }) => {
   expect(result.committed).toBe(true);
   await expect(page.locator('body')).toHaveAttribute('data-added', 'true');
 });
+
+test('publishing stops when the top design is not the one this run authored', async ({ page }) => {
+  await page.setContent(ADD_LESSON_PAGE);
+
+  await expect(
+    createLessonFromMostRecentDesign(page, baseConfig(), {
+      commit: true,
+      expectedDesignTitle: 'FOM TBL05 310826 2026Y1'
+    })
+  ).rejects.toThrow(/most recent design is "FOM TBL06 030926 2026Y1" but this run authored "FOM TBL05 310826 2026Y1"/);
+
+  await expect(page.locator('body')).not.toHaveAttribute('data-added');
+});
+
+test('publishing proceeds when the top design matches the authored lesson', async ({ page }) => {
+  await page.setContent(ADD_LESSON_PAGE);
+
+  const result = await createLessonFromMostRecentDesign(page, baseConfig(), {
+    commit: true,
+    expectedDesignTitle: '  FOM TBL06 030926 2026Y1  '
+  });
+
+  expect(result.committed).toBe(true);
+  await expect(page.locator('body')).toHaveAttribute('data-added', 'true');
+});

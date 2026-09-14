@@ -1,4 +1,5 @@
 import { loadConfig, parseRequestOverrides } from './config.js';
+import { loadEnvFile } from './load-env.js';
 import { sendCodeToSheet } from './sheets/code-sink.js';
 
 /**
@@ -10,6 +11,8 @@ import { sendCodeToSheet } from './sheets/code-sink.js';
  * With no --identifier the lesson title from the config is used, because that is the
  * exact string the sheet keys on in "TBL/Quiz Details" (column G).
  */
+loadEnvFile();
+
 async function main(): Promise<void> {
   const code = readArgument('--code');
   if (!code) throw new Error('Pass --code <5 digits>.');

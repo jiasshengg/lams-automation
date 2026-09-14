@@ -142,6 +142,11 @@ export interface LamsConfig {
      * bundled Chromium is unsupported on this OS, so an installed browser is driven instead.
      */
     channel?: string;
+    /**
+     * Milliseconds Playwright pauses before each action. Purely for watching a live run;
+     * it slows every step, so it is left unset for normal use.
+     */
+    slowMoMs?: number;
   };
   selectors: {
     previousCohort?: LocatorSpec;
@@ -151,6 +156,8 @@ export interface LamsConfig {
     aeOpenActivity?: LocatorSpec;
     authoringRoot?: LocatorSpec;
     authoringNode?: AuthoringNodeSelector;
+    /** CSS for the Author toolbar's Close control; defaults to #closeButton. */
+    closeAuthoring?: string;
     openAddLesson?: LocatorSpec;
     openMonitoring?: LocatorSpec;
   };
@@ -270,7 +277,8 @@ export async function loadConfig(
     // LAMS initialises the authoring canvas well after the toolbar paints, so surface
     // readiness needs a longer budget than an ordinary action.
     readyTimeoutMs: config.browser?.readyTimeoutMs ?? 60_000,
-    ...(config.browser?.channel ? { channel: config.browser.channel } : {})
+    ...(config.browser?.channel ? { channel: config.browser.channel } : {}),
+    ...(config.browser?.slowMoMs !== undefined ? { slowMoMs: config.browser.slowMoMs } : {})
   };
   config.selectors ??= {};
   validateLocatorSpecs(config.selectors);
@@ -281,11 +289,17 @@ export async function loadConfig(
  * Launch options shared by every persistent-profile entry point. `channel` is only
  * present when configured so Playwright otherwise keeps using its bundled Chromium.
  */
-export function browserLaunchOptions(config: LamsConfig, overrides: { headless?: boolean } = {}) {
+export function browserLaunchOptions(
+  config: LamsConfig,
+  overrides: { headless?: boolean; slowMoMs?: number } = {}
+) {
+  const slowMo = overrides.slowMoMs ?? config.browser.slowMoMs;
   return {
     headless: overrides.headless ?? config.browser.headless,
     viewport: null,
-    ...(config.browser.channel ? { channel: config.browser.channel } : {})
+    ...(config.browser.channel ? { channel: config.browser.channel } : {}),
+    // slowMo:0 is Playwright's default, so an unset value stays out of the options entirely.
+    ...(slowMo ? { slowMo } : {})
   };
 }
 

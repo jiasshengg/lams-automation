@@ -239,3 +239,41 @@ test('reads --request-json from a file when given a path instead of inline JSON'
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('slow motion stays out of the launch options unless it is asked for', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-config-slowmo-'));
+  try {
+    const configPath = path.join(directory, 'config.json');
+    const example = JSON.parse(await readFile('configs/example.json', 'utf8')) as { browser: Record<string, unknown> };
+
+    const plain = await loadConfig('configs/example.json');
+    expect(plain.browser.slowMoMs).toBeUndefined();
+    expect(browserLaunchOptions(plain)).not.toHaveProperty('slowMo');
+
+    // A per-run override is enough; the config need not carry it.
+    expect(browserLaunchOptions(plain, { slowMoMs: 400 })).toMatchObject({ slowMo: 400 });
+    // Zero is Playwright's own default, so it is not worth emitting.
+    expect(browserLaunchOptions(plain, { slowMoMs: 0 })).not.toHaveProperty('slowMo');
+
+    example.browser.slowMoMs = 250;
+    await writeFile(configPath, JSON.stringify(example), 'utf8');
+    const slow = await loadConfig(configPath);
+    expect(slow.browser.slowMoMs).toBe(250);
+    expect(browserLaunchOptions(slow)).toMatchObject({ slowMo: 250 });
+    // An explicit per-run value wins over the configured one.
+    expect(browserLaunchOptions(slow, { slowMoMs: 900 })).toMatchObject({ slowMo: 900 });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('lessonIndex settings arrive through --request-json, not a separate config edit', async () => {
+  const overrides = parseRequestOverrides(
+    JSON.stringify({ lessonIndex: { endDate: '2026-09-03', courseGrouping: 'Y1 ALL' } })
+  );
+
+  expect(overrides.lessonIndex).toEqual({ endDate: '2026-09-03', courseGrouping: 'Y1 ALL' });
+
+  const config = await loadConfig('configs/example.json', overrides);
+  expect(config.lessonIndex).toEqual({ endDate: '2026-09-03', courseGrouping: 'Y1 ALL' });
+});
