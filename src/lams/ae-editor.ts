@@ -1,6 +1,7 @@
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import { inlineHtmlToText, sanitizeInlineHtml } from '../ae/inline-html.js';
 import type { AENodePlan, AEPlan, AEQuestionPlan } from '../ae/plan.js';
+import { IMAGE_SLOT_HTML } from '../ae/prompt-lines.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 import { applyAEActivitySettings } from './ae-settings.js';
 import { inspectAuthoringGraph, openActivityProperties, type GraphNode } from './authoring.js';
@@ -305,6 +306,18 @@ export class LamsAEEditor {
 export function questionDescriptionHtml(promptHtml: string, images: UploadedImage[]): string {
   const before = imageHtml(images, 'before');
   const after = imageHtml(images, 'after');
+  const parts = promptHtml.split(IMAGE_SLOT_HTML);
+  if (parts.length > 1) {
+    // The prompt marks where the document printed each figure: one figure per slot in order, any
+    // extra figures joining the last slot. An unfilled slot simply disappears.
+    const figures = images.filter((image) => image.placement === 'before');
+    const filled = parts.reduce((html, part, index) => {
+      if (index === 0) return part;
+      const slotFigures = index === parts.length - 1 ? figures.slice(index - 1) : figures.slice(index - 1, index);
+      return `${html}${imageHtml(slotFigures)}${part}`;
+    }, '');
+    return `${filled}${after}`;
+  }
   if (before === '') return `${promptHtml}${after}`;
   // A figure printed above the stem still belongs below the case narrative that introduces it
   // ("...the karyotype below:"), so it goes immediately before the numbered stem rather than above

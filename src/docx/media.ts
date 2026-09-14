@@ -185,7 +185,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
  * answer options, answer keys, rationales, and new sections all belong to the
  * document structure instead, so an image followed by one of them has no caption.
  */
-function isCaption(text: string): boolean {
+export function isCaption(text: string): boolean {
   return (
     !QUESTION_START.test(text) &&
     !SECTION_BOUNDARY.test(text) &&

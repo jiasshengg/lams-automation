@@ -2,6 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { chromium } from '@playwright/test';
 import { buildAEPlan } from './ae/plan.js';
+import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { resolveAEQuestionImages } from './docx/question-images.js';
 import { resolveInputFile } from './input-file.js';
@@ -15,7 +16,7 @@ import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const aeJson = readArgument('--ae-json');
-  if (!aeJson) throw new Error('Usage: npm run apply:ae -- --config <path> --ae-json <path> --request-json <json> [--team-setup <title>] [--dry-run]');
+  if (!aeJson) throw new Error('Usage: npm run apply:ae -- --config <path> --ae-json <path> --request-json <json> [--team-setup <title>] [--dry-run] [--skip-sot-check]');
   const commit = !process.argv.includes('--dry-run');
   const keepOpen = process.argv.includes('--keep-open');
   const config = await loadConfig(
@@ -23,6 +24,8 @@ async function main(): Promise<void> {
     parseRequestOverrides(readArgument('--request-json'))
   );
   const plan = buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown);
+  // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
+  await assertAEPlanMatchesSOT(plan);
   const teamSetup = readArgument('--team-setup') ?? config.irat?.teamSetupName ?? 'Team Setup';
   const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);

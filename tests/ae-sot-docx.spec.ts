@@ -16,8 +16,8 @@ test('extracts split runs, bold answer options, and image counts from Word XML',
   </w:body></w:document>`;
 
   expect(extractSOTParagraphs(xml)).toEqual([
-    { text: '--- BREAK ---', html: '--- BREAK ---', bold: false, imageCount: 0 },
-    { text: 'B. Correct answer', html: '<strong>B. Correct answer</strong>', bold: true, imageCount: 1 }
+    { text: '--- BREAK ---', html: '--- BREAK ---', bold: false, imageCount: 0, blankLinesBefore: 0, pageBreakBefore: false },
+    { text: 'B. Correct answer', html: '<strong>B. Correct answer</strong>', bold: true, imageCount: 1, blankLinesBefore: 0, pageBreakBefore: false }
   ]);
 });
 

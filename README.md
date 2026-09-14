@@ -208,7 +208,17 @@ The extractor treats only a standalone literal `--- BREAK ---` paragraph as an A
 
 `Case` headings do name the nodes. A node inside one case is titled `AE Case 3 Q3-6` (or `AE Case 3 Q4` for a single question); a node spanning two cases is titled `AE Case 1 Q1 to Case 2 Q2`. A heading stays in effect across break markers, so a node that continues the previous case keeps that case number. Questions outside any numbered `Case` heading fall back to `AE Q<range>` and raise a warning. Suggested titles are review aids, not authority for exact names in LAMS.
 
-`--draft` writes a reviewable AE plan JSON transcribed from the document: those node titles, the case narrative that opens each node, every stem and option with the bold, italic, underline, superscript, and subscript the document uses, detected answer keys, explicit marks, and gates. Retyping the document by hand is what makes titles, emphasis, and figure order drift, so start from the draft and resolve its `_review` notes and `TODO_` keys.
+`--draft` writes a reviewable AE plan JSON transcribed from the document: those node titles, the case narrative that opens each node, every stem and option with the bold, italic, underline, superscript, and subscript the document uses, detected answer keys, explicit marks, and gates. Retyping the document by hand is what makes titles, emphasis, and figure order drift, so always start from the draft and resolve its `_review` notes and `TODO_` keys.
+
+The draft follows the document's layout, while the paragraph format and font stay at the LAMS defaults:
+
+- each Word paragraph is one line, and each blank line is an empty line — whether the document typed an empty paragraph or left a visible gap (6pt or more) with paragraph spacing;
+- a figure printed inside the case text is held in place by a `{{image}}` line and written exactly there;
+- Word lettered lists (`A.`, `B.`, …) get the letters Word prints, so they read as answer options;
+- text that follows a page break inside a node, such as the next part of a case, opens the next question's prompt;
+- tables keep their printed width, column proportions, and centred or right-aligned cells.
+
+`plan:ae`, `apply:ae`, and `run:tbl` re-read `sourceDocx` before anything reaches LAMS and refuse an AE JSON whose node titles, prompts, tables, or options differ from the document. Answer keys, marks, and weights are not compared. Pass `--skip-sot-check` only for a confirmed, intentional difference.
 
 Extract the embedded images and inspect their question assignments:
 

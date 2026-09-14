@@ -13,6 +13,7 @@ import { resolveAEQuestionImages } from './docx/question-images.js';
 import { readFile } from 'node:fs/promises';
 import { resolveInputFile } from './input-file.js';
 import { buildAEPlan } from './ae/plan.js';
+import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
 import { reconcileAndWriteAEGraph } from './lams/ae-graph.js';
 
@@ -27,6 +28,8 @@ async function main(): Promise<void> {
   const aePlan = aeJson
     ? buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown)
     : undefined;
+  // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
+  if (aePlan) await assertAEPlanMatchesSOT(aePlan);
   // --slow-mo pauses before every action so a live run can be watched step by step.
   const slowMoArgument = readArgument('--slow-mo');
   const slowMoMs = slowMoArgument === undefined ? undefined : Number(slowMoArgument);

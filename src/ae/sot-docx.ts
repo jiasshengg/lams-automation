@@ -1,7 +1,9 @@
+import { isCaption } from '../docx/media.js';
 import { sliceInlineHtml, stripOptionPrefixHtml, withoutUniformInlineTag } from './inline-html.js';
-import { extractSOTParagraphs, readDocumentXmlFromDocx, type SOTParagraph } from './sot-paragraphs.js';
+import { IMAGE_SLOT_LINE } from './prompt-lines.js';
+import { extractSOTParagraphs, readDocumentXmlFromDocx, readSOTDocxParts, type SOTParagraph } from './sot-paragraphs.js';
 
-export { extractSOTParagraphs, readDocumentXmlFromDocx };
+export { extractSOTParagraphs, readDocumentXmlFromDocx, readSOTDocxParts };
 export type { SOTParagraph };
 
 export type ObservedAEQuestionType = 'single-select' | 'multiple-select' | 'open-response';
@@ -20,6 +22,13 @@ export interface AEQuestionObservation {
   caseNumber: number | null;
   /** The question stem exactly as written, including emphasis. */
   promptHtml: string;
+  /**
+   * Prompt lines printed ahead of this stem after a page break inside the node, such as the next
+   * part of a case. Empty strings are blank lines; see `prompt-lines.ts`.
+   */
+  leadInLines: string[];
+  /** Blank lines the document leaves directly above the stem. */
+  blankLinesBeforeStem: number;
   optionLabels: string[];
   correctAnswerLabels: string[];
   options: AEObservedOption[];
@@ -33,7 +42,10 @@ export interface AENodeObservation {
   questionRange: string;
   caseNumbers: number[];
   caseHeadings: string[];
-  /** Case narrative shown before the node's first question, in document order. */
+  /**
+   * Case narrative shown before the node's first question, as prompt lines in document order:
+   * empty strings are blank lines and `IMAGE_SLOT_LINE` marks where a figure is printed.
+   */
   contextHtml: string[];
   imageCount: number;
   suggestedTitle: string;
@@ -122,12 +134,18 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
       throw new Error(`Break-derived AE group ${index + 1} does not contain a numbered question.`);
     }
 
+    const slices = questionStarts.map((start, questionIndex) =>
+      group.slice(start.paragraphIndex, questionStarts[questionIndex + 1]?.paragraphIndex ?? group.length)
+    );
+    // Only a question followed by another in this node can hand a lead-in forward.
+    const leadInStarts = slices.map((slice, questionIndex) => (questionIndex < slices.length - 1 ? leadInStart(slice) : slice.length));
     const nodeQuestions = questionStarts.map((start, questionIndex) => {
-      const nextStart = questionStarts[questionIndex + 1]?.paragraphIndex ?? group.length;
+      const previous = questionIndex > 0 ? slices[questionIndex - 1]!.slice(leadInStarts[questionIndex - 1]) : [];
       const observed = observeQuestion(
-        group.slice(start.paragraphIndex, nextStart),
+        slices[questionIndex]!.slice(0, leadInStarts[questionIndex]),
         start.number,
-        caseNumbers[offset + groupStart + start.paragraphIndex] ?? null
+        caseNumbers[offset + groupStart + start.paragraphIndex] ?? null,
+        { leadInLines: promptLines(previous), blankLinesBeforeStem: group[start.paragraphIndex]!.blankLinesBefore }
       );
       questions.push(observed.observation);
       if (observed.unlabelledOptionBlock) unlabelledOptionBlockQuestions.push(start.number);
@@ -147,7 +165,8 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
         nodeQuestions.map((question) => question.caseNumber).filter((value): value is number => value !== null)
       ),
       caseHeadings: group.map((paragraph) => paragraph.text).filter((text) => CASE_HEADING.test(text)),
-      contextHtml: contextParagraphs(group.slice(0, questionStarts[0]!.paragraphIndex), index === 0 && precedingCaseIndex < 0),
+      contextHtml:
+        index === 0 && precedingCaseIndex < 0 ? [] : promptLines(group.slice(0, questionStarts[0]!.paragraphIndex)),
       imageCount: group.reduce((sum, paragraph) => sum + paragraph.imageCount, 0),
       suggestedTitle: suggestNodeTitle(
         nodeQuestions[0]!.caseNumber,
@@ -273,11 +292,48 @@ function suggestNodeTitle(firstCase: number | null, lastCase: number | null, fir
   return `AE Case ${firstCase} Q${first} to Case ${lastCase} Q${last}`;
 }
 
-function contextParagraphs(paragraphs: SOTParagraph[], skipFrontMatter: boolean): string[] {
-  if (skipFrontMatter) return [];
-  return paragraphs
-    .filter((paragraph) => paragraph.text !== '' && !METADATA_LABEL.test(paragraph.text))
-    .map((paragraph) => paragraph.html);
+/**
+ * Renders paragraphs as prompt lines, keeping the blank lines above each one and holding a figure's
+ * place with `IMAGE_SLOT_LINE`. The caption under a figure is written with the image itself, so it is
+ * not repeated as a line of text.
+ */
+function promptLines(paragraphs: SOTParagraph[]): string[] {
+  const lines: string[] = [];
+  let awaitingCaption = false;
+  for (const paragraph of paragraphs) {
+    if (paragraph.text === '') {
+      lines.push(...blankLines(paragraph.blankLinesBefore), IMAGE_SLOT_LINE);
+      awaitingCaption = true;
+      continue;
+    }
+    const caption = awaitingCaption && isCaption(paragraph.text);
+    awaitingCaption = false;
+    if (caption || METADATA_LABEL.test(paragraph.text)) continue;
+    lines.push(...blankLines(paragraph.blankLinesBefore), paragraph.html);
+  }
+  return lines;
+}
+
+function blankLines(count: number): string[] {
+  return Array.from({ length: count }, () => '');
+}
+
+/**
+ * Where a question's slice stops and the next question's lead-in starts: at a page break that
+ * opens text belonging to no answer option, answer key, or rationale. Without one, the whole slice
+ * belongs to the question.
+ */
+function leadInStart(slice: SOTParagraph[]): number {
+  let start = -1;
+  slice.forEach((paragraph, index) => {
+    if (index > 0 && paragraph.pageBreakBefore) start = index;
+  });
+  if (start < 0) return slice.length;
+  const leadIn = slice.slice(start);
+  const structural = leadIn.some(
+    (paragraph) => OPTION_START.test(paragraph.text) || ANSWER_LINE.test(paragraph.text) || RATIONALE_LINE.test(paragraph.text)
+  );
+  return structural || leadIn.every((paragraph) => paragraph.text === '') ? slice.length : start;
 }
 
 interface OptionEntry {
@@ -392,7 +448,12 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   return { entries: [], unlabelledOptionBlock: answerLabel !== undefined };
 }
 
-function observeQuestion(paragraphs: SOTParagraph[], number: number, caseNumber: number | null): ObservedQuestion {
+function observeQuestion(
+  paragraphs: SOTParagraph[],
+  number: number,
+  caseNumber: number | null,
+  layout: { leadInLines: string[]; blankLinesBeforeStem: number }
+): ObservedQuestion {
   const { entries: optionParagraphs, unlabelledOptionBlock } = collectOptionEntries(paragraphs);
   const optionLabels = optionParagraphs.map(({ label }) => label);
   const explicitAnswer = paragraphs
@@ -420,6 +481,8 @@ function observeQuestion(paragraphs: SOTParagraph[], number: number, caseNumber:
       explicitMarks: marksMatch ? Number(marksMatch[1]) : null,
       caseNumber,
       promptHtml: stem?.html ?? '',
+      leadInLines: layout.leadInLines,
+      blankLinesBeforeStem: layout.blankLinesBeforeStem,
       optionLabels,
       correctAnswerLabels,
       options: optionParagraphs.map((entry) => ({

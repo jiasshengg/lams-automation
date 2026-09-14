@@ -46,7 +46,12 @@ export function buildAEDraft(
     title: node.suggestedTitle,
     questions: node.questionNumbers.map((number, index) => {
       const question = analysis.questions.find((candidate) => candidate.number === number)!;
-      const prompt = index === 0 ? [...node.contextHtml, question.promptHtml].join('\n') : question.promptHtml;
+      const opening = index === 0 ? node.contextHtml : question.leadInLines;
+      const prompt = trimBlankLines([
+        ...opening,
+        ...Array.from({ length: question.blankLinesBeforeStem }, () => ''),
+        question.promptHtml
+      ]).join('\n');
       const draft: AEDraftQuestion = {
         number,
         type: question.type === 'open-response' ? 'essay' : 'mcq',
@@ -84,6 +89,12 @@ export function buildAEDraft(
     nodes,
     gates
   };
+}
+
+/** Blank lines above a prompt belong to whatever the document printed before it. */
+function trimBlankLines(lines: string[]): string[] {
+  const content = lines.flatMap((line, index) => (line === '' ? [] : [index]));
+  return content.length === 0 ? [] : lines.slice(content[0], content.at(-1)! + 1);
 }
 
 function imageSummary(images: DocxImage[]): string {
