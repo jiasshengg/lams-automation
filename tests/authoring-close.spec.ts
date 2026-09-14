@@ -83,3 +83,22 @@ test('a same-page authoring surface with no Close control fails loudly', async (
     /No authoring Close control matched "#closeButton"/
   );
 });
+
+/**
+ * Reproduces the live failure: after an Open/Save As, LAMS leaves #ldStoreDialog showing
+ * over the toolbar, and it intercepts the pointer event aimed at Close.
+ */
+const AUTHOR_PAGE_BEHIND_MODAL = `
+  <button id="closeButton" onclick="document.body.dataset.closed = 'true'"
+          style="position:fixed;top:10px;left:10px">Close</button>
+  <div id="ldStoreDialog" role="dialog"
+       style="position:fixed;inset:0;background:rgba(0,0,0,.3)">Open design</div>
+`;
+
+test('closes through a LAMS modal that intercepts the pointer event', async ({ page }) => {
+  await page.setContent(AUTHOR_PAGE_BEHIND_MODAL);
+
+  await closeAuthoring(page, page, baseConfig());
+
+  await expect(page.locator('body')).toHaveAttribute('data-closed', 'true');
+});

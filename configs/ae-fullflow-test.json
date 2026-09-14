@@ -1,0 +1,33 @@
+{
+  "sourceLabel": "Full-flow automation test AE",
+  "breakMarkerCount": 0,
+  "expectedTotalMarks": 8,
+  "_review": [
+    "Matches the single existing AE node in [Jss] TEST LESSON A 280826 ('AE Test Qns'),",
+    "so the reconciler writes content into that node instead of creating new nodes/gates.",
+    "breakMarkerCount 0 => 1 AE node and 0 AE gates."
+  ],
+  "nodes": [
+    {
+      "title": "AE Test Qns",
+      "questions": [
+        {
+          "number": 1,
+          "type": "mcq",
+          "prompt": "Full-flow automation test. Which option is correct? (4 marks)",
+          "options": [
+            { "text": "A) First option", "correct": false },
+            { "text": "B) Correct option", "correct": true },
+            { "text": "C) Third option", "correct": false }
+          ]
+        },
+        {
+          "number": 2,
+          "type": "essay",
+          "prompt": "2. Explain your reasoning for the answer above. (4 marks)"
+        }
+      ]
+    }
+  ],
+  "gates": []
+}

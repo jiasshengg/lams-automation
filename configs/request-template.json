@@ -4,8 +4,7 @@
   "lessonTitle": "ZZ TEST full-flow 20260914",
   "destinationFolderPath": ["Courses", "! My Courses", "DL Playground 2026/2027 [internal]"],
   "lessonIndex": {
-    "endDate": "2026-09-30",
-    "courseGrouping": "Y1 ALL"
+    "endDate": "2026-09-30"
   },
   "irat": {
     "activityName": "iRAT",
@@ -15,7 +14,7 @@
       "description": "iRAT Gate",
       "type": "password",
       "dynamicPassword": true,
-      "rotationSeconds": 30
+      "rotationSeconds": 10
     },
     "advanced": {
       "displayAllQuestions": true

@@ -306,7 +306,14 @@ export async function closeAuthoring(
   authoringPage.on('dialog', dialogHandler);
   try {
     if (hasButton) {
-      await closeButton.click();
+      // A LAMS modal left open over the toolbar (#ldStoreDialog after an Open/Save As, for
+      // one) keeps intercepting pointer events, so a real click retries until it times out.
+      // The inline handler runs either way, so an intercepted click is dispatched instead.
+      try {
+        await closeButton.click({ timeout: Math.min(timeout, 5_000) });
+      } catch {
+        await closeButton.dispatchEvent('click');
+      }
       if (separatePage) {
         await authoringPage.waitForEvent('close', { timeout }).catch(() => undefined);
       } else {
