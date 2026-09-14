@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     console.log(
       aeResult
         ? 'Verified: configured course, copy destination, iRAT content/Print View, AE content/Print View, and post-save AE graph.'
-        : 'Verified: configured course, copy destination, iRAT graph readiness, Print View, and post-save gate state.'
+        : 'Verified: configured course, copy destination, iRAT/tRAT graph readiness, Print View, synced tRAT questions, tRAT confidence/default settings, and post-save gate state.'
     );
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'continuous-tbl-irat-failure').catch(() => undefined);

@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 import type { LamsConfig } from '../config.js';
-import { waitForAuthoringReady } from './authoring.js';
+import { inspectAuthoringGraph, waitForAuthoringReady } from './authoring.js';
+import { plannedGateRotations, setGateRotationSeconds } from './gate-properties.js';
 import { waitForVisibleTarget } from './navigation.js';
 
 export interface CopyLessonOptions {
@@ -130,6 +131,10 @@ export async function copyLesson(
   config: LamsConfig,
   options: CopyLessonOptions
 ): Promise<CopyLessonResult> {
+  const rotations = await plannedGateRotations(page, config);
+  if (!options.commit) {
+    for (const rotation of rotations) console.log(`Dry run: copied gate ${rotation.name} would be verified/set to ${rotation.seconds}s.`);
+  }
   await page.locator('#saveDropButton').click();
   await page.getByRole('link', { name: 'Save as', exact: true }).click();
 
@@ -173,6 +178,38 @@ export async function copyLesson(
     state: 'visible',
     timeout: config.browser.actionTimeoutMs
   });
+  await page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
+  if (rotations.length) {
+    // Open the saved destination normally, even when the source required Open a copy.
+    const savedConfig = { ...config, openSourceAsCopy: false };
+    await openLessonFromLibrary(page, config.destinationFolderPath, config.lessonTitle, savedConfig);
+    let changed = false;
+    for (const rotation of rotations) {
+      const graph = await inspectAuthoringGraph(page);
+      const matches = graph.nodes.filter(node => node.type === 'gate' && node.name === rotation.name);
+      if (matches.length !== 1) throw new Error(`Expected exactly one gate named "${rotation.name}" in the copy.`);
+      if (matches[0]!.rotationSeconds !== rotation.seconds) {
+        await setGateRotationSeconds(page, config, rotation.name, rotation.seconds);
+        changed = true;
+      }
+    }
+    if (changed) {
+      const save = page.locator('#saveButton');
+      if (!(await save.isEnabled())) throw new Error('Authoring Save remained disabled after changing gate rotation.');
+      await save.click();
+      await page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
+    }
+    await openLessonFromLibrary(page, config.destinationFolderPath, config.lessonTitle, savedConfig);
+    const persisted = await inspectAuthoringGraph(page);
+    for (const rotation of rotations) {
+      const matches = persisted.nodes.filter(node => node.type === 'gate' && node.name === rotation.name);
+      if (matches.length !== 1 || matches[0]!.rotationSeconds !== rotation.seconds ||
+          matches[0]!.gateType !== 'password' || matches[0]!.dynamicPassword !== true) {
+        throw new Error(`Saved copy did not retain the requested rotation for "${rotation.name}".`);
+      }
+      console.log(`Verified saved gate rotation: ${rotation.name} = ${rotation.seconds}s`);
+    }
+  }
   await verifyCopiedLessonInDestination(page, config);
   console.log(`Verified copied lesson in destination: ${config.lessonTitle}`);
   return {

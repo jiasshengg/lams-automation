@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml } from '../src/lams/irat-editor.js';
+import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
 
 const request: IratRequest = {
   activityName: 'iRAT', teamSetupName: 'Team Setup',
@@ -14,8 +14,21 @@ const request: IratRequest = {
 // four initial answers, collapsed advanced controls, and separate Save / Save as new version.
 // It deliberately removes the old edit iframe but merely hides the creation modal.
 // `transform` mimics an editor that rewrites the HTML it is given, as LAMS can when a profile carries font defaults.
-async function fixture(page: Page, existing = false, versionSave = true, transform = 'value => value') {
+async function fixture(
+  page: Page,
+  existing = false,
+  versionSave = true,
+  transform = 'value => value',
+  toggleDelayMs = 0,
+  syncPromptOnQuestionSave = false
+) {
   await page.route('https://irat.test/**', async route => {
+    const toggle = /\/toggleQuestionRequired\.do\?next=(true|false)/.exec(route.request().url());
+    if (toggle) {
+      if (toggleDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, toggleDelayMs));
+      await route.fulfill({ contentType: 'text/plain', body: toggle[1]! });
+      return;
+    }
     if (route.request().url() === 'https://irat.test/') {
       await route.fulfill({ contentType: 'text/html', body: `
         <button onclick="document.querySelector('#menu').hidden=false">Create question</button>
@@ -30,7 +43,17 @@ async function fixture(page: Page, existing = false, versionSave = true, transfo
             tr.querySelector('span').textContent=title;
             return tr;
           }
-          function toggleQuestionRequired(button) { button.classList.toggle('text-danger'); button.classList.toggle('text-muted'); }
+          // Mirrors LAMS: the stored value comes back from the server, and the class is
+          // only stamped when the reply matches what the handler predicted.
+          async function toggleQuestionRequired(button) {
+            const predicted = !button.classList.contains('text-danger');
+            const reply = await (await fetch('/toggleQuestionRequired.do?next=' + predicted)).text();
+            const stored = reply === 'true';
+            if (stored === predicted) {
+              button.classList.toggle('text-danger', stored);
+              button.classList.toggle('text-muted', !stored);
+            }
+          }
           function openQuestion(existing) {
             const modal=document.querySelector('#qb-question-authoring-modal');
             modal.hidden=false; modal.className='show';
@@ -80,6 +103,7 @@ async function fixture(page: Page, existing = false, versionSave = true, transfo
             content:CKEDITOR.instances.description.data,feedback:CKEDITOR.instances.feedback?.data,
             answers:Array.from(document.querySelectorAll('.single-option-table')).map((_,i)=>CKEDITOR.instances['optionName'+i].data)};
           if(!data.title || !data.content || data.answers.some(a=>!a))throw Error('Incomplete question');
+          if(${syncPromptOnQuestionSave} && !confirm("You've made edits to the questions. Sync with the matching tRAT?")) return;
           parent.saved(data,${editing});
         }
       </script>` });
@@ -108,6 +132,9 @@ for (const count of [2, 5, 6]) {
     expect(saves[0]!.feedback).toContain('Supplied rationale');
     await expect(page.locator('#referencesTable tbody tr')).toHaveCount(1);
     await expect(page.locator('.max-mark-input')).toHaveValue('2');
+    // Creating a question no longer touches "answer required"; the separate pass does.
+    await expect(page.getByRole('button', { name: 'Answer required', exact: true })).toHaveClass('text-danger');
+    await editor.applyAnswerRequired([question]);
     await expect(page.getByRole('button', { name: 'Answer required', exact: true })).toHaveClass('text-muted');
     await expect(editor.createQuestion(question)).rejects.toThrow('no existing');
   });
@@ -118,6 +145,22 @@ test('existing questions still require Save as new version', async ({ page }) =>
   await editor.updateQuestion({ title: 'Question 1', type: 'multiple-choice', marks: 1, content: 'Updated', mandatory: true, answers: [{ text: 'Yes', correct: true, weight: 100 }, { text: 'No', correct: false, weight: 0 }] });
   expect(await page.evaluate(() => (window as unknown as { saves: {version:boolean}[] }).saves.map(s=>s.version))).toEqual([true]);
 });
+
+for (const existing of [false, true]) {
+  test(`confirms the tRAT sync prompt raised by an ${existing ? 'existing' : 'new'} question save`, async ({ page }) => {
+    const editor = await fixture(page, existing, true, 'value => value', 0, true);
+    const question = {
+      title: 'Question 1', type: 'multiple-choice', marks: 1, content: 'Synced', mandatory: true,
+      answers: [{ text: 'Yes', correct: true, weight: 100 }, { text: 'No', correct: false, weight: 0 }]
+    };
+    if (existing) await editor.updateQuestion(question);
+    else await editor.createQuestion(question);
+    expect(editor.confirmedDialogs).toEqual([
+      "You've made edits to the questions. Sync with the matching tRAT?"
+    ]);
+    expect(await page.evaluate(() => (window as unknown as { saves: unknown[] }).saves)).toHaveLength(1);
+  });
+}
 
 test('never falls back to shared-question Save if version Save is missing', async ({ page }) => {
   const editor = await fixture(page, true, false);
@@ -167,6 +210,14 @@ test('formatting verification tolerates CKEditor serialisation differences', () 
   expect(canonicalInlineHtml('<B class="x">a</B>  <I>b</I>')).toBe('<strong>a</strong> <em>b</em>');
 });
 
+test('tRAT Print View formatting check detects a lost inline tag', () => {
+  const printable = canonicalInlineHtml('<p>The lac operon has H<sub>2</sub>O</p>');
+  expect(missingInlineFormatting(printable, 'The <em>lac</em> operon has H<sub>2</sub>O')).toEqual([
+    '<em>lac</em>'
+  ]);
+  expect(missingInlineFormatting(printable, 'H<sub>2</sub>O')).toEqual([]);
+});
+
 // Activity-level settings mirror the observed card layout: everything sits behind
 // "Expand all", the Advanced toggles carry stable ids, and the Feedback & Results
 // checkbox is wrapped by its label with a description block, as in the AE adapter.
@@ -211,3 +262,72 @@ test('stops when the Feedback & Results checkbox cannot be found exactly once', 
     displayAllAfterCompletion: true, answerJustification: true, confidenceLevels: true
   })).rejects.toThrow('found 0');
 });
+
+test('a slow toggle reply is read once instead of being clicked again', async ({ page }) => {
+  // LAMS stamps no class until its reply lands. Polling for the class and clicking again
+  // flipped the stored flag straight back, which is how most questions lost the setting.
+  const editor = await fixture(page, true, true, 'value => value', 800);
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('toggleQuestionRequired.do')) requests.push(request.url());
+  });
+
+  const changed = await editor.applyAnswerRequired([
+    { title: 'Question 1', type: 'multiple-choice', marks: 1, content: 'x', mandatory: false, answers: [] }
+  ]);
+
+  expect(changed).toEqual(['Question 1']);
+  expect(requests).toHaveLength(1);
+  await expect(page.getByRole('button', { name: 'Answer required', exact: true })).toHaveClass('text-muted');
+});
+
+test('a question already in the requested state is never toggled', async ({ page }) => {
+  const editor = await fixture(page, true);
+  const requests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('toggleQuestionRequired.do')) requests.push(request.url());
+  });
+
+  // The fixture row renders as required, which is what the request asks for.
+  const changed = await editor.applyAnswerRequired([
+    { title: 'Question 1', type: 'multiple-choice', marks: 1, content: 'x', mandatory: true, answers: [] }
+  ]);
+
+  expect(changed).toEqual([]);
+  expect(requests).toEqual([]);
+});
+
+test('required-only dry run reports a difference without sending a toggle request', async ({ page }) => {
+  const editor = await fixture(page, true);
+  const requests: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('toggleQuestionRequired.do')) requests.push(request.url());
+  });
+  const question = { ...request.questions[0]!, title: 'Question 1', mandatory: false };
+  expect(await editor.applyAnswerRequired([question], { commit: false })).toEqual(['Question 1']);
+  expect(requests).toEqual([]);
+  await expect(page.getByRole('button', { name: 'Answer required', exact: true })).toHaveClass('text-danger');
+});
+
+test('required-only preflight rejects a missing later question before toggling the first', async ({ page }) => {
+  const editor = await fixture(page, true);
+  const requests: string[] = [];
+  page.on('request', request => {
+    if (request.url().includes('toggleQuestionRequired.do')) requests.push(request.url());
+  });
+  const question = { ...request.questions[0]!, title: 'Question 1', mandatory: false };
+  await expect(editor.applyAnswerRequired([question, { ...question, title: 'Missing' }])).rejects.toThrow('preflight failed');
+  expect(requests).toEqual([]);
+});
+
+for (const mandatory of [true, false]) {
+  test(`post-save verification rejects a reverted required flag (expected=${mandatory})`, () => {
+    const question = { ...request.questions[0]!, title: 'Question 1', mandatory };
+    expect(() => verifySavedRequiredFlags([
+      { title: question.title, type: 'multiple-choice', mandatory: !mandatory }
+    ], [question])).toThrow('Post-save answer-required verification failed');
+    expect(() => verifySavedRequiredFlags([
+      { title: question.title, type: 'multiple-choice', mandatory }
+    ], [question])).not.toThrow();
+  });
+}

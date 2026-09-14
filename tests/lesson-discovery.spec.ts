@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { discoverLessons } from '../src/lams/lesson-discovery.js';
 
-async function library(page: Page): Promise<void> {
+async function library(page: Page, nonExpandingEmpty = false): Promise<void> {
   await page.setContent(`
     <button id="openButton" onclick="document.querySelector('[role=dialog]').hidden=false">Open</button>
     <div role="dialog" aria-label="Open design" hidden><div id="tree"></div></div>
@@ -31,7 +31,9 @@ async function library(page: Page): Promise<void> {
             el.append(document.createTextNode(node.name));
             if(node.children) {
               el.className='tree-parent'; el.setAttribute('aria-expanded', String(!!node.expanded));
-              el.onclick=()=>{node.expanded=!node.expanded;render();};
+              if (${nonExpandingEmpty} && node.children.length === 0) {
+                el.insertAdjacentHTML('beforeend', '<span class="node-icon treeview-empty"></span>');
+              } else el.onclick=()=>{node.expanded=!node.expanded;render();};
             } else el.onclick=()=>window.lessonClicks++;
             document.querySelector('#tree').append(el);
             if(node.expanded) visit(node.children,depth+1);
@@ -79,4 +81,15 @@ test('refuses missing roots and incomplete traversal', async ({ page }) => {
 test('stops on unrecognised folder state', async ({ page }) => {
   await page.setContent('<button id="openButton">Open</button><div role="dialog" aria-label="Open design"><div role="treeitem" class="tree-parent">Courses</div></div>');
   await expect(discoverLessons(page, { timeoutMs: 2000 })).rejects.toThrow('Unknown folder expansion state');
+});
+
+test('skips DOM-verified empty folders that cannot expand and still searches siblings', async ({ page }) => {
+  await library(page, true);
+  expect(await discoverLessons(page, { query: 'fom tbl06', timeoutMs: 2000 })).toHaveLength(3);
+  await expect(page.getByRole('treeitem', { name: 'Empty', exact: true })).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('does not hide expansion failures for folders without empty-folder evidence', async ({ page }) => {
+  await page.setContent('<button id="openButton">Open</button><div role="dialog" aria-label="Open design"><div role="treeitem" class="tree-parent" aria-expanded="false">Courses</div></div>');
+  await expect(discoverLessons(page, { timeoutMs: 300 })).rejects.toThrow();
 });

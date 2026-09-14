@@ -4,7 +4,7 @@ import { applySotFormattingFromDocx } from '../docx/sot-formatting.js';
 import { inspectAuthoringGraph, type AuthoringGraph, type GraphNode } from './authoring.js';
 
 export interface IratPlanStep {
-  phase: 'gate' | 'activity' | 'question' | 'advanced' | 'verification';
+  phase: 'gate' | 'activity' | 'question' | 'advanced' | 'trat' | 'verification';
   action: string;
   questionTitle?: string;
 }
@@ -36,6 +36,7 @@ export interface IratObservedState {
     rotationSeconds: number | null;
   };
   activityName: string;
+  tratActivityName: string;
   teamSetupAssociated: boolean;
   questions: IratObservedQuestion[];
 }
@@ -46,6 +47,7 @@ export interface IratEditor {
   associateWithTeamSetup(teamSetupName: string): Promise<void>;
   updateQuestion(question: IratQuestionRequest): Promise<void>;
   createQuestion(question: IratQuestionRequest): Promise<void>;
+  applyAnswerRequired(questions: IratQuestionRequest[]): Promise<string[]>;
   updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void>;
   verifyPrintView(request: IratRequest): Promise<void>;
   save(): Promise<void>;
@@ -69,6 +71,7 @@ export function validateIratReadiness(graph: AuthoringGraph, request: IratReques
   const teamSetup = uniqueNode(graph, request.teamSetupName, 'grouping', checks);
   const gate = uniqueNode(graph, request.gate.name, 'gate', checks);
   const activity = uniqueNode(graph, request.activityName, 'tool', checks);
+  uniqueNode(graph, matchingTratRequest(request).activityName, 'tool', checks);
 
   const gateConnected = Boolean(
     gate &&
@@ -124,6 +127,10 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
       phase: 'advanced',
       action: `Set shuffle questions=${request.advanced.shuffleQuestions}, shuffle answers=${request.advanced.shuffleAnswers}, questions' numbering=${request.advanced.questionsNumbering}, display all questions=${request.advanced.displayAllQuestions}, display all questions and answers once finished=${request.advanced.displayAllAfterCompletion}, answer justification=${request.advanced.answerJustification}, confidence levels=${request.advanced.confidenceLevels}`
     },
+    {
+      phase: 'trat',
+      action: `Confirm every RAT-sync prompt, restore ${matchingTratRequest(request).activityName} advanced defaults, enable Show confidence levels from ${matchingTratRequest(request).confidenceSourceActivityName}, save, reopen, and verify`
+    },
     { phase: 'verification', action: 'Open Print View and compare every question and correct answer with the supplied request' },
     { phase: 'verification', action: 'Save iRAT and re-inspect the resulting state' }
   );
@@ -156,6 +163,7 @@ export async function executeIratAutomation(
       createdQuestions.push(question.title);
     }
   }
+  await editor.applyAnswerRequired(request.questions);
   await editor.updateAdvancedSettings(request.advanced);
   await editor.verifyPrintView(request);
   await editor.save();
@@ -188,6 +196,7 @@ function validateObservedState(observed: IratObservedState, request: IratRequest
   const checks: IratReadinessCheck[] = [
     exactCheck('iRAT Gate', request.gate.name, observed.gate.name),
     exactCheck('iRAT activity', request.activityName, observed.activityName),
+    exactCheck('matching tRAT activity', matchingTratRequest(request).activityName, observed.tratActivityName),
     {
       label: 'Team Setup association',
       passed: observed.teamSetupAssociated,
@@ -224,6 +233,13 @@ function validateObservedState(observed: IratObservedState, request: IratRequest
     detail: 'The live adapter requires displayAllQuestions=true'
   });
   return { passed: checks.every((check) => check.passed), checks, plan: createIratPlan(request) };
+}
+
+export function matchingTratRequest(request: IratRequest): NonNullable<IratRequest['trat']> {
+  return request.trat ?? {
+    activityName: 'tRAT',
+    confidenceSourceActivityName: request.activityName
+  };
 }
 
 function exactCheck(label: string, expected: string, found: string): IratReadinessCheck {

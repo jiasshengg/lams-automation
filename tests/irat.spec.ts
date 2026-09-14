@@ -47,7 +47,8 @@ test('preflight verifies exact iRAT nodes, connection, and Team Setup associatio
   const nodes: GraphNode[] = [
     graphNode(1, 'Team Setup', 'grouping'),
     graphNode(2, 'iRAT Gate', 'gate'),
-    { ...graphNode(3, 'iRAT', 'tool'), grouped: true, groupingUiid: 1 }
+    { ...graphNode(3, 'iRAT', 'tool'), grouped: true, groupingUiid: 1 },
+    graphNode(4, 'tRAT', 'tool')
   ];
   const graph: AuthoringGraph = {
     rendering: 'svg',
@@ -65,7 +66,12 @@ test('preflight fails when iRAT is not grouped with Team Setup', () => {
   const graph: AuthoringGraph = {
     rendering: 'svg',
     modelAvailable: true,
-    nodes: [graphNode(1, 'Team Setup', 'grouping'), graphNode(2, 'iRAT Gate', 'gate'), graphNode(3, 'iRAT', 'tool')],
+    nodes: [
+      graphNode(1, 'Team Setup', 'grouping'),
+      graphNode(2, 'iRAT Gate', 'gate'),
+      graphNode(3, 'iRAT', 'tool'),
+      graphNode(4, 'tRAT', 'tool')
+    ],
     transitions: [{ uiid: 10, fromUiid: 2, toUiid: 3 }]
   };
 
@@ -84,7 +90,7 @@ test('dry run inspects but performs no iRAT writes', async () => {
   expect(calls).toEqual(['inspect']);
 });
 
-test('commit applies gate, grouping, questions, advanced settings, print verification, then save', async () => {
+test('commit applies gate, grouping, questions, answer-required, advanced settings, print verification, then save', async () => {
   const calls: string[] = [];
   const editor = fakeEditor(calls);
 
@@ -97,6 +103,9 @@ test('commit applies gate, grouping, questions, advanced settings, print verific
     'gate:iRAT Gate',
     'team:Team Setup',
     'question:Question 1',
+    // Answer required is set once the last question editor has closed: toggling it while
+    // questions are still being saved loses the flag to LAMS's reference-list rebuild.
+    'required:Question 1',
     'advanced',
     'print',
     'save'
@@ -119,6 +128,7 @@ function fakeEditor(calls: string[]): IratEditor {
       rotationSeconds: null
     },
     activityName: 'iRAT',
+    tratActivityName: 'tRAT',
     teamSetupAssociated: true,
     questions: [{ title: 'Question 1', type: 'multiple-choice', mandatory: false }]
   };
@@ -138,6 +148,10 @@ function fakeEditor(calls: string[]): IratEditor {
     },
     async updateQuestion(question) {
       calls.push(`question:${question.title}`);
+    },
+    async applyAnswerRequired(questions) {
+      calls.push(`required:${questions.map((question) => question.title).join(',')}`);
+      return questions.map((question) => question.title);
     },
     async updateAdvancedSettings() {
       calls.push('advanced');

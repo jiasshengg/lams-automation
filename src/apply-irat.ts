@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`Question images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);
     console.log(`Save prompts confirmed (${editor.confirmedDialogs.length}): ${editor.confirmedDialogs.join(' | ') || 'none raised'}`);
-    console.log('Verified: configured course, exact lesson, iRAT graph readiness, Print View, and post-save gate state.');
+    console.log('Verified: configured course, exact lesson, iRAT/tRAT graph readiness, Print View, synced tRAT questions, tRAT confidence/default settings, and post-save gate state.');
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'apply-irat-failure').catch(() => undefined);
     if (directory) console.error(`iRAT diagnostics: ${directory}`);

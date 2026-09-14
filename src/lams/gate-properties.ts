@@ -62,3 +62,29 @@ function gateNode(graph: Awaited<ReturnType<typeof inspectAuthoringGraph>>, gate
   }
   return matches[0]!;
 }
+
+/** Resolve and preflight configured rotations before copying or changing any gate. */
+export async function plannedGateRotations(page: Page, config: LamsConfig): Promise<Array<{ name: string; seconds: number }>> {
+  const requests = (config.expectedGateProperties ?? [])
+    .filter(rule => rule.rotationSeconds !== undefined)
+    .map(rule => ({ name: rule.name, seconds: rule.rotationSeconds! }));
+  if (config.irat?.gate.dynamicPassword) {
+    requests.push({ name: config.irat.gate.name, seconds: config.irat.gate.rotationSeconds });
+  }
+  const unique = new Map<string, number>();
+  for (const request of requests) {
+    if (unique.has(request.name) && unique.get(request.name) !== request.seconds) {
+      throw new Error(`Conflicting rotation settings for "${request.name}".`);
+    }
+    unique.set(request.name, request.seconds);
+  }
+  if (!unique.size) return [];
+  const graph = await inspectAuthoringGraph(page);
+  return [...unique].map(([name, seconds]) => {
+    const node = gateNode(graph, name);
+    if (node.gateType !== 'password' || node.dynamicPassword !== true) {
+      throw new Error(`"${name}" is not a dynamic-password gate; refusing to change its rotation.`);
+    }
+    return { name, seconds };
+  });
+}

@@ -1,4 +1,4 @@
-import type { Frame, Page } from '@playwright/test';
+import type { Frame } from '@playwright/test';
 import { sanitizeInlineHtml } from '../ae/inline-html.js';
 import type { ImagePlacement } from '../docx/media.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
@@ -13,7 +13,6 @@ export interface UploadedImage {
 }
 
 export async function uploadCkEditorImages(
-  page: Page,
   frame: Frame,
   editorId: string,
   images: QuestionImageAsset[]
@@ -26,23 +25,36 @@ export async function uploadCkEditorImages(
     return editor?.config?.filebrowserImageUploadUrl ?? null;
   }, editorId);
   if (!uploadValue) throw new Error(`CKEditor instance "${editorId}" does not expose an image upload URL.`);
-  const uploadUrl = withUploadCallbackId(new URL(uploadValue, frame.url()));
-  if (uploadUrl.origin !== new URL(frame.url()).origin) {
-    throw new Error(`Refusing to upload a question image to a different origin: ${uploadUrl.origin}`);
+  const requestUrl = withUploadCallback(uploadValue);
+  const absoluteRequestUrl = new URL(requestUrl, frame.url());
+  if (absoluteRequestUrl.origin !== new URL(frame.url()).origin) {
+    throw new Error(`Refusing to upload a question image to a different origin: ${absoluteRequestUrl.origin}`);
   }
 
   const uploaded: UploadedImage[] = [];
   for (const image of images) {
-    const data = await applyDocumentCrop(page, image);
-    const response = await page.context().request.post(uploadUrl.toString(), {
-      multipart: { upload: { name: image.filename, mimeType: image.contentType, buffer: data } }
-    });
-    const body = await response.text();
-    if (!response.ok()) throw new Error(`CKEditor image upload failed (${response.status()}): ${body.slice(0, 300)}`);
+    const data = await applyDocumentCrop(frame, image);
+    // The upload runs inside the authoring frame so it carries the signed-in LAMS session.
+    // Playwright's APIRequestContext is a separate client here: LAMS answered it with a
+    // SAML re-authentication page instead of an upload response.
+    const response = await frame.evaluate(
+      async ({ url, filename, contentType, base64 }) => {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        const form = new FormData();
+        form.append('upload', new File([bytes], filename, { type: contentType }));
+        const result = await fetch(url, { method: 'POST', body: form, credentials: 'include' });
+        return { status: result.status, ok: result.ok, body: await result.text() };
+      },
+      { url: requestUrl, filename: image.filename, contentType: image.contentType, base64: data.toString('base64') }
+    );
+    const body = response.body;
+    if (!response.ok) throw new Error(`CKEditor image upload failed (${response.status}): ${body.slice(0, 300)}`);
     if (body.trim() === '') {
       throw new Error(
-        `CKEditor image upload returned ${response.status()} with an empty body for ${image.filename}. ` +
-          `Upload URL: ${uploadUrl.pathname}${uploadUrl.search}`
+        `CKEditor image upload returned ${response.status} with an empty body for ${image.filename}. ` +
+          `Upload URL: ${absoluteRequestUrl.pathname}${absoluteRequestUrl.search}`
       );
     }
     const returnedUrl = parseCkEditorUploadResponse(body);
@@ -63,25 +75,26 @@ export async function uploadCkEditorImages(
 }
 
 /**
- * LAMS serves the legacy CKEditor "simpleuploader", which answers with a script calling
- * CKEDITOR.tools.callFunction(<id>, '<url>'). It reads that id from CKEditorFuncNum, which the
- * editor adds itself when a user uploads through the UI. A direct POST has to supply it, or the
- * servlet answers 200 with an empty body and there is no URL to read back.
+ * CKEditor's own file browser appends CKEditorFuncNum before posting, and LAMS's
+ * simpleuploader only answers when it is present: without it the servlet returns 200 with
+ * an empty body, which reads as a successful upload that produced no image URL. The value
+ * is the callback index the legacy response echoes back, and 1 is what CKEditor uses for a
+ * single dialog. The query string is extended textually so the unencoded slashes LAMS
+ * writes into CurrentFolder survive.
  */
-export function withUploadCallbackId(uploadUrl: URL): URL {
-  if (!uploadUrl.searchParams.has('CKEditorFuncNum')) uploadUrl.searchParams.set('CKEditorFuncNum', '1');
-  return uploadUrl;
+export function withUploadCallback(uploadUrl: string): string {
+  if (/[?&]CKEditorFuncNum=/.test(uploadUrl)) return uploadUrl;
+  return `${uploadUrl}${uploadUrl.includes('?') ? '&' : '?'}CKEditorFuncNum=1`;
 }
 
 /**
  * Word crops a picture for display but embeds the whole file, so the archived bytes show more than
- * the document does. The crop is applied here rather than at extraction because it needs an image
- * decoder, and the browser already driving LAMS is the one this project ships.
+ * the document does. The crop is applied inside the authenticated authoring frame before upload.
  */
-async function applyDocumentCrop(page: Page, image: QuestionImageAsset): Promise<Buffer> {
+async function applyDocumentCrop(frame: Frame, image: QuestionImageAsset): Promise<Buffer> {
   if (image.crop === null) return image.data;
   const source = `data:${image.contentType};base64,${image.data.toString('base64')}`;
-  const cropped = await page.evaluate(
+  const cropped = await frame.evaluate(
     async ([dataUrl, type, left, top, right, bottom]) => {
       const picture = new Image();
       picture.src = dataUrl as string;
@@ -125,6 +138,9 @@ export function parseCkEditorUploadResponse(body: string): string {
   if (callFunction) return decodeJavascriptString(callFunction);
   const urlProperty = /\burl\s*[:=]\s*['"]([^'"]+)['"]/.exec(body)?.[1];
   if (urlProperty) return decodeJavascriptString(urlProperty);
+  if (body.trim() === '') {
+    throw new Error('CKEditor returned an empty upload response, so no image URL was stored.');
+  }
   throw new Error(`Could not read the uploaded image URL from CKEditor response: ${body.slice(0, 300)}`);
 }
 
