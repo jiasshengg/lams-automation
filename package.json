@@ -29,6 +29,7 @@
     "find:lesson": "tsx src/find-lesson.ts",
     "inspect:irat-questions": "tsx src/inspect-irat-questions.ts",
     "apply:irat": "tsx src/apply-irat.ts",
+    "apply:irat-required": "tsx src/apply-irat-required.ts",
     "send:code": "tsx src/send-code.ts",
     "watch:url": "tsx src/watch-url.ts",
     "setup": "node scripts/setup/setup.mjs",

@@ -22,11 +22,34 @@ import { imageHtml, uploadCkEditorImages } from './ckeditor-media.js';
  * markup. "Answer required" is toggled by, and read from, the BUTTON that calls
  * toggleQuestionRequired(this): its own inline handler does hasClass('text-danger') on
  * that button, and toggles text-danger/text-muted there, not on the inner <i> icon.
+ *
+ * Two class families carry that state, and both must be read. The server renders the
+ * stored value as btn-outline-danger (required) or btn-outline-secondary (optional)
+ * every time the reference list is drawn. toggleQuestionRequired's AJAX callback never
+ * touches those; it stamps text-danger/text-muted on top of them, and only when the
+ * server's reply matches the state it expected — a mismatched reply leaves no class at
+ * all. The stamped class is therefore newer than the rendered one and wins.
  */
 export const QUESTION_TITLE = 'td .fw-semibold';
 export const QUESTION_TYPE_BADGE = 'td .badge.bg-primary-subtle';
 export const REQUIRED_TOGGLE = 'button[onclick*="toggleQuestionRequired"]';
 export const MAX_MARK_INPUT = 'input.max-mark-input';
+
+/**
+ * Reads one "Answer required" button's state from whichever class family is present.
+ * Returns null only when the button carries neither, which happens when a toggle's AJAX
+ * reply disagreed with the state the handler predicted.
+ */
+export function readRequiredState(element: Element): boolean | null {
+  if (element.classList.contains('text-danger')) return true;
+  if (element.classList.contains('text-muted')) return false;
+  if (element.classList.contains('btn-outline-danger')) return true;
+  if (element.classList.contains('btn-outline-secondary')) return false;
+  return null;
+}
+
+/** Clicks needed to converge when LAMS leaves a toggle's state unconfirmed. */
+const REQUIRED_TOGGLE_ATTEMPTS = 3;
 /**
  * The question editor opens as an unnamed iframe inside the activity frame. This LAMS
  * build no longer uses ThickBox, so "#TB_iframeContent" never appears; the iframe is
@@ -257,22 +280,70 @@ export class LamsIratEditor implements IratEditor {
       throw new Error(`Mark for "${question.title}" did not accept ${question.marks}.`);
     }
 
-    // LAMS renders no required-state class on load: text-danger/text-muted are written
-    // only by toggleQuestionRequired's AJAX callback, so the stored value is unreadable
-    // until the toggle is exercised. Clicking is therefore treated as a probe — the class
-    // that comes back is authoritative, and a second click converges when the stored value
-    // already differed from what the class implied. Without this, re-running the workflow
-    // would silently invert every question's "answer required" flag.
-    const requiredToggle = updatedRow.locator(REQUIRED_TOGGLE);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const observed = await requiredToggle.evaluate((element) =>
-        element.classList.contains('text-danger') ? true : element.classList.contains('text-muted') ? false : null
-      );
-      if (observed === question.mandatory) break;
-      await requiredToggle.click();
-      await waitForToggleResponse(requiredToggle, this.timeoutMs);
+  }
+
+  /**
+   * Sets "answer required" for every question in one pass, after the last question editor
+   * has closed. Toggling inside writeQuestion loses most of the flags: saving a question
+   * rebuilds the reference list, and a rebuild that lands after the toggle restores the
+   * flag it had before. Nothing rewrites the list during this pass, so the toggles stick.
+   */
+  async applyAnswerRequired(questions: IratQuestionRequest[], options: { commit: boolean } = { commit: true }): Promise<string[]> {
+    const frame = await this.ensureActivityFrame();
+    const titles = questions.map(question => normalizeText(question.title));
+    const existing = await questionTitles(frame);
+    if (new Set(titles).size !== titles.length ||
+        JSON.stringify([...titles].sort()) !== JSON.stringify([...existing].sort())) {
+      throw new Error('Answer-required preflight failed: request must match the complete unique question inventory.');
     }
-    await waitForMandatoryState(frame, question.title, question.mandatory, this.timeoutMs);
+    // Read every target before the first mutation, including in preview mode.
+    const planned: Array<{ question: IratQuestionRequest; toggle: Locator; stored: boolean }> = [];
+    for (const question of questions) {
+      const row = await exactQuestionRow(frame, question.title);
+      const toggle = row.locator(REQUIRED_TOGGLE);
+      const stored = await toggle.evaluate(readRequiredState);
+      if (stored === null) throw new Error(`Cannot read answer-required state for "${question.title}".`);
+      planned.push({ question, toggle, stored });
+    }
+    if (!options.commit) return planned.filter(item => item.stored !== item.question.mandatory).map(item => item.question.title);
+    const changed: string[] = [];
+    for (const item of planned) {
+      const { question, toggle: requiredToggle } = item;
+      // The rendered btn-outline-* class already states the stored value, so a question
+      // that is already correct is never clicked.
+      let stored = item.stored;
+      for (let attempt = 0; attempt < REQUIRED_TOGGLE_ATTEMPTS && stored !== question.mandatory; attempt += 1) {
+        if (attempt === 0) changed.push(question.title);
+        stored = await this.toggleAnswerRequired(requiredToggle);
+      }
+      if (stored !== question.mandatory) {
+        throw new Error(`LAMS kept "answer required" at ${String(stored)} for "${question.title}"; expected ${question.mandatory}.`);
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Clicks one "Answer required" toggle and returns the value LAMS stored, taken from the
+   * toggle's own AJAX reply rather than from the class it may or may not stamp afterwards.
+   * The handler only stamps a class when the reply matches the state it predicted, so a
+   * reply that arrives late reads as "nothing happened" and a second click silently flips
+   * the flag back. The reply itself is the only authoritative answer.
+   */
+  private async toggleAnswerRequired(toggle: Locator): Promise<boolean> {
+    const reply = this.page.waitForResponse(
+      (response) => response.url().includes('toggleQuestionRequired.do'),
+      { timeout: this.timeoutMs }
+    );
+    // Dispatched rather than clicked: hovering one toggle leaves a Bootstrap
+    // "Answer required" tooltip floating over the next row's button, and a real click
+    // then lands on the tooltip. The inline onclick handler runs either way.
+    await toggle.dispatchEvent('click');
+    const body = (await (await reply).text()).trim();
+    if (body !== 'true' && body !== 'false') {
+      throw new Error(`toggleQuestionRequired returned an unreadable state: ${JSON.stringify(body.slice(0, 100))}`);
+    }
+    return body === 'true';
   }
 
   async updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void> {
@@ -355,7 +426,7 @@ export class LamsIratEditor implements IratEditor {
     }
 
     await this.page.locator('#saveButton').click();
-    await this.page.waitForTimeout(500);
+    await this.page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: this.timeoutMs });
     const graph = await inspectAuthoringGraph(this.page);
     const gate = uniqueGraphNode(graph, this.request.gate.name, 'gate');
     const savedQuestions = await this.inspectQuestionsAndClose(uniqueGraphNode(graph, this.request.activityName, 'tool'));
@@ -364,6 +435,7 @@ export class LamsIratEditor implements IratEditor {
     if (JSON.stringify(savedTitles) !== JSON.stringify(expectedTitles) || savedQuestions.some((question) => question.type !== 'multiple-choice')) {
       throw new Error('Post-save iRAT question inventory did not match the request.');
     }
+    verifySavedRequiredFlags(savedQuestions, this.request.questions);
     if (
       gate.gateType !== this.request.gate.type ||
       gate.description !== this.request.gate.description ||
@@ -382,10 +454,12 @@ export class LamsIratEditor implements IratEditor {
     const questions: IratObservedQuestion[] = [];
     for (let index = 0; index < (await rows.count()); index += 1) {
       const row = rows.nth(index);
+      const mandatory = await row.locator(REQUIRED_TOGGLE).evaluate(readRequiredState);
+      if (mandatory === null) throw new Error('Cannot verify an unreadable answer-required flag.');
       questions.push({
         title: normalizeText(await row.locator(QUESTION_TITLE).innerText()),
         type: normalizeQuestionType(await row.locator(QUESTION_TYPE_BADGE).innerText()),
-        mandatory: await row.locator(REQUIRED_TOGGLE).evaluate((element) => element.classList.contains('text-danger'))
+        mandatory
       });
     }
 
@@ -417,7 +491,17 @@ export class LamsIratEditor implements IratEditor {
     // and its handler ignores it. The floating properties panel can cover the node, so it
     // is dismissed first when it is showing.
     await this.dismissPropertiesDialog();
-    await this.canvasNode(activity).dblclick({ delay: 80 });
+    // The panel can survive every dismissal this build offers. It is only ever in the way
+    // of the double-click, so it is made click-through for exactly that action and
+    // restored immediately: nothing about the activity or its properties is changed.
+    const panel = this.page.locator('#propertiesDialog');
+    const covering = await panel.isVisible();
+    if (covering) await setPointerEvents(panel, 'none');
+    try {
+      await this.canvasNode(activity).dblclick({ delay: 80 });
+    } finally {
+      if (covering) await setPointerEvents(panel, '');
+    }
     const iframe = this.page.locator('iframe[id^="dialogActivity"]:visible');
     await iframe.waitFor({ state: 'visible', timeout: this.timeoutMs });
     const frame = await (await iframe.elementHandle())?.contentFrame();
@@ -431,17 +515,73 @@ export class LamsIratEditor implements IratEditor {
    * The properties panel has no close control: LAMS hides it when the canvas background is
    * clicked. It is only dismissed when actually showing, and the canvas click selects
    * nothing, so no activity is moved, opened, or changed.
+   *
+   * LAMS leaves the panel on the canvas at reduced opacity rather than removing it, and a
+   * fixed click position can land on the panel itself, so Escape is tried first and then a
+   * canvas point nothing is covering. Both are best-effort: this build can keep the panel
+   * open regardless, which openActivityFrame handles by making it click-through.
    */
   private async dismissPropertiesDialog(): Promise<void> {
     const dialog = this.page.locator('#propertiesDialog');
     if (!(await dialog.isVisible())) return;
-    await this.page.locator('#canvas').click({ position: { x: 5, y: 5 } });
-    await dialog.waitFor({ state: 'hidden', timeout: this.timeoutMs }).catch(() => undefined);
+    await this.page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => undefined);
+    if (!(await dialog.isVisible())) return;
+    const point = await findClearCanvasPoint(this.page);
+    if (!point) return;
+    await this.page.mouse.click(point.x, point.y);
+    await dialog.waitFor({ state: 'hidden', timeout: 2000 }).catch(() => undefined);
   }
 
   private canvasNode(node: GraphNode): Locator {
     return this.page.locator(`#canvas > svg > g.svg-activity[uiid="${node.uiid}"]`);
   }
+}
+
+export function verifySavedRequiredFlags(saved: IratObservedQuestion[], requested: IratQuestionRequest[]): void {
+  for (const question of requested) {
+    const matches = saved.filter(candidate => normalizeText(candidate.title) === normalizeText(question.title));
+    if (matches.length !== 1 || matches[0]!.mandatory !== question.mandatory) {
+      throw new Error(`Post-save answer-required verification failed for "${question.title}"; expected ${question.mandatory}.`);
+    }
+  }
+}
+
+/**
+ * Toggles a leftover overlay's pointer interception without changing what it shows.
+ * Bootstrap gives .modal no pointer events and .modal-dialog its own, so the inner dialog
+ * has to be set as well or it keeps swallowing the click.
+ */
+async function setPointerEvents(locator: Locator, value: string): Promise<void> {
+  await locator.evaluate((element, next) => {
+    for (const target of [element, ...element.querySelectorAll('.modal-dialog')]) {
+      (target as HTMLElement).style.pointerEvents = next;
+    }
+  }, value);
+}
+
+/**
+ * Finds a viewport point where a click lands on the authoring canvas background: inside
+ * the canvas, and not on a floating panel, an activity, or a transition. The canvas is
+ * filled by its own <svg>, so the topmost element there is that drawing surface rather
+ * than #canvas itself — anything the canvas contains counts, as long as it is not part of
+ * an activity or transition.
+ */
+export async function findClearCanvasPoint(page: Page): Promise<{ x: number; y: number } | null> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('#canvas');
+    if (!canvas) return null;
+    const box = canvas.getBoundingClientRect();
+    for (let y = box.top + 8; y < box.bottom - 8; y += 24) {
+      for (let x = box.left + 8; x < box.right - 8; x += 24) {
+        const topmost = document.elementFromPoint(x, y);
+        if (!topmost || !canvas.contains(topmost)) continue;
+        if (topmost.closest('.svg-activity, .svg-transition')) continue;
+        return { x, y };
+      }
+    }
+    return null;
+  });
 }
 
 function uniqueGraphNode(graph: AuthoringGraph, name: string, type: GraphNode['type']): GraphNode {
@@ -528,21 +668,6 @@ async function setCheckbox(locator: Locator, checked: boolean): Promise<void> {
   }
 }
 
-async function waitForMandatoryState(frame: Frame, title: string, mandatory: boolean, timeoutMs: number): Promise<void> {
-  await frame.waitForFunction(
-    ({ expectedTitle, expectedMandatory }) => {
-      const rows = Array.from(document.querySelectorAll('#referencesTable tbody tr'));
-      const row = rows.find((candidate) => {
-        const cell = candidate.querySelector('td .fw-semibold');
-        return (cell?.textContent ?? '').replace(/\s+/g, ' ').trim() === expectedTitle.replace(/\s+/g, ' ').trim();
-      });
-      const toggle = row?.querySelector('button[onclick*="toggleQuestionRequired"]');
-      return toggle ? toggle.classList.contains('text-danger') === expectedMandatory : false;
-    },
-    { expectedTitle: title, expectedMandatory: mandatory },
-    { timeout: timeoutMs }
-  );
-}
 
 /**
  * Keeps only the SoT inline formatting tags and escapes everything else. No font family,
@@ -624,25 +749,6 @@ function visibleField(dialog: Locator, className: string): Locator {
   return dialog.locator(className).filter({ visible: true }).first();
 }
 
-/** Waits for toggleQuestionRequired's callback to stamp the resulting state on the button. */
-async function waitForToggleResponse(toggle: Locator, timeoutMs: number): Promise<void> {
-  await toggle
-    .evaluate(
-      (element) =>
-        new Promise<void>((resolve, reject) => {
-          const deadline = Date.now() + 10_000;
-          const poll = () => {
-            if (element.classList.contains('text-danger') || element.classList.contains('text-muted')) resolve();
-            else if (Date.now() > deadline) reject(new Error('no toggle response'));
-            else setTimeout(poll, 50);
-          };
-          poll();
-        }),
-      undefined,
-      { timeout: timeoutMs }
-    )
-    .catch(() => undefined);
-}
 
 async function questionTitles(frame: Frame): Promise<string[]> {
   return (await frame.locator(`#referencesTable tbody tr ${QUESTION_TITLE}`).allTextContents()).map(normalizeText);
