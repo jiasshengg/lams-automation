@@ -14,7 +14,11 @@ async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/example.json';
   const commit = process.argv.includes('--commit');
   const monitorOnly = process.argv.includes('--monitor-only');
-  const publishCode = process.argv.includes('--publish-code');
+  // Recording the code in the Kanban sheet is the last step of the publishing stage, so it
+  // runs by default once the sheet is configured. --no-publish-code skips it; the older
+  // --publish-code is still accepted and additionally demands that the sheet be configured.
+  const forceCode = process.argv.includes('--publish-code');
+  const publishCode = !process.argv.includes('--no-publish-code');
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
   if (config.baseUrl.includes('replace-with-your-lams-host.example')) {
     throw new Error(`Edit ${path.resolve(configPath)} and set the real LAMS baseUrl before running the index workflow.`);
@@ -32,7 +36,7 @@ async function main(): Promise<void> {
       const monitoring = await openMonitoring(page, config.lessonTitle, config);
       console.log('\nMonitoring workflow: OK');
       console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
-      await reportLessonCode(config.lessonTitle, monitoring.lessonId, publishCode);
+      await reportLessonCode(config.lessonTitle, monitoring.lessonId, publishCode, forceCode);
       return;
     }
 
@@ -60,7 +64,7 @@ async function main(): Promise<void> {
     const monitoring = await openMonitoring(page, result.lessonTitle, config);
     console.log('\nMonitoring workflow: OK');
     console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
-    await reportLessonCode(result.lessonTitle, monitoring.lessonId, publishCode);
+    await reportLessonCode(result.lessonTitle, monitoring.lessonId, publishCode, forceCode);
   } catch (error) {
     const directory = await saveDiagnostics(page, 'index-monitoring-failure').catch(() => undefined);
     if (directory) console.error(`Live failure diagnostics: ${directory}`);
@@ -73,11 +77,19 @@ async function main(): Promise<void> {
 /**
  * The 5-digit code the Kanban sheet wants is the lesson ID from the monitoring URL
  * (monitorLesson.do?lessonID=41192), which openMonitoring has already read and confirmed
- * against the URL the browser actually landed on. With --publish-code it goes to the sheet.
+ * against the URL the browser actually landed on.
+ *
+ * Recording it completes the publishing stage, so it is sent by default. A machine with no
+ * sheet credentials simply reports the code for manual entry rather than failing a run whose
+ * LAMS-side work already succeeded, unless --publish-code asked for the send explicitly.
  */
-async function reportLessonCode(identifier: string, code: string, publish: boolean): Promise<void> {
+async function reportLessonCode(identifier: string, code: string, publish: boolean, force: boolean): Promise<void> {
   if (!publish) {
-    console.log('Pass --publish-code to send this code to the Kanban sheet.');
+    console.log('Kanban sheet not updated: --no-publish-code was passed. Record this code manually.');
+    return;
+  }
+  if (!force && !sheetConfigured()) {
+    console.log('Kanban sheet not configured (LAMS_SHEET_WEBHOOK_URL / LAMS_SHEET_SECRET); record this code manually.');
     return;
   }
 
@@ -90,6 +102,10 @@ async function reportLessonCode(identifier: string, code: string, publish: boole
     console.error(`Kanban sheet not updated: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   }
+}
+
+function sheetConfigured(): boolean {
+  return Boolean(process.env.LAMS_SHEET_WEBHOOK_URL && process.env.LAMS_SHEET_SECRET);
 }
 
 function readArgument(name: string): string | undefined {

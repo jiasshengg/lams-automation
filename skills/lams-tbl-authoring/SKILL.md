@@ -60,12 +60,20 @@ Read the relevant focused instructions directly; routing does not require a new 
 
    It works from the cohort page: selects the most recent design, turns off "Display activity
    scores on completion", enables scheduling with the end date at 23:59, selects the course
-   grouping, clicks Add now, and reads the 5-digit lesson code. `--commit` is required;
-   without it the form is filled and verified and "Add now" is never clicked.
-   `--expect-design` refuses to publish unless the top "Recently used designs" entry is the
-   lesson the authoring run just created. Add `--publish-code` to send the lesson code to the
-   Kanban sheet. Repeat the end date back when reporting the result, so the user can catch a
-   wrong date before learners see it.
+   grouping, clicks Add now, reads the 5-digit lesson code, and records that code in the
+   Kanban sheet, which completes the stage. `--commit` is required; without it the form is
+   filled and verified and "Add now" is never clicked. `--expect-design` refuses to publish
+   unless the top "Recently used designs" entry is the lesson the authoring run just created.
+
+   The code is sent to the sheet automatically when the sheet credentials are configured in
+   the environment. When they are not, the run prints the code for manual entry rather than
+   failing, so report the code to the user in that case. `--no-publish-code` skips the send.
+   The sheet matches on the lesson title exactly as it appears in its TBL/Quiz Details
+   column, so an "Identifier not found" result means the title does not match that column,
+   not that publishing failed - the lesson still exists.
+
+   Report the 5-digit code and repeat the end date back when reporting the result, so the
+   user can catch a wrong date before learners see it.
 
 7. Inspect or validate the resulting authoring graph when required for the requested outcome, using expectations from the source/request rather than inventing values to match the observed graph.
 8. Report completed stages, verified results, remaining mismatches, and any partial saved state.

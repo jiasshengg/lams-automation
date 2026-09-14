@@ -75,3 +75,14 @@ test('fails loudly on a rejected status, an HTTP error, and a non-JSON body', as
   await expect(withBody(() => jsonResponse({ status: 'error' }, 500))).rejects.toThrow(/HTTP 500/);
   await expect(withBody(() => new Response('<html>Sign in</html>'))).rejects.toThrow(/did not return JSON/);
 });
+
+test('the sheet endpoint is only considered configured when both variables are set', () => {
+  // Mirrors the check index-monitoring uses to decide whether to send the code
+  // automatically, so a machine without credentials reports the code instead of failing.
+  expect(() => resolveSinkEndpoint({ url: '', secret: 's' })).toThrow(/LAMS_SHEET_WEBHOOK_URL/);
+  expect(() => resolveSinkEndpoint({ url: 'https://example.test/exec', secret: '' })).toThrow(/LAMS_SHEET_SECRET/);
+  expect(resolveSinkEndpoint({ url: 'https://example.test/exec', secret: 's' })).toEqual({
+    url: 'https://example.test/exec',
+    secret: 's'
+  });
+});

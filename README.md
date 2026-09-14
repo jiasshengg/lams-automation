@@ -312,19 +312,27 @@ steps:
 npx tsx src/index-monitoring.ts --monitor-only --config configs/local.json
 ```
 
-Monitoring then prints the 5-digit code and, with `--publish-code`, POSTs it to the Kanban
-sheet in the same run:
+Recording the code in the Kanban sheet is the last step of the publishing stage, so it
+happens in the same run whenever the sheet credentials are set in the environment. Pass
+`--no-publish-code` to skip it:
 
 ```bash
-npx tsx src/index-monitoring.ts --monitor-only --publish-code --config configs/local.json
+npx tsx src/index-monitoring.ts --monitor-only --no-publish-code --config configs/local.json
 ```
 
 The 5-digit code is the LAMS lesson ID, read from the monitoring URL
 (`monitorLesson.do?lessonID=41192`). `openMonitoring` already confirms it against the URL the
 browser actually landed on, so no extra scraping is involved. The identifier sent alongside it
-is the lesson title, which matches the sheet's TBL/Quiz Details column. A sheet that is
-unreachable does not fail the run - the lesson already exists by then - but the run exits
-non-zero so the failure is not silent.
+is the lesson title, which matches the sheet's TBL/Quiz Details column.
+
+On a machine with no sheet credentials the run prints the code for manual entry instead of
+failing, since the LAMS-side work has already succeeded by then. `--publish-code` still
+forces the send and treats missing credentials as an error. A configured sheet that is
+unreachable or rejects the identifier is reported and exits non-zero, so the failure is never
+silent.
+
+Sheet credentials live in an ignored `.env` file (see `.env.example`), which the entry points
+load themselves - no dotenv dependency and no `--env-file` flag is needed.
 
 ## Selector discovery workflow
 
