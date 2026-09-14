@@ -44,6 +44,13 @@ async function readTree(dialog: Locator): Promise<TreeRow[]> {
   });
 }
 
+function isVisiblyExpanded(rows: TreeRow[], index: number): boolean {
+  const row = rows[index]!;
+  // LAMS normally updates aria-expanded, but some populated folders have been
+  // observed leaving it false after their descendant rows are rendered.
+  return row.expanded === 'true' || (rows[index + 1]?.level ?? -1) > row.level;
+}
+
 export async function discoverLessons(page: Page, options: DiscoveryOptions): Promise<LessonCandidate[]> {
   const limit = options.maxExpansions ?? 1000;
   if (!Number.isInteger(limit) || limit < 1) throw new Error('maxExpansions must be a positive integer.');
@@ -62,7 +69,9 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
     if (JSON.stringify(fresh) !== JSON.stringify(rows)) throw new Error('Authoring tree changed before expansion; retry discovery.');
     const target = dialog.getByRole('treeitem').nth(index);
     await target.click();
-    await expect(target).toHaveAttribute('aria-expanded', 'true', { timeout: options.timeoutMs });
+    await expect.poll(async () => isVisiblyExpanded(await readTree(dialog), index), {
+      timeout: options.timeoutMs
+    }).toBe(true);
     // The existing treeview populates children during expansion. Wait for its DOM to settle.
     let last = '';
     await expect.poll(async () => {
@@ -77,7 +86,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   const courses = rows.map((row, index) => ({ row, index }))
     .filter(({ row }) => row.folder && row.text === 'Courses' && row.level === 0);
   if (courses.length !== 1) throw new Error(`Expected one top-level Courses folder; found ${courses.length}.`);
-  if (!courses[0]!.row.empty && courses[0]!.row.expanded !== 'true') await expand(courses[0]!.index, rows);
+  if (!courses[0]!.row.empty && !isVisiblyExpanded(rows, courses[0]!.index)) await expand(courses[0]!.index, rows);
   rows = await readTree(dialog);
   for (const root of options.roots ?? []) {
     const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && row.text === root);
@@ -87,7 +96,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
     (!options.roots?.length || options.roots.includes(row.path[1] ?? ''));
   while (true) {
     rows = await readTree(dialog);
-    const index = rows.findIndex(row => inScope(row) && row.folder && !row.empty && row.expanded !== 'true');
+    const index = rows.findIndex((row, index) => inScope(row) && row.folder && !row.empty && !isVisiblyExpanded(rows, index));
     if (index < 0) break;
     await expand(index, rows);
   }

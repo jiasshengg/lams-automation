@@ -89,6 +89,23 @@ test('skips DOM-verified empty folders that cannot expand and still searches sib
   await expect(page.getByRole('treeitem', { name: 'Empty', exact: true })).toHaveAttribute('aria-expanded', 'false');
 });
 
+test('accepts rendered descendants when a populated folder leaves aria-expanded false', async ({ page }) => {
+  await page.setContent(`
+    <button id="openButton" onclick="document.querySelector('[role=dialog]').hidden=false">Open</button>
+    <div role="dialog" aria-label="Open design" hidden>
+      <div role="treeitem" class="tree-parent" aria-expanded="true">Courses</div>
+      <div role="treeitem" class="tree-parent" aria-expanded="true"><span class="indent"></span>Playground</div>
+      <div role="treeitem" class="tree-parent" aria-expanded="false"><span class="indent"></span><span class="indent"></span>Run sequences</div>
+      <div role="treeitem"><span class="indent"></span><span class="indent"></span><span class="indent"></span>FOM TBL01 2025Y1</div>
+    </div>
+  `);
+  expect(await discoverLessons(page, { query: 'FOM TBL01', timeoutMs: 300 })).toEqual([{
+    sourceLessonTitle: 'FOM TBL01 2025Y1',
+    sourceFolderPath: ['Courses', 'Playground', 'Run sequences']
+  }]);
+  await expect(page.getByRole('treeitem', { name: 'Run sequences', exact: true })).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('does not hide expansion failures for folders without empty-folder evidence', async ({ page }) => {
   await page.setContent('<button id="openButton">Open</button><div role="dialog" aria-label="Open design"><div role="treeitem" class="tree-parent" aria-expanded="false">Courses</div></div>');
   await expect(discoverLessons(page, { timeoutMs: 300 })).rejects.toThrow();
