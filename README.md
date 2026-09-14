@@ -168,9 +168,14 @@ First extract the structural evidence from the supplied SoT DOCX:
 ```bash
 npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx"
 npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx" --out /tmp/ae-sot-analysis.json --json
+npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx" --draft /tmp/ae-plan-draft.json
 ```
 
-The extractor treats only a standalone literal `--- BREAK ---` paragraph as an AE boundary. It derives `expectedAENodes = breaks + 1`, `expectedAEGates = breaks`, inventories the question ranges, explicit marks, selectable/open-response types, detected answer keys, and embedded-image counts, and stops at a standalone `END`. Page boundaries and `Case` headings never create nodes. Its suggested node titles are review aids, not authority for exact names in LAMS.
+The extractor treats only a standalone literal `--- BREAK ---` paragraph as an AE boundary. It derives `expectedAENodes = breaks + 1`, `expectedAEGates = breaks`, inventories the question ranges, explicit marks, selectable/open-response types, detected answer keys, and embedded-image counts, and stops at a standalone `END`. Page boundaries and `Case` headings never create nodes.
+
+`Case` headings do name the nodes. A node inside one case is titled `AE Case 3 Q3-6` (or `AE Case 3 Q4` for a single question); a node spanning two cases is titled `AE Case 1 Q1 to Case 2 Q2`. A heading stays in effect across break markers, so a node that continues the previous case keeps that case number. Questions outside any numbered `Case` heading fall back to `AE Q<range>` and raise a warning. Suggested titles are review aids, not authority for exact names in LAMS.
+
+`--draft` writes a reviewable AE plan JSON transcribed from the document: those node titles, the case narrative that opens each node, every stem and option with the bold, italic, underline, superscript, and subscript the document uses, detected answer keys, explicit marks, and gates. Retyping the document by hand is what makes titles, emphasis, and figure order drift, so start from the draft and resolve its `_review` notes and `TODO_` keys.
 
 Extract the embedded images and inspect their question assignments:
 
@@ -178,7 +183,9 @@ Extract the embedded images and inspect their question assignments:
 npm run extract:sot-media -- --sot-docx "AE SOT.docx"
 ```
 
-Review the extraction warnings, then convert the content into structured JSON matching [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, links, and question content must be confirmed before browser use. Set root-level `sourceDocx` to import embedded images by question number, or add explicit local `images` to individual questions. Preflight the reviewed JSON locally:
+Each image records the question it belongs to, the caption line printed under it, and whether the document printed it above or below the stem. A figure under a new `Case` heading illustrates the question that follows it, not the previous one; cover art before the first section stays unassigned.
+
+Review the extraction warnings, then confirm the draft against [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, links, and question content must be confirmed before browser use. Set root-level `sourceDocx` to import embedded images by question number, or add explicit local `images` (each accepting `placement` and `caption`) to individual questions. Preflight the reviewed JSON locally:
 
 ```bash
 npm run plan:ae -- --ae-json configs/ae-example.json
@@ -189,8 +196,10 @@ The preflight refuses invalid data and derives a deterministic plan that:
 - requires AE nodes = `breakMarkerCount + 1` and AE gates = `breakMarkerCount`;
 - requires question numbers to be globally sequential from 1;
 - defaults each question to 4 marks and checks `expectedTotalMarks` when supplied;
-- removes `[X marks]`/numeric mark annotations and typed `A)`/`A.` option prefixes;
-- emits bold-underlined `Case X` and required blank paragraphs in `promptHtml`;
+- removes `[X marks]`/numeric mark annotations and typed `A)`/`A.` option prefixes, while leaving option text that opens with its own identifier, such as `I:1 and I:2`, intact;
+- keeps `<strong>`, `<em>`, `<u>`, `<sup>`, and `<sub>` in prompts and options so emphasis matches the Source-of-Truth, and escapes every other tag;
+- emits bold-underlined `Case X` and required blank paragraphs in `promptHtml`, unless the Source-of-Truth already styled that heading;
+- leaves the AE activity description empty: the node title alone identifies it;
 - enables LAMS multiple-answer mode when an MCQ has several correct options, assigns equal correct-answer weights by default, and accepts explicit positive weights totaling 100%;
 - sets Answer required, sequential-letter answer prefixes, Save as new version, and latest-version selection in the plan;
 - fixes all video-specified AE activity settings, with optional SoT overrides only for attempts and passing mark;
@@ -210,7 +219,7 @@ Write the reviewed AE plan to an existing lesson, creating missing Assessment no
 npm run apply:ae -- --config configs/local.json --ae-json <AE_JSON> --request-json '<REQUEST_JSON>'
 ```
 
-Add `--dry-run` to report missing nodes, gates, connections, and gate-bypass edges without mutation. A committed run updates existing questions as new versions, creates missing MCQ/essay questions, imports images, applies canonical AE settings, associates Team Setup, saves the design, and verifies the resulting graph. It stops rather than deleting extra questions/nodes or removing a direct transition that would bypass a planned gate.
+Add `--dry-run` to report missing nodes, gates, connections, and gate-bypass edges without mutation. A committed run updates existing questions as new versions, creates missing MCQ/essay questions, imports images and their captions on the side of the stem the Source-of-Truth printed them, applies canonical AE settings, associates Team Setup, saves the design, and verifies the resulting graph. Print View verification fails when an imported image or its caption is missing. It stops rather than deleting extra questions/nodes or removing a direct transition that would bypass a planned gate.
 
 ## Lesson index and monitoring
 

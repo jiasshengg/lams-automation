@@ -1,19 +1,28 @@
-import { inflateRawSync } from 'node:zlib';
+import { sliceInlineHtml, stripOptionPrefixHtml, withoutUniformInlineTag } from './inline-html.js';
+import { extractSOTParagraphs, readDocumentXmlFromDocx, type SOTParagraph } from './sot-paragraphs.js';
 
-export interface SOTParagraph {
-  text: string;
-  bold: boolean;
-  imageCount: number;
-}
+export { extractSOTParagraphs, readDocumentXmlFromDocx };
+export type { SOTParagraph };
 
 export type ObservedAEQuestionType = 'single-select' | 'multiple-select' | 'open-response';
+
+export interface AEObservedOption {
+  label: string;
+  /** Option text with its answer-letter prefix removed and SoT emphasis preserved. */
+  html: string;
+  correct: boolean;
+}
 
 export interface AEQuestionObservation {
   number: number;
   type: ObservedAEQuestionType;
   explicitMarks: number | null;
+  caseNumber: number | null;
+  /** The question stem exactly as written, including emphasis. */
+  promptHtml: string;
   optionLabels: string[];
   correctAnswerLabels: string[];
+  options: AEObservedOption[];
 }
 
 export interface AENodeObservation {
@@ -22,7 +31,10 @@ export interface AENodeObservation {
   firstQuestionNumber: number;
   lastQuestionNumber: number;
   questionRange: string;
+  caseNumbers: number[];
   caseHeadings: string[];
+  /** Case narrative shown before the node's first question, in document order. */
+  contextHtml: string[];
   imageCount: number;
   suggestedTitle: string;
 }
@@ -59,74 +71,49 @@ export interface AESOTAnalysis {
   warnings: string[];
 }
 
-const BREAK_MARKER = /^-{3}\s*BREAK\s*-{3}$/i;
+export const BREAK_MARKER = /^-{3}\s*BREAK\s*-{3}$/i;
+export const CASE_HEADING = /^Case\s+(\d+)\b/i;
+export const SOT_QUESTION_START = /^(\d+)[.)]\s+\S/;
 const END_MARKER = /^END$/i;
-const QUESTION_START = /^(\d+)[.)]\s+\S/;
 const OPTION_START = /^([A-Z])[.)]\s+\S/;
 const INLINE_OPTION = /(?:^|\s)([A-Z])[.)]\s+\S/g;
 const ANSWER_LINE = /^Answer\s*[-:]\s*(.+)$/i;
 const RATIONALE_LINE = /^Rationale\b/i;
-
-export function readDocumentXmlFromDocx(buffer: Buffer): string {
-  const entry = readZipEntry(buffer, 'word/document.xml');
-  return entry.toString('utf8');
-}
-
-export function extractSOTParagraphs(documentXml: string): SOTParagraph[] {
-  const paragraphs: SOTParagraph[] = [];
-  const paragraphPattern = /<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g;
-  let paragraphMatch: RegExpExecArray | null;
-
-  while ((paragraphMatch = paragraphPattern.exec(documentXml)) !== null) {
-    const xml = paragraphMatch[1] ?? '';
-    const pieces: string[] = [];
-    const contentPattern = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>/g;
-    let contentMatch: RegExpExecArray | null;
-    while ((contentMatch = contentPattern.exec(xml)) !== null) {
-      if (contentMatch[1] !== undefined) pieces.push(decodeXml(contentMatch[1]));
-      else pieces.push(' ');
-    }
-
-    const text = normalizeText(pieces.join(''));
-    if (text === '' && !/<w:drawing\b/.test(xml)) continue;
-    paragraphs.push({
-      text,
-      bold: text !== '' && isFullyBoldParagraph(xml),
-      imageCount: countMatches(xml, /<w:drawing\b/g)
-    });
-  }
-  return paragraphs;
-}
+/** Front matter of the first group (copyright, outcomes, labels) is never case narrative. */
+const METADATA_LABEL =
+  /^(?:Module|Session Title|Authors and affiliations|Resource|Learning Outcomes|Specific Objectives for Session|Application title|Copyright Statement)\b/i;
 
 export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string): AESOTAnalysis {
   const endIndex = paragraphs.findIndex((paragraph) => END_MARKER.test(paragraph.text));
   const contentEnd = endIndex >= 0 ? endIndex : paragraphs.length;
   const relevant = paragraphs.slice(0, contentEnd);
+  const caseNumbers = caseNumberByParagraph(relevant);
   const breakIndexes = relevant
     .map((paragraph, index) => (BREAK_MARKER.test(paragraph.text) ? index : -1))
     .filter((index) => index >= 0);
 
   const boundaries = [-1, ...breakIndexes, relevant.length];
-  const groups = boundaries.slice(0, -1).map((boundary, index) => {
-    const next = boundaries[index + 1]!;
-    return relevant.slice(boundary + 1, next);
-  });
+  const groups = boundaries.slice(0, -1).map((boundary, index) => ({
+    offset: boundary + 1,
+    paragraphs: relevant.slice(boundary + 1, boundaries[index + 1]!)
+  }));
 
   if (groups.length === 0) throw new Error('The AE SOT did not contain any content.');
 
   const questions: AEQuestionObservation[] = [];
   const unlabelledOptionBlockQuestions: number[] = [];
-  const nodes = groups.map<AENodeObservation>((untrimmedGroup, index) => {
-    const firstQuestionIndex = untrimmedGroup.findIndex((paragraph) => QUESTION_START.test(paragraph.text));
+  const nodes = groups.map<AENodeObservation>(({ offset, paragraphs: untrimmedGroup }, index) => {
+    const firstQuestionIndex = untrimmedGroup.findIndex((paragraph) => SOT_QUESTION_START.test(paragraph.text));
     const precedingCaseIndex = untrimmedGroup.reduce(
       (latest, paragraph, paragraphIndex) =>
-        paragraphIndex < firstQuestionIndex && /^Case\s+\d+\b/i.test(paragraph.text) ? paragraphIndex : latest,
+        paragraphIndex < firstQuestionIndex && CASE_HEADING.test(paragraph.text) ? paragraphIndex : latest,
       -1
     );
-    const group = precedingCaseIndex >= 0 ? untrimmedGroup.slice(precedingCaseIndex) : untrimmedGroup;
+    const groupStart = precedingCaseIndex >= 0 ? precedingCaseIndex : 0;
+    const group = untrimmedGroup.slice(groupStart);
     const questionStarts = group
       .map((paragraph, paragraphIndex) => {
-        const match = paragraph.text.match(QUESTION_START);
+        const match = paragraph.text.match(SOT_QUESTION_START);
         return match ? { paragraphIndex, number: Number(match[1]) } : null;
       })
       .filter((value): value is { paragraphIndex: number; number: number } => value !== null);
@@ -135,26 +122,39 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
       throw new Error(`Break-derived AE group ${index + 1} does not contain a numbered question.`);
     }
 
-    questionStarts.forEach((start, questionIndex) => {
+    const nodeQuestions = questionStarts.map((start, questionIndex) => {
       const nextStart = questionStarts[questionIndex + 1]?.paragraphIndex ?? group.length;
-      const observed = observeQuestion(group.slice(start.paragraphIndex, nextStart), start.number);
+      const observed = observeQuestion(
+        group.slice(start.paragraphIndex, nextStart),
+        start.number,
+        caseNumbers[offset + groupStart + start.paragraphIndex] ?? null
+      );
       questions.push(observed.observation);
       if (observed.unlabelledOptionBlock) unlabelledOptionBlockQuestions.push(start.number);
+      return observed.observation;
     });
 
     const questionNumbers = questionStarts.map((question) => question.number);
     const firstQuestionNumber = questionNumbers[0]!;
     const lastQuestionNumber = questionNumbers.at(-1)!;
-    const questionRange = formatQuestionRange(firstQuestionNumber, lastQuestionNumber);
     return {
       index: index + 1,
       questionNumbers,
       firstQuestionNumber,
       lastQuestionNumber,
-      questionRange,
-      caseHeadings: group.map((paragraph) => paragraph.text).filter((text) => /^Case\s+\d+\b/i.test(text)),
+      questionRange: formatQuestionRange(firstQuestionNumber, lastQuestionNumber),
+      caseNumbers: unique(
+        nodeQuestions.map((question) => question.caseNumber).filter((value): value is number => value !== null)
+      ),
+      caseHeadings: group.map((paragraph) => paragraph.text).filter((text) => CASE_HEADING.test(text)),
+      contextHtml: contextParagraphs(group.slice(0, questionStarts[0]!.paragraphIndex), index === 0 && precedingCaseIndex < 0),
       imageCount: group.reduce((sum, paragraph) => sum + paragraph.imageCount, 0),
-      suggestedTitle: `AE ${questionRange}`
+      suggestedTitle: suggestNodeTitle(
+        nodeQuestions[0]!.caseNumber,
+        nodeQuestions.at(-1)!.caseNumber,
+        firstQuestionNumber,
+        lastQuestionNumber
+      )
     };
   });
 
@@ -185,6 +185,9 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
       `Questions with an unlabelled option block that could not be resolved: ${formatNumberList(unlabelledOptionBlockQuestions)}. The option list could not be bounded automatically; confirm the options and answer key manually.`
     );
   }
+  if (questions.some((question) => question.caseNumber === null)) {
+    warnings.push('Some questions sit outside any numbered Case heading, so their suggested node titles omit the Case prefix.');
+  }
 
   const sourceLabel = applicationTitle ?? fallbackLabel;
   const gates = nodes.slice(1).map<AEGateObservation>((node, index) => ({
@@ -211,7 +214,7 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
       expectedAEGates: breakIndexes.length
     },
     reviewRequired: [
-      'Confirm exact AE node titles; suggested titles are not authority for existing LAMS nodes.',
+      'Confirm exact AE node titles; suggested titles follow the "AE Case <n> Q<range>" convention but are not authority for existing LAMS nodes.',
       'Confirm exact AE gate titles and build the linear expectedFlow from the approved naming convention.',
       ...(multipleSelectQuestions.length > 0
         ? [`Confirm correct answers and scoring for multiple-select questions ${formatNumberList(multipleSelectQuestions)}; correct weights default to an equal split unless explicitly supplied.`]
@@ -250,9 +253,41 @@ export function formatAESOTSummary(analysis: AESOTAnalysis): string {
   return lines.join('\n');
 }
 
+/**
+ * Case headings carry across break markers: an AE node that continues the previous
+ * case states no heading of its own, so the last heading seen stays in effect.
+ */
+function caseNumberByParagraph(paragraphs: SOTParagraph[]): (number | null)[] {
+  let current: number | null = null;
+  return paragraphs.map((paragraph) => {
+    const match = paragraph.text.match(CASE_HEADING);
+    if (match) current = Number(match[1]);
+    return current;
+  });
+}
+
+/** Matches the observed LAMS naming convention, e.g. "AE Case 3 Q3-6". */
+function suggestNodeTitle(firstCase: number | null, lastCase: number | null, first: number, last: number): string {
+  if (firstCase === null || lastCase === null) return `AE ${formatQuestionRange(first, last)}`;
+  if (firstCase === lastCase) return `AE Case ${firstCase} ${formatQuestionRange(first, last)}`;
+  return `AE Case ${firstCase} Q${first} to Case ${lastCase} Q${last}`;
+}
+
+function contextParagraphs(paragraphs: SOTParagraph[], skipFrontMatter: boolean): string[] {
+  if (skipFrontMatter) return [];
+  return paragraphs
+    .filter((paragraph) => paragraph.text !== '' && !METADATA_LABEL.test(paragraph.text))
+    .map((paragraph) => paragraph.html);
+}
+
 interface OptionEntry {
   label: string;
   paragraph: SOTParagraph;
+  /** Visible-text bounds of this option inside its paragraph, answer letter included. */
+  start: number;
+  end: number;
+  /** False when the label was synthesised for an unprefixed block, so nothing is stripped. */
+  labelled: boolean;
   // False for options recovered from a collapsed run: they all share one
   // paragraph, so its bold flag cannot single any of them out as the answer.
   boldEligible: boolean;
@@ -267,6 +302,14 @@ function optionLabelAt(index: number): string {
   return String.fromCharCode(65 + index);
 }
 
+function wholeParagraphEntry(
+  label: string,
+  paragraph: SOTParagraph,
+  options: { boldEligible: boolean; labelled: boolean }
+): OptionEntry {
+  return { label, paragraph, start: 0, end: paragraph.text.length, ...options };
+}
+
 // Word sometimes collapses a whole option list onto one line, e.g.
 // "A. First B. Second C. Third". Split it only when the labels form a
 // sequential run starting at A, so ordinary prose containing "B." is untouched.
@@ -275,7 +318,15 @@ function splitInlineOptionRun(paragraph: SOTParagraph): OptionEntry[] | null {
   if (matches.length < 2) return null;
   const labels = matches.map((match) => match[1]!);
   if (!labels.every((label, index) => label === optionLabelAt(index))) return null;
-  return labels.map((label) => ({ label, paragraph, boldEligible: false }));
+  const starts = matches.map((match, index) => match.index! + match[0].indexOf(labels[index]!));
+  return labels.map((label, index) => ({
+    label,
+    paragraph,
+    start: starts[index]!,
+    end: starts[index + 1] ?? paragraph.text.length,
+    labelled: true,
+    boldEligible: false
+  }));
 }
 
 // Some option lists carry no letter prefixes because each option starts with
@@ -303,7 +354,7 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
       continue;
     }
     const match = paragraph.text.match(OPTION_START);
-    if (match) labelled.push({ label: match[1]!, paragraph, boldEligible: true });
+    if (match) labelled.push(wholeParagraphEntry(match[1]!, paragraph, { boldEligible: true, labelled: true }));
   }
   if (labelled.length > 0) return { entries: labelled, unlabelledOptionBlock: false };
 
@@ -326,15 +377,13 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
     answerLabel !== undefined && candidates.length <= 26 && answerLabel <= optionLabelAt(candidates.length - 1);
   const usable = candidates.every(
     (paragraph) =>
-      paragraph.text !== '' && !RATIONALE_LINE.test(paragraph.text) && !QUESTION_START.test(paragraph.text)
+      paragraph.text !== '' && !RATIONALE_LINE.test(paragraph.text) && !SOT_QUESTION_START.test(paragraph.text)
   );
   if (inRange && usable) {
     return {
-      entries: candidates.map((paragraph, index) => ({
-        label: optionLabelAt(index),
-        paragraph,
-        boldEligible: true
-      })),
+      entries: candidates.map((paragraph, index) =>
+        wholeParagraphEntry(optionLabelAt(index), paragraph, { boldEligible: true, labelled: false })
+      ),
       unlabelledOptionBlock: false
     };
   }
@@ -343,7 +392,7 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   return { entries: [], unlabelledOptionBlock: answerLabel !== undefined };
 }
 
-function observeQuestion(paragraphs: SOTParagraph[], number: number): ObservedQuestion {
+function observeQuestion(paragraphs: SOTParagraph[], number: number, caseNumber: number | null): ObservedQuestion {
   const { entries: optionParagraphs, unlabelledOptionBlock } = collectOptionEntries(paragraphs);
   const optionLabels = optionParagraphs.map(({ label }) => label);
   const explicitAnswer = paragraphs
@@ -358,7 +407,8 @@ function observeQuestion(paragraphs: SOTParagraph[], number: number): ObservedQu
   const correctAnswerLabels = unique(explicitLabels.length > 0 ? explicitLabels : boldLabels).filter((label) =>
     optionLabels.includes(label)
   );
-  const prompt = paragraphs[0]?.text ?? '';
+  const stem = paragraphs[0];
+  const prompt = stem?.text ?? '';
   const marksMatch = prompt.match(/\(?\s*(\d+)\s+marks?\s*\)?/i);
   const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || correctAnswerLabels.length > 1;
   const type: ObservedAEQuestionType =
@@ -368,11 +418,23 @@ function observeQuestion(paragraphs: SOTParagraph[], number: number): ObservedQu
       number,
       type,
       explicitMarks: marksMatch ? Number(marksMatch[1]) : null,
+      caseNumber,
+      promptHtml: stem?.html ?? '',
       optionLabels,
-      correctAnswerLabels
+      correctAnswerLabels,
+      options: optionParagraphs.map((entry) => ({
+        label: entry.label,
+        html: withoutUniformInlineTag(optionHtml(entry), 'strong'),
+        correct: correctAnswerLabels.includes(entry.label)
+      }))
     },
     unlabelledOptionBlock
   };
+}
+
+function optionHtml(entry: OptionEntry): string {
+  const html = sliceInlineHtml(entry.paragraph.html, entry.start, entry.end);
+  return entry.labelled ? stripOptionPrefixHtml(html) : html;
 }
 
 function assertSequentialQuestions(numbers: number[]): void {
@@ -392,83 +454,8 @@ function valueAfterLabel(paragraphs: SOTParagraph[], label: string): string | nu
   return null;
 }
 
-function isFullyBoldParagraph(xml: string): boolean {
-  const runPattern = /<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g;
-  let sawText = false;
-  let runMatch: RegExpExecArray | null;
-  while ((runMatch = runPattern.exec(xml)) !== null) {
-    const runXml = runMatch[1] ?? '';
-    const text = [...runXml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)]
-      .map((match) => decodeXml(match[1] ?? ''))
-      .join('')
-      .trim();
-    if (text === '') continue;
-    sawText = true;
-    if (!/<w:b(?:\s[^>]*)?\/>/.test(runXml) || /<w:b\b[^>]*w:val=["'](?:0|false|off)["'][^>]*\/>/i.test(runXml)) {
-      return false;
-    }
-  }
-  return sawText;
-}
-
-function readZipEntry(buffer: Buffer, expectedName: string): Buffer {
-  const eocdSignature = 0x06054b50;
-  const centralSignature = 0x02014b50;
-  const localSignature = 0x04034b50;
-  const minimumEocdSize = 22;
-  const searchStart = Math.max(0, buffer.length - 65_557);
-  let eocdOffset = -1;
-  for (let offset = buffer.length - minimumEocdSize; offset >= searchStart; offset -= 1) {
-    if (buffer.readUInt32LE(offset) === eocdSignature) {
-      eocdOffset = offset;
-      break;
-    }
-  }
-  if (eocdOffset < 0) throw new Error('The supplied file is not a supported DOCX/ZIP file.');
-
-  const entryCount = buffer.readUInt16LE(eocdOffset + 10);
-  let offset = buffer.readUInt32LE(eocdOffset + 16);
-  for (let index = 0; index < entryCount; index += 1) {
-    if (buffer.readUInt32LE(offset) !== centralSignature) throw new Error('Invalid DOCX central directory.');
-    const compressionMethod = buffer.readUInt16LE(offset + 10);
-    const compressedSize = buffer.readUInt32LE(offset + 20);
-    const fileNameLength = buffer.readUInt16LE(offset + 28);
-    const extraLength = buffer.readUInt16LE(offset + 30);
-    const commentLength = buffer.readUInt16LE(offset + 32);
-    const localOffset = buffer.readUInt32LE(offset + 42);
-    const fileName = buffer.subarray(offset + 46, offset + 46 + fileNameLength).toString('utf8');
-    if (fileName === expectedName) {
-      if (buffer.readUInt32LE(localOffset) !== localSignature) throw new Error('Invalid DOCX local file header.');
-      const localFileNameLength = buffer.readUInt16LE(localOffset + 26);
-      const localExtraLength = buffer.readUInt16LE(localOffset + 28);
-      const dataStart = localOffset + 30 + localFileNameLength + localExtraLength;
-      const compressed = buffer.subarray(dataStart, dataStart + compressedSize);
-      if (compressionMethod === 0) return compressed;
-      if (compressionMethod === 8) return inflateRawSync(compressed);
-      throw new Error(`Unsupported DOCX compression method ${compressionMethod}.`);
-    }
-    offset += 46 + fileNameLength + extraLength + commentLength;
-  }
-  throw new Error(`The supplied DOCX does not contain ${expectedName}.`);
-}
-
-function decodeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)));
-}
-
-function normalizeText(value: string): string {
-  return value.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
 function formatQuestionRange(first: number, last: number): string {
-  return first === last ? `Q${first}` : `Q${first}–${last}`;
+  return first === last ? `Q${first}` : `Q${first}-${last}`;
 }
 
 function formatNumberList(values: number[]): string {
@@ -477,10 +464,6 @@ function formatNumberList(values: number[]): string {
 
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
-}
-
-function countMatches(value: string, pattern: RegExp): number {
-  return [...value.matchAll(pattern)].length;
 }
 
 function escapeRegExp(value: string): string {

@@ -3,6 +3,8 @@ import { analyzeAESOT, extractSOTParagraphs } from '../src/ae/sot-docx.js';
 
 function paragraph(text: string, options: { bold?: boolean; drawing?: boolean } = {}): string {
   const bold = options.bold ? '<w:rPr><w:b/></w:rPr>' : '';
+  // Case headings in a real SoT are bold and underlined; the helper keeps them plain
+  // unless a test opts in, so structural rules stay independent of styling.
   const drawing = options.drawing ? '<w:drawing><wp:inline/></w:drawing>' : '';
   return `<w:p><w:r>${bold}<w:t>${text}</w:t>${drawing}</w:r></w:p>`;
 }
@@ -14,8 +16,8 @@ test('extracts split runs, bold answer options, and image counts from Word XML',
   </w:body></w:document>`;
 
   expect(extractSOTParagraphs(xml)).toEqual([
-    { text: '--- BREAK ---', bold: false, imageCount: 0 },
-    { text: 'B. Correct answer', bold: true, imageCount: 1 }
+    { text: '--- BREAK ---', html: '--- BREAK ---', bold: false, imageCount: 0 },
+    { text: 'B. Correct answer', html: '<strong>B. Correct answer</strong>', bold: true, imageCount: 1 }
   ]);
 });
 
@@ -249,4 +251,115 @@ test('warns instead of silently dropping an option block the guard cannot resolv
   const analysis = analyzeAESOT(paragraphs, 'Example');
   expect(analysis.questions[0]?.optionLabels).toEqual([]);
   expect(analysis.warnings.find((warning) => warning.includes('unlabelled option block'))).toContain('Q1');
+});
+
+function styledParagraph(runs: { text: string; tags?: string[] }[]): string {
+  const body = runs
+    .map(({ text, tags = [] }) => {
+      const vertical: Record<string, string> = { sup: 'superscript', sub: 'subscript' };
+      const properties = tags
+        .map((tag) => (vertical[tag] ? `<w:vertAlign w:val="${vertical[tag]}"/>` : `<w:${tag}/>`))
+        .join('');
+      return `<w:r><w:rPr>${properties}</w:rPr><w:t>${text}</w:t></w:r>`;
+    })
+    .join('');
+  return `<w:p>${body}</w:p>`;
+}
+
+test('names each AE node from its Case headings and question range', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. First question?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Right', { bold: true })}
+    ${paragraph('Case 2')}
+    ${paragraph('2. Second question?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Right', { bold: true })}
+    ${paragraph('--- BREAK ---')}
+    ${paragraph('Case 3')}
+    ${paragraph('3. Third question?')}
+    ${paragraph('4. Fourth question?')}
+    ${paragraph('--- BREAK ---')}
+    ${paragraph('5. Fifth question?')}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const analysis = analyzeAESOT(paragraphs, 'Example');
+  expect(analysis.nodes.map((node) => node.suggestedTitle)).toEqual([
+    'AE Case 1 Q1 to Case 2 Q2',
+    'AE Case 3 Q3-4',
+    // A node that continues the previous case states no heading of its own.
+    'AE Case 3 Q5'
+  ]);
+});
+
+test('omits the Case prefix and warns when a question sits outside any Case heading', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(`<w:document><w:body>
+      ${paragraph('1. Only question?')}
+      ${paragraph('END')}
+    </w:body></w:document>`),
+    'Example'
+  );
+  expect(analysis.nodes[0]?.suggestedTitle).toBe('AE Q1');
+  expect(analysis.warnings.join('\n')).toContain('outside any numbered Case heading');
+});
+
+test('preserves underline, superscript, and italics observed in the question stem', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(`<w:document><w:body>
+      ${paragraph('Case 1')}
+      ${styledParagraph([
+        { text: '1. A sample contains 10' },
+        { text: '9', tags: ['sup'] },
+        { text: ' molecules. For this ' },
+        { text: 'highly albumin-bound', tags: ['u'] },
+        { text: ' drug, which concentration may increase?' }
+      ])}
+      ${paragraph('A. The bound concentration')}
+      ${paragraph('B. The unbound concentration', { bold: true })}
+      ${paragraph('END')}
+    </w:body></w:document>`),
+    'Example'
+  );
+  expect(analysis.questions[0]?.promptHtml).toBe(
+    '1. A sample contains 10<sup>9</sup> molecules. For this <u>highly albumin-bound</u> drug, which concentration may increase?'
+  );
+});
+
+test('never copies the bold Word uses to mark the answer key into the option text', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(`<w:document><w:body>
+      ${paragraph('Case 1')}
+      ${paragraph('1. Which concentration may increase?')}
+      ${paragraph('A. The bound concentration')}
+      ${paragraph('B. The unbound concentration', { bold: true })}
+      ${paragraph('END')}
+    </w:body></w:document>`),
+    'Example'
+  );
+  expect(analysis.questions[0]?.options).toEqual([
+    { label: 'A', html: 'The bound concentration', correct: false },
+    { label: 'B', html: 'The unbound concentration', correct: true }
+  ]);
+});
+
+test('reads the case narrative before a node as its first question context', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(`<w:document><w:body>
+      ${paragraph('Module: Example module')}
+      ${paragraph('Case 1')}
+      ${paragraph('1. First question?')}
+      ${paragraph('--- BREAK ---')}
+      ${paragraph('The team reviews other changes.')}
+      ${paragraph('2. Second question?')}
+      ${paragraph('END')}
+    </w:body></w:document>`),
+    'Example'
+  );
+  // Context is reproduced verbatim; the bold-underline house style is applied later,
+  // and only to a Case heading the Source-of-Truth left unformatted.
+  expect(analysis.nodes[0]?.contextHtml).toEqual(['Case 1']);
+  expect(analysis.nodes[1]?.contextHtml).toEqual(['The team reviews other changes.']);
 });

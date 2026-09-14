@@ -55,6 +55,10 @@ export interface QuestionImageRequest {
   path: string;
   altText?: string;
   widthPx?: number;
+  /** Where the image sits relative to the question text. Defaults to `after`. */
+  placement?: 'before' | 'after';
+  /** Optional caption rendered directly under the image. Inline emphasis is kept. */
+  caption?: string;
 }
 
 export interface IratQuestionRequest {

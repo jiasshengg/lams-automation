@@ -17,6 +17,7 @@ async function main(): Promise<void> {
   const aeJson = readArgument('--ae-json');
   if (!aeJson) throw new Error('Usage: npm run apply:ae -- --config <path> --ae-json <path> --request-json <json> [--team-setup <title>] [--dry-run]');
   const commit = !process.argv.includes('--dry-run');
+  const keepOpen = process.argv.includes('--keep-open');
   const config = await loadConfig(
     readArgument('--config') ?? 'configs/local.json',
     parseRequestOverrides(readArgument('--request-json'))
@@ -56,12 +57,21 @@ async function main(): Promise<void> {
     console.log(`Transitions created: ${result.createdTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
     console.log(`Questions created/updated: ${result.writtenNodes.reduce((sum, node) => sum + node.createdQuestions.length + node.updatedQuestions.length, 0)}`);
     console.log(`Images imported: ${result.writtenNodes.reduce((sum, node) => sum + node.importedImages, 0)}`);
+    // The design is saved and verified by this point, so leave Authoring rather than sitting in it.
+    await editor.closeAuthoring();
   } catch (error) {
     const directory = await saveDiagnostics(activePage, 'apply-ae-failure').catch(() => undefined);
     if (directory) console.error(`AE diagnostics: ${directory}`);
+    // With --keep-open the rethrow is not printed until the window closes; surface it now.
+    if (keepOpen) console.error(error instanceof Error ? error.stack ?? error.message : error);
     throw error;
   } finally {
-    await context.close();
+    if (keepOpen) {
+      console.log('\nBrowser left open for manual verification. Close the window to end the run.');
+      await new Promise<void>((resolve) => context.on('close', () => resolve()));
+    } else {
+      await context.close();
+    }
   }
 }
 

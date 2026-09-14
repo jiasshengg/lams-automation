@@ -97,15 +97,28 @@ For read-only AE inspection, `selectors.aeOpenActivity` is a stable local-enviro
 
 ## AE SOT structural extraction
 
-Run `npm run extract:ae-sot -- --sot-docx '<PATH>' [--out '<JSON_PATH>'] [--json]`. The read-only extractor:
+Run `npm run extract:ae-sot -- --sot-docx '<PATH>' [--out '<JSON_PATH>'] [--draft '<JSON_PATH>'] [--json]`. The read-only extractor:
 
 - treats standalone `--- BREAK ---` paragraphs as the only node separators;
 - stops at standalone `END` and ignores version tracking after it;
 - derives AE node/gate counts and question ranges;
+- names each node from its Case headings and question range (see below);
+- preserves the bold, italic, underline, superscript, and subscript observed in each stem and option;
 - inventories explicit marks, selectable/open-response types, detected answer keys, Case headings, and embedded images;
 - reports warnings that require review.
 
-Do not use page boundaries or Case headings as separators. Do not use generated suggested titles as exact LAMS names. The extractor does not fully preserve tables, images, links, rationales, or rich formatting in executable AE JSON.
+Do not use page boundaries as separators. Case headings are not separators either, but they do name the nodes. The extractor does not fully preserve tables or rationales in executable AE JSON.
+
+`--draft` additionally writes a reviewable AE plan JSON transcribed from the document: node titles, case context, stems and options with their emphasis, detected answer keys, explicit marks, and gates. Hand transcription is where titles, emphasis, and figure order drift from the Source-of-Truth, so prefer the draft over retyping. It is still a draft: resolve every `_review` note and `TODO_` key before `plan:ae` or `apply:ae`.
+
+## AE node title convention
+
+- One case: `AE Case <n> Q<first>-<last>`, or `AE Case <n> Q<n>` for a single question — for example `AE Case 3 Q3-6`.
+- Spanning cases: `AE Case <first> Q<first> to Case <last> Q<last>` — for example `AE Case 1 Q1 to Case 2 Q2`.
+- A case heading stays in effect across break markers, so a node that continues the previous case is still titled with that case number.
+- Questions outside any numbered Case heading fall back to `AE Q<range>` and raise a warning.
+
+Suggested titles are still not authority for existing LAMS nodes; confirm them against the graph.
 
 ## Structured AE preflight input
 
@@ -116,7 +129,15 @@ Pass the local path separately with `--ae-json`; do not merge AE question conten
 - `mcq` or `essay` question type, prompt text, and MCQ options with one or more `correct: true` values;
 - exact gate title, adjacent node titles, and the first question number after each gate.
 
-Each node also accepts an optional `description` (default: the node title), written to the Assessment activity's description on `apply:ae`. MCQ options may supply `weight` percentages. If omitted, correct options split 100% equally; if any correct weight is explicit, every correct option needs a positive weight and those weights must total 100. Incorrect options have zero weight. More than one correct option enables LAMS's multiple-answer mode. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
+Nodes carry no description by default: AE activities are identified by their title alone, and `apply:ae` clears any description the copied lesson left behind. Supply an optional `description` only when the Source-of-Truth calls for one. MCQ options may supply `weight` percentages. If omitted, correct options split 100% equally; if any correct weight is explicit, every correct option needs a positive weight and those weights must total 100. Incorrect options have zero weight. More than one correct option enables LAMS's multiple-answer mode. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
+
+Each image records where the document printed it. A figure that follows the stem is written below it; a figure printed under a Case heading before the stem belongs to the question that follows and is written above it. The caption line directly under a figure is imported with it and rendered below the image, keeping its emphasis. Explicit `images` entries accept `placement` (`before` or `after`, default `after`) and `caption`. Print View verification fails when an imported image or its caption is missing.
+
+## Inline formatting in AE content
+
+Question prompts and MCQ option text accept `<strong>`/`<b>`, `<em>`/`<i>`, `<u>`, `<sup>`, and `<sub>`; `<br>` reads as a space. Every other tag is escaped and shown literally, so reviewed JSON cannot inject markup into the authoring surface. Emphasis must match the Source-of-Truth exactly, which is what the `--draft` output already does.
+
+A `Case ...` line that carries no formatting of its own is written bold and underlined; one the Source-of-Truth already styled keeps its own emphasis. Word marks an answer key by emboldening the whole correct option, so a uniformly bold option is written to LAMS without that bold and never reveals the answer.
 
 `marks` defaults to 4. `attempts` defaults to 1 and `passingMark` to null; supply them only when the SoT explicitly overrides those defaults. `expectedTotalMarks` is optional but recommended.
 
