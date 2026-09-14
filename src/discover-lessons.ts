@@ -25,7 +25,8 @@ async function main(): Promise<void> {
       ...(roots ? { roots } : {}),
       query: readArgument('--query') ?? '',
       maxExpansions,
-      timeoutMs: config.browser.actionTimeoutMs
+      timeoutMs: config.browser.actionTimeoutMs,
+      onProgress: message => console.log(message)
     });
     console.log(`\nRead-only Authoring library discovery: ${candidates.length} matching lesson(s).`);
     console.log('Scope: Courses' + (roots ? ` > ${roots.join(' | ')}` : ' (all accessible folders; may include other courses)'));
