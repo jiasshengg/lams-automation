@@ -159,6 +159,16 @@ export interface LamsConfig {
      */
     slowMoMs?: number;
   };
+  /**
+   * Kanban sheet endpoint. These are stable per machine rather than per run, so they belong
+   * in the ignored `configs/local.json` alongside the other environment values, and never in
+   * `configs/example.json` or any tracked file. The environment variables still work and
+   * take precedence, so an existing .env keeps behaving as before.
+   */
+  sheet?: {
+    webhookUrl: string;
+    secret: string;
+  };
   selectors: {
     previousCohort?: LocatorSpec;
     tbl?: LocatorSpec;
@@ -278,6 +288,7 @@ export async function loadConfig(
     }
   }
   validateIratRequest(merged.irat);
+  validateSheet(merged.sheet);
 
   const config = merged as unknown as LamsConfig;
   config.browser = {
@@ -499,6 +510,16 @@ function validateExpectedGateProperties(value: unknown): void {
       throw new Error(`expectedGateProperties[${index}].stopAtPrecedingActivity must be a boolean.`);
     }
   });
+}
+
+function validateSheet(value: unknown): void {
+  if (value === undefined) return;
+  if (!isRecord(value)) throw new Error('Configuration field "sheet" must be an object.');
+  for (const key of ['webhookUrl', 'secret'] as const) {
+    if (typeof value[key] !== 'string' || String(value[key]).trim() === '') {
+      throw new Error(`sheet.${key} must be a non-empty string.`);
+    }
+  }
 }
 
 function validateLessonIndex(value: unknown): void {

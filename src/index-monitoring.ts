@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { chromium } from '@playwright/test';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
+import type { LamsConfig } from './config.js';
 import { loadEnvFile } from './load-env.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { createLessonFromMostRecentDesign, openAddLesson } from './lams/lesson-index.js';
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
       const monitoring = await openMonitoring(page, config.lessonTitle, config);
       console.log('\nMonitoring workflow: OK');
       console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
-      await reportLessonCode(config.lessonTitle, monitoring.lessonId, publishCode, forceCode);
+      await reportLessonCode(config.lessonTitle, monitoring.lessonId, publishCode, forceCode, config);
       return;
     }
 
@@ -64,7 +65,7 @@ async function main(): Promise<void> {
     const monitoring = await openMonitoring(page, result.lessonTitle, config);
     console.log('\nMonitoring workflow: OK');
     console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
-    await reportLessonCode(result.lessonTitle, monitoring.lessonId, publishCode, forceCode);
+    await reportLessonCode(result.lessonTitle, monitoring.lessonId, publishCode, forceCode, config);
   } catch (error) {
     const directory = await saveDiagnostics(page, 'index-monitoring-failure').catch(() => undefined);
     if (directory) console.error(`Live failure diagnostics: ${directory}`);
@@ -83,20 +84,26 @@ async function main(): Promise<void> {
  * sheet credentials simply reports the code for manual entry rather than failing a run whose
  * LAMS-side work already succeeded, unless --publish-code asked for the send explicitly.
  */
-async function reportLessonCode(identifier: string, code: string, publish: boolean, force: boolean): Promise<void> {
+async function reportLessonCode(
+  identifier: string,
+  code: string,
+  publish: boolean,
+  force: boolean,
+  config: LamsConfig
+): Promise<void> {
   if (!publish) {
     console.log('Kanban sheet not updated: --no-publish-code was passed. Record this code manually.');
     return;
   }
-  if (!force && !sheetConfigured()) {
-    console.log('Kanban sheet not configured (LAMS_SHEET_WEBHOOK_URL / LAMS_SHEET_SECRET); record this code manually.');
+  if (!force && !sheetConfigured(config)) {
+    console.log('Kanban sheet not configured (add a "sheet" block to configs/local.json); record this code manually.');
     return;
   }
 
   // The lesson exists by this point, so a sheet that is unreachable or rejects the
   // identifier is reported rather than allowed to fail the whole run.
   try {
-    await sendCodeToSheet(code, identifier);
+    await sendCodeToSheet(code, identifier, sinkOptions(config));
     console.log(`Sent code ${code} for "${identifier}" to the Kanban sheet.`);
   } catch (error) {
     console.error(`Kanban sheet not updated: ${error instanceof Error ? error.message : String(error)}`);
@@ -104,8 +111,20 @@ async function reportLessonCode(identifier: string, code: string, publish: boole
   }
 }
 
-function sheetConfigured(): boolean {
-  return Boolean(process.env.LAMS_SHEET_WEBHOOK_URL && process.env.LAMS_SHEET_SECRET);
+/**
+ * The endpoint may come from the ignored `configs/local.json` or from the environment. The
+ * environment wins, so an exported variable or a CI secret can override the file without
+ * editing it, and an existing .env keeps working exactly as before.
+ */
+function sinkOptions(config: LamsConfig): { url?: string; secret?: string } {
+  const url = process.env.LAMS_SHEET_WEBHOOK_URL || config.sheet?.webhookUrl;
+  const secret = process.env.LAMS_SHEET_SECRET || config.sheet?.secret;
+  return { ...(url ? { url } : {}), ...(secret ? { secret } : {}) };
+}
+
+function sheetConfigured(config: LamsConfig): boolean {
+  const { url, secret } = sinkOptions(config);
+  return Boolean(url && secret);
 }
 
 function readArgument(name: string): string | undefined {

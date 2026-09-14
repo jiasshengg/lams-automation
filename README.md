@@ -331,8 +331,27 @@ forces the send and treats missing credentials as an error. A configured sheet t
 unreachable or rejects the identifier is reported and exits non-zero, so the failure is never
 silent.
 
-Sheet credentials live in an ignored `.env` file (see `.env.example`), which the entry points
-load themselves - no dotenv dependency and no `--env-file` flag is needed.
+Sheet credentials are stable per machine, so they belong in the ignored
+`configs/local.json` alongside the other environment values:
+
+```json
+{
+  "sheet": {
+    "webhookUrl": "<the Apps Script /exec URL>",
+    "secret": "<the shared secret>"
+  }
+}
+```
+
+`configs/local.json` is ignored by Git, so these never reach the repository. Put them there
+and every entry point picks them up with no further setup. `LAMS_SHEET_WEBHOOK_URL` and
+`LAMS_SHEET_SECRET` still work and take precedence, so an existing `.env` or an exported
+shell variable keeps behaving as before and CI can override the file. `sheet` is not a
+`--request-json` field: it is environment, not per-run data, and keeping it out of the
+request input means a secret cannot travel through a shell command line.
+
+Never put these in `configs/example.json` or any other tracked file. A secret committed to
+Git stays in its history even after deletion.
 
 ## Selector discovery workflow
 

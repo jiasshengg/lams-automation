@@ -155,3 +155,24 @@ Before running a committed copy or rename, reject the merged request when:
 For a rename, also reject the operation when the same folder already contains the new title. After saving, verify that the new title exists and the old title is absent.
 
 When a copy destination is omitted, save in the resolved source lesson folder without asking for destination confirmation. Copy commands derive `destinationFolderPath` and its display label from `sourceFolderPath`, overriding stale destination defaults in local configuration. An explicit per-run `destinationFolderPath` wins. Folder creation/rename still requires its requested target path. Existing-lesson edits and renames save in place; their destination fields identify the existing lesson rather than move it.
+
+## Kanban sheet endpoint
+
+Recording the lesson code completes the publishing stage. Its endpoint and shared secret are
+stable per machine, so they live in the ignored `configs/local.json`:
+
+```json
+{
+  "sheet": {
+    "webhookUrl": "<the Apps Script /exec URL>",
+    "secret": "<the shared secret>"
+  }
+}
+```
+
+`LAMS_SHEET_WEBHOOK_URL` and `LAMS_SHEET_SECRET` still work and take precedence over the
+file. `sheet` is deliberately not a `--request-json` field, so a secret never travels
+through a shell command line. Never write these values into `configs/example.json` or any
+other tracked file; `configs/local.json` is ignored by Git and is the only place for them.
+When they are absent the publishing stage prints the lesson code for manual entry instead of
+failing, so report that code to the user.
