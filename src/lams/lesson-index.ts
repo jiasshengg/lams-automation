@@ -46,7 +46,17 @@ export type ResolvedLessonIndexSettings = Required<
 
 export function resolveLessonIndexSettings(config: LamsConfig): ResolvedLessonIndexSettings {
   const settings = config.lessonIndex;
-  if (!settings) throw new Error('Configuration field "lessonIndex" is required for the index workflow.');
+  // Publishing needs values only the user can supply, so the missing-field error names them
+  // rather than letting a default stand in. An end date guessed from a config or an example
+  // publishes a lesson that closes on the wrong day.
+  if (!settings) {
+    throw new Error(
+      'Publishing needs a "lessonIndex" block in --request-json. Ask the user for: endDate ' +
+        '(YYYY-MM-DD, the real closing date for this lesson); optionally endTime (defaults to ' +
+        '23:59) and courseGrouping (defaults to the single preset the course offers). Do not ' +
+        'reuse an end date from configs/local.json, an example, or a previous run.'
+    );
+  }
   return {
     ...(settings.courseGrouping ? { courseGrouping: settings.courseGrouping } : {}),
     endDate: settings.endDate,

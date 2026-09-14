@@ -3,6 +3,7 @@ import type { LamsConfig } from '../src/config.js';
 import {
   configureAdvancedOptions,
   createLessonFromMostRecentDesign,
+  resolveLessonIndexSettings,
   selectCourseGrouping,
   selectMostRecentDesign
 } from '../src/lams/lesson-index.js';
@@ -211,4 +212,12 @@ test('publishing proceeds when the top design matches the authored lesson', asyn
 
   expect(result.committed).toBe(true);
   await expect(page.locator('body')).toHaveAttribute('data-added', 'true');
+});
+
+test('missing publish settings name what to ask the user for', async () => {
+  const config = { browser: { actionTimeoutMs: 3_000 } } as unknown as LamsConfig;
+
+  expect(() => resolveLessonIndexSettings(config)).toThrow(/Ask the user for: endDate/);
+  // The wrong-date hazard is the reason this is not defaulted, so it is stated in the error.
+  expect(() => resolveLessonIndexSettings(config)).toThrow(/Do not reuse an end date/);
 });

@@ -37,7 +37,15 @@ async function main(): Promise<void> {
     }
 
     await openAddLesson(page, config);
-    const result = await createLessonFromMostRecentDesign(page, config, { commit });
+    // The skill runs this stage straight after AE, so --expect-design carries the title the
+    // authoring run saved. "Recently used designs" is ordered by LAMS rather than by that
+    // run, so without this the wrong design could be published if anything else was
+    // authored in between.
+    const expectDesign = readArgument('--expect-design');
+    const result = await createLessonFromMostRecentDesign(page, config, {
+      commit,
+      ...(expectDesign !== undefined ? { expectedDesignTitle: expectDesign } : {})
+    });
     console.log(`\nIndex workflow: ${result.committed ? 'LESSON CREATED' : 'DRY RUN PASS'}`);
     console.log(`Design: ${result.designTitle}`);
     console.log(`Lesson title: ${result.lessonTitle}`);

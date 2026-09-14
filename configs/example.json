@@ -51,10 +51,6 @@
       "stopAtPrecedingActivity": true
     }
   ],
-  "lessonIndex": {
-    "endDate": "2026-09-03",
-    "endTime": "23:59"
-  },
   "irat": {
     "sourceDocx": "REPLACE WITH iRAT SOT DOCX FILENAME",
     "gate": {

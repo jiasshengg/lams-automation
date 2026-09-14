@@ -138,50 +138,21 @@ For one continuous copy → iRAT → AE run, include reviewed AE JSON:
 npm run run:tbl -- --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
 ```
 
-That run continues through deployment-guide steps 81-92 in the same browser session: it
-closes the Author screen, opens Add Lesson on the course page, selects the most recent
-design, turns off "Display activity scores on completion", enables scheduling with the end
-date at `23:59`, picks the course grouping, clicks Add now, and reads the 5-digit lesson
-code from Monitoring. Publishing runs whenever the config carries a `lessonIndex` block;
-`--skip-index` stops after authoring, and without a `lessonIndex` there is no end date to
-publish with, so the run stops and says so.
+Authoring stops after the design is saved and the Author screen is closed. Publishing the
+lesson to a cohort is a separate stage - see [Lesson index and monitoring](#lesson-index-and-monitoring) -
+because `AGENTS.md` requires a learner-facing lesson to be explicitly requested. The
+authoring entry points contain no publishing code at all.
 
-Publishing makes the lesson visible to learners and cannot be undone from this tool, so two
-things guard it: `--dry-run` fills and verifies the whole Add Lesson form and stops before
-"Add now", and a committed run refuses to publish unless the top "Recently used designs"
-entry is the lesson this run just created.
-
-Because "Recently used designs" is ordered by LAMS rather than by this run, publishing
-refuses to continue unless the top design is the lesson the copy step just created.
-
-| Flag | Effect |
-| --- | --- |
-| `--skip-index` | Stop after authoring instead of publishing. |
-| `--publish-code` | POST the lesson code to the Kanban sheet once the lesson exists. |
-| `--dry-run` | Stop after the copy step, then preview the Add Lesson form without submitting it. |
-| `--slow-mo <ms>` | Pause before every action and force a visible browser, to watch a run. |
-
-`lesson:index` remains available for publishing a design that was authored in an earlier
-run.
-
-`lessonIndex` is a `--request-json` field like the rest of the per-run request, so the end
-date and grouping travel with the same JSON the authoring step uses - no separate config
-edit or second command:
-
-```json
-{
-  "lessonIndex": { "endDate": "2026-09-03", "courseGrouping": "Y1 ALL" }
-}
-```
-
-`configs/request-template.json` is a working starting point with the iRAT and `lessonIndex`
-fields already in place; copy it, edit the values, and pass it with `--request-json`.
-
-To watch the whole thing run, add `--slow-mo`:
+To watch a run, add `--slow-mo`:
 
 ```bash
 npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>' --slow-mo 500
 ```
+
+| Flag | Effect |
+| --- | --- |
+| `--dry-run` | Stop after the copy preview; nothing is authored. |
+| `--slow-mo <ms>` | Pause before every action and force a visible browser, to watch a run. |
 
 ### `npm run` drops flags in PowerShell
 
@@ -286,12 +257,24 @@ Run these with `npx tsx` directly, not `npm run -- --flag`: npm strips the flag 
 from forwarded arguments on Windows, so `--config X` arrives as a bare `X` and the run
 falls back to `configs/example.json`.
 
+This is the stage that runs **after** AE, as its own command, and only when publishing has
+been explicitly requested: `AGENTS.md` forbids making a copied lesson learner-facing
+otherwise, and the authoring entry points contain no publishing code.
+
 Create the lesson from the design the authoring workflow just saved, then read back its
 monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
 
 ```bash
-npx tsx src/index-monitoring.ts --config configs/local.json --request-json '{"lessonIndex":{"endDate":"2026-09-03"}}'
+npx tsx src/index-monitoring.ts --config configs/local.json   --request-json '{"lessonIndex":{"endDate":"2026-09-30"}}'   --expect-design 'FOM TBL06 030926 2026Y1' --commit
 ```
+
+`--expect-design` refuses to publish unless the top "Recently used designs" entry is that
+exact lesson. "Recently used" is ordered by LAMS rather than by your run, so without it a
+design authored in between would be published instead.
+
+`endDate` must be the real closing date for that lesson and is supplied per run. It is
+deliberately not carried in `configs/local.json` or `configs/example.json`, and the run
+fails with a message naming what to ask for when it is missing, rather than defaulting.
 
 The run is a dry run by default: it selects the top entry of "Recently used designs",
 opens the Advanced tab, turns *Display activity scores on completion* off, turns
