@@ -427,10 +427,16 @@ export class LamsIratEditor implements IratEditor {
     });
     this.activityFrame = undefined;
 
+    // Scratchie's confidence-source controls are deliberately withheld until the
+    // current design has been saved. Persist the completed iRAT first, then reopen the
+    // matching tRAT so its Data import panel can enumerate Assessment activities.
+    await this.page.locator('#saveButton').click();
+    await this.page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: this.timeoutMs });
+
     const trat = matchingTratRequest(this.request);
     const tratNode = uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool');
     const tratFrame = await this.openActivityFrame(tratNode);
-    await this.verifyTratQuestionSync(tratFrame);
+    await this.verifyTratQuestionSync(tratFrame, { repairStaleVersions: true });
     await applyTratAdvancedSettings(
       tratFrame,
       trat.confidenceSourceActivityName,
@@ -443,6 +449,8 @@ export class LamsIratEditor implements IratEditor {
     });
     this.activityFrame = undefined;
 
+    // Persist the repaired tRAT references and its settings before reopening both
+    // activities for final read-only verification.
     await this.page.locator('#saveButton').click();
     await this.page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: this.timeoutMs });
     const graph = await inspectAuthoringGraph(this.page);
@@ -457,7 +465,7 @@ export class LamsIratEditor implements IratEditor {
     const savedTratFrame = await this.openActivityFrame(
       uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool')
     );
-    await this.verifyTratQuestionSync(savedTratFrame);
+    await this.verifyTratQuestionSync(savedTratFrame, { repairStaleVersions: false });
     const tratSettings = await applyTratAdvancedSettings(
       savedTratFrame,
       trat.confidenceSourceActivityName,
@@ -496,15 +504,29 @@ export class LamsIratEditor implements IratEditor {
    * Confirms the matching Scratchie activity selected the newest shared-question versions
    * and renders the same text, answers, inline formatting, and imported images as iRAT.
    */
-  private async verifyTratQuestionSync(frame: Frame): Promise<void> {
-    const rows = frame.locator('#itemTable tbody tr');
-    await frame.locator('#itemTable').waitFor({ state: 'visible', timeout: this.timeoutMs });
+  private async verifyTratQuestionSync(
+    frame: Frame,
+    options: { repairStaleVersions: boolean }
+  ): Promise<void> {
+    // Scratchie changed from a table to Bootstrap list items in the deployed LAMS build.
+    // Both renderings expose stable containers; select the one that is actually present
+    // instead of assuming the Assessment tool's #itemTable exists in Scratchie.
+    const modernList = frame.locator('#scratchieItemsList');
+    const legacyTable = frame.locator('#itemTable');
+    const modern = await modernList.isVisible().catch(() => false);
+    if (modern) await modernList.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    else await legacyTable.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    const rows = modern
+      ? modernList.locator('.scratchie-item-list-item')
+      : legacyTable.locator('tbody tr');
     const titles: string[] = [];
     for (let index = 0; index < (await rows.count()); index += 1) {
       const row = rows.nth(index);
-      const legacyTitle = row.locator('td:has(> .item-sequence-id)');
-      const modernTitle = row.locator(QUESTION_TITLE);
-      const titleCell = (await legacyTitle.count()) === 1 ? legacyTitle : modernTitle;
+      const titleCell = modern
+        ? row.locator('.fw-semibold.text-break')
+        : (await row.locator('td:has(> .item-sequence-id)').count()) === 1
+          ? row.locator('td:has(> .item-sequence-id)')
+          : row.locator(QUESTION_TITLE);
       if ((await titleCell.count()) !== 1) {
         throw new Error(`Could not read one title from tRAT question row ${index + 1}.`);
       }
@@ -514,7 +536,10 @@ export class LamsIratEditor implements IratEditor {
     if (JSON.stringify(titles) !== JSON.stringify(expectedTitles)) {
       throw new Error(`tRAT question inventory/order did not match iRAT: ${JSON.stringify(titles)}.`);
     }
-    const staleVersions = await frame.locator('.newer-version-prompt:visible').count();
+    if (options.repairStaleVersions) {
+      await this.selectNewestTratQuestionVersions(frame, rows, modern);
+    }
+    const staleVersions = await this.countStaleTratVersions(frame);
     if (staleVersions > 0) {
       throw new Error(`tRAT still shows ${staleVersions} question version(s) with a newer shared version available.`);
     }
@@ -551,6 +576,63 @@ export class LamsIratEditor implements IratEditor {
     } finally {
       await printPage.close();
     }
+  }
+
+  /**
+   * LAMS may acknowledge the iRAT sync confirmation while leaving Scratchie references
+   * on their previous shared-question versions. When that verified state is visible,
+   * choose the newest offered version for each exact tRAT row, then verify the complete
+   * Print View against the request before the activity is saved.
+   */
+  private async selectNewestTratQuestionVersions(frame: Frame, rows: Locator, modern: boolean): Promise<void> {
+    let staleCount = await this.countStaleTratVersions(frame);
+    if (staleCount === 0) return;
+    if (!modern) {
+      throw new Error(`tRAT shows ${staleCount} stale question version(s), but this legacy layout has no verified repair path.`);
+    }
+
+    for (let index = 0; index < (await rows.count()); index += 1) {
+      const row = rows.nth(index);
+      const warning = row.getByRole('button', { name: 'There is a newer version of this question', exact: true });
+      if ((await warning.count()) === 0) continue;
+      const versionMenu = row.locator('button.dropdown-toggle');
+      if ((await versionMenu.count()) !== 1) {
+        throw new Error(`Could not find one tRAT version menu for question row ${index + 1}.`);
+      }
+      await versionMenu.click();
+      const candidates = row.locator('button.dropdown-item:not(.disabled)');
+      if ((await candidates.count()) === 0) {
+        throw new Error(`tRAT question row ${index + 1} reports a newer version but offers none.`);
+      }
+      const newestLabel = normalizeText(await candidates.last().innerText());
+      await candidates.last().click();
+
+      const deadline = Date.now() + this.timeoutMs;
+      let updated = false;
+      do {
+        // changeItemQuestionVersion replaces the whole #itemArea. Reacquire the row from
+        // the new list and verify its selected label instead of polling a pre-AJAX node.
+        const freshRow = frame.locator('#scratchieItemsList .scratchie-item-list-item').nth(index);
+        const selectedLabel = normalizeText(await freshRow.locator('button.dropdown-toggle').innerText().catch(() => ''));
+        const stillWarns = await freshRow
+          .getByRole('button', { name: 'There is a newer version of this question', exact: true })
+          .count();
+        updated = selectedLabel === newestLabel && stillWarns === 0;
+        if (updated) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } while (Date.now() < deadline);
+      if (!updated) {
+        throw new Error(`Selecting the newest tRAT version did not update question row ${index + 1}.`);
+      }
+      staleCount = await this.countStaleTratVersions(frame);
+    }
+  }
+
+  private async countStaleTratVersions(frame: Frame): Promise<number> {
+    return frame.locator([
+      '.newer-version-prompt:visible',
+      'button[aria-label="There is a newer version of this question"]:visible'
+    ].join(', ')).count();
   }
 
   private async inspectQuestionsAndClose(activity: GraphNode): Promise<IratObservedQuestion[]> {
