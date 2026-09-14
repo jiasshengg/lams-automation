@@ -186,7 +186,6 @@ export class LamsIratEditor implements IratEditor {
     await questionFrame.locator('#title').fill(question.title);
     await waitForCkEditor(questionFrame, 'description');
     const uploaded = await uploadCkEditorImages(
-      this.page,
       questionFrame,
       'description',
       this.questionImages.get(question.title) ?? []
