@@ -1,9 +1,10 @@
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
-import type { IratEditor, IratObservedQuestion, IratObservedState } from './irat.js';
+import { matchingTratRequest, type IratEditor, type IratObservedQuestion, type IratObservedState } from './irat.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 import { imageHtml, uploadCkEditorImages } from './ckeditor-media.js';
+import { applyTratAdvancedSettings, DEFAULT_TRAT_ADVANCED_SETTINGS } from './trat-settings.js';
 
 /**
  * Live adapter for the LAMS Assessment authoring UI.
@@ -110,6 +111,7 @@ export class LamsIratEditor implements IratEditor {
     const gate = uniqueGraphNode(graph, this.request.gate.name, 'gate');
     const activity = uniqueGraphNode(graph, this.request.activityName, 'tool');
     const teamSetup = uniqueGraphNode(graph, this.request.teamSetupName, 'grouping');
+    const trat = uniqueGraphNode(graph, matchingTratRequest(this.request).activityName, 'tool');
     const questions = await this.inspectQuestionsAndClose(activity);
     return {
       gate: {
@@ -120,6 +122,7 @@ export class LamsIratEditor implements IratEditor {
         rotationSeconds: gate.rotationSeconds
       },
       activityName: activity.name,
+      tratActivityName: trat.name,
       teamSetupAssociated: activity.grouped && activity.groupingUiid === teamSetup.uiid,
       questions
     };
@@ -255,12 +258,18 @@ export class LamsIratEditor implements IratEditor {
         ? `"Save as new version" never appeared for "${question.title}"; refusing to save the shared question in place.`
         : `New-question Save did not appear for "${question.title}".`);
     }
-    await saveQuestion.click();
-    if (existing) {
-      await frame.locator(editorSelector).waitFor({ state: 'detached', timeout: this.timeoutMs });
-    } else {
-      await frame.locator('#qb-question-authoring-modal').waitFor({ state: 'hidden', timeout: this.timeoutMs });
-    }
+    // Some LAMS deployments raise the RAT-sync confirmation as soon as a question's new
+    // version is saved, while others defer it until the activity Save below. Keep the
+    // affirmative handler around every question save so neither variant silently chooses
+    // the browser's default "No" response.
+    await this.acceptSaveDialogs(async () => {
+      await saveQuestion.click();
+      if (existing) {
+        await frame.locator(editorSelector).waitFor({ state: 'detached', timeout: this.timeoutMs });
+      } else {
+        await frame.locator('#qb-question-authoring-modal').waitFor({ state: 'hidden', timeout: this.timeoutMs });
+      }
+    });
     const expectedTitles = existing ? previousTitles : [...previousTitles, normalizeText(question.title)];
     await frame.waitForFunction(({ titles, selector }) => {
       const actual = Array.from(document.querySelectorAll(selector)).map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim());
@@ -412,18 +421,27 @@ export class LamsIratEditor implements IratEditor {
     // Saving the iRAT asks whether the matching tRAT should receive the same changes.
     // The deployment guide always confirms that prompt: the tRAT must mirror the iRAT,
     // so this handler accepts every browser dialog raised by the save and never cancels.
-    const dialogHandler = async (dialog: { message(): string; accept(): Promise<void>; dismiss(): Promise<void> }) => {
-      this.confirmedDialogs.push(dialog.message());
-      await dialog.accept();
-    };
-    this.page.on('dialog', dialogHandler);
-    try {
+    await this.acceptSaveDialogs(async () => {
       await frame.locator('#saveButton').click();
       await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
-    } finally {
-      this.page.off('dialog', dialogHandler);
-      this.activityFrame = undefined;
-    }
+    });
+    this.activityFrame = undefined;
+
+    const trat = matchingTratRequest(this.request);
+    const tratNode = uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool');
+    const tratFrame = await this.openActivityFrame(tratNode);
+    await this.verifyTratQuestionSync(tratFrame);
+    await applyTratAdvancedSettings(
+      tratFrame,
+      trat.confidenceSourceActivityName,
+      { ...DEFAULT_TRAT_ADVANCED_SETTINGS },
+      { commit: true, timeoutMs: this.timeoutMs }
+    );
+    await this.acceptSaveDialogs(async () => {
+      await tratFrame.locator('#saveButton').click();
+      await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
+    });
+    this.activityFrame = undefined;
 
     await this.page.locator('#saveButton').click();
     await this.page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: this.timeoutMs });
@@ -436,6 +454,18 @@ export class LamsIratEditor implements IratEditor {
       throw new Error('Post-save iRAT question inventory did not match the request.');
     }
     verifySavedRequiredFlags(savedQuestions, this.request.questions);
+    const savedTratFrame = await this.openActivityFrame(
+      uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool')
+    );
+    await this.verifyTratQuestionSync(savedTratFrame);
+    const tratSettings = await applyTratAdvancedSettings(
+      savedTratFrame,
+      trat.confidenceSourceActivityName,
+      { ...DEFAULT_TRAT_ADVANCED_SETTINGS },
+      { commit: false, timeoutMs: this.timeoutMs }
+    );
+    if (!tratSettings.passed) throw new Error('Post-save tRAT advanced settings did not match the required defaults.');
+    await this.closeActivityWithoutSaving(savedTratFrame);
     if (
       gate.gateType !== this.request.gate.type ||
       gate.description !== this.request.gate.description ||
@@ -443,6 +473,83 @@ export class LamsIratEditor implements IratEditor {
       gate.rotationSeconds !== this.request.gate.rotationSeconds
     ) {
       throw new Error('Post-save graph verification failed for the iRAT Gate.');
+    }
+  }
+
+  /** Accepts and records every confirmation raised by one explicit save action. */
+  private async acceptSaveDialogs(action: () => Promise<void>): Promise<void> {
+    const pending: Promise<void>[] = [];
+    const handler = (dialog: Dialog) => {
+      this.confirmedDialogs.push(dialog.message());
+      pending.push(dialog.accept());
+    };
+    this.page.on('dialog', handler);
+    try {
+      await action();
+      await Promise.all(pending);
+    } finally {
+      this.page.off('dialog', handler);
+    }
+  }
+
+  /**
+   * Confirms the matching Scratchie activity selected the newest shared-question versions
+   * and renders the same text, answers, inline formatting, and imported images as iRAT.
+   */
+  private async verifyTratQuestionSync(frame: Frame): Promise<void> {
+    const rows = frame.locator('#itemTable tbody tr');
+    await frame.locator('#itemTable').waitFor({ state: 'visible', timeout: this.timeoutMs });
+    const titles: string[] = [];
+    for (let index = 0; index < (await rows.count()); index += 1) {
+      const row = rows.nth(index);
+      const legacyTitle = row.locator('td:has(> .item-sequence-id)');
+      const modernTitle = row.locator(QUESTION_TITLE);
+      const titleCell = (await legacyTitle.count()) === 1 ? legacyTitle : modernTitle;
+      if ((await titleCell.count()) !== 1) {
+        throw new Error(`Could not read one title from tRAT question row ${index + 1}.`);
+      }
+      titles.push(normalizeText(await titleCell.innerText()));
+    }
+    const expectedTitles = this.request.questions.map((question) => normalizeText(question.title));
+    if (JSON.stringify(titles) !== JSON.stringify(expectedTitles)) {
+      throw new Error(`tRAT question inventory/order did not match iRAT: ${JSON.stringify(titles)}.`);
+    }
+    const staleVersions = await frame.locator('.newer-version-prompt:visible').count();
+    if (staleVersions > 0) {
+      throw new Error(`tRAT still shows ${staleVersions} question version(s) with a newer shared version available.`);
+    }
+
+    const popupPromise = this.page.waitForEvent('popup', { timeout: this.timeoutMs });
+    await frame.locator('button[onclick*="showQuestionsPrintPage"]').click();
+    const printPage = await popupPromise;
+    try {
+      await printPage.waitForLoadState('domcontentloaded');
+      const body = printPage.locator('body');
+      const printableText = normalizeText(await body.innerText());
+      const printableHtml = canonicalInlineHtml(await body.innerHTML());
+      for (const question of this.request.questions) {
+        for (const expected of [question.title, stripHtml(question.content), ...question.answers.map((answer) => stripHtml(answer.text))]) {
+          if (!printableText.includes(normalizeText(expected))) {
+            throw new Error(`tRAT Print View did not contain synced text: "${normalizeText(expected)}".`);
+          }
+        }
+        for (const formatted of [question.content, ...question.answers.map((answer) => answer.text)]) {
+          const missing = missingInlineFormatting(printableHtml, formatted);
+          if (missing.length > 0) {
+            throw new Error(`tRAT Print View lost synced inline formatting: ${missing.join(', ')}.`);
+          }
+        }
+      }
+      if (this.uploadedImageUrls.size > 0) {
+        const printableImages = new Set(
+          await printPage.locator('img').evaluateAll((elements) => elements.map((element) => (element as HTMLImageElement).src))
+        );
+        for (const url of this.uploadedImageUrls) {
+          if (!printableImages.has(url)) throw new Error(`tRAT Print View did not contain synced image: ${url}`);
+        }
+      }
+    } finally {
+      await printPage.close();
     }
   }
 
@@ -467,6 +574,11 @@ export class LamsIratEditor implements IratEditor {
     // modal owned by the parent authoring page, so it is dismissed from the modal header.
     // That routes into the frame's doCancel(), which raises an in-frame "Confirm Cancel"
     // modal; discarding the unchanged inspection requires confirming it.
+    await this.closeActivityWithoutSaving(frame);
+    return questions;
+  }
+
+  private async closeActivityWithoutSaving(frame: Frame): Promise<void> {
     await this.page.locator(ACTIVITY_DIALOG_CLOSE).click();
     const confirmDiscard = frame.locator(CANCEL_CONFIRM);
     try {
@@ -477,7 +589,6 @@ export class LamsIratEditor implements IratEditor {
     }
     await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
     this.activityFrame = undefined;
-    return questions;
   }
 
   private async ensureActivityFrame(): Promise<Frame> {
@@ -725,6 +836,19 @@ async function verifyDefaultFormatting(frame: Frame, id: string, requested: stri
 
 function stripHtml(value: string): string {
   return value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ');
+}
+
+/** Returns exact inline-tagged segments requested by the SoT but absent from Print View. */
+export function missingInlineFormatting(printableCanonicalHtml: string, requested: string): string[] {
+  const missing: string[] = [];
+  const expected = canonicalInlineHtml(inlineHtml(requested));
+  for (const tag of ['strong', 'em', 'u', 'sub', 'sup']) {
+    for (const segment of expected.matchAll(new RegExp(`<${tag}>(.*?)</${tag}>`, 'g'))) {
+      const formatted = `<${tag}>${segment[1]}</${tag}>`;
+      if (!printableCanonicalHtml.includes(formatted)) missing.push(formatted);
+    }
+  }
+  return missing;
 }
 
 function escapeHtml(value: string): string {

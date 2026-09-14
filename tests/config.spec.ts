@@ -227,6 +227,17 @@ test('iRAT advanced toggles default to the deployment guide values when omitted'
   expect(defaults.irat?.advanced.displayAllAfterCompletion).toBe(true);
 });
 
+test('defaults the matching tRAT and its confidence source from the exact iRAT activity', async () => {
+  const base = JSON.parse(await readFile('configs/example.json', 'utf8'));
+  delete base.irat.trat;
+  base.irat.activityName = 'Exact iRAT';
+  const config = await loadConfig('configs/example.json', { irat: base.irat });
+  expect(config.irat?.trat).toEqual({
+    activityName: 'tRAT',
+    confidenceSourceActivityName: 'Exact iRAT'
+  });
+});
+
 test('reads --request-json from a file when given a path instead of inline JSON', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-request-file-'));
   try {
