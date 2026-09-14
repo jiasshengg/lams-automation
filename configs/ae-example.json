@@ -3,16 +3,22 @@
   "sourceDocx": "REPLACE WITH AE SOT DOCX FILENAME",
   "breakMarkerCount": 1,
   "expectedTotalMarks": 12,
+  "_review": [
+    "Node titles follow the Case-and-question convention: 'AE Case 3 Q3-6' within one case,",
+    "'AE Case 1 Q1 to Case 2 Q2' when a node spans two cases.",
+    "Prompts and option text accept inline <strong>, <em>, <u>, <sup>, and <sub> so emphasis",
+    "matches the Source-of-Truth exactly. Every other tag is escaped and shown literally.",
+    "Generate this file with: npm run extract:ae-sot -- --sot-docx '<DOCX>' --draft '<JSON>'"
+  ],
   "nodes": [
     {
-      "title": "AE Case 1",
-      "description": "Case 1: optional; defaults to the node title when omitted",
+      "title": "AE Case 1 Q1-2",
       "questions": [
         {
           "number": 1,
           "title": "Question 1",
           "type": "mcq",
-          "prompt": "Case 1\n[4 marks]\nQUESTION 1\nWhich action is best?",
+          "prompt": "Case 1: A Patient with Changing Antibiotic Exposure\nMs Tan is admitted with severe pneumonia.\n1. For this <u>highly albumin-bound</u> drug, which action is best? (4 marks)",
           "options": [
             { "text": "A) First option", "correct": false },
             { "text": "B) Correct option", "correct": true },
@@ -22,17 +28,24 @@
         {
           "number": 2,
           "type": "essay",
-          "prompt": "QUESTION 2\nExplain your reasoning."
+          "prompt": "2. Explain your reasoning.",
+          "images": [
+            {
+              "path": "pedigree.png",
+              "placement": "before",
+              "caption": "<strong>Figure 1.</strong> Three-generation pedigree"
+            }
+          ]
         }
       ]
     },
     {
-      "title": "AE Case 2",
+      "title": "AE Case 2 Q3",
       "questions": [
         {
           "number": 3,
           "type": "mcq",
-          "prompt": "Case 2\n[4 marks]\nQUESTION 3\nWhich actions should happen next? Select all that apply.",
+          "prompt": "Case 2\n3. Which actions should happen next? Select all that apply. (4 marks)",
           "options": [
             { "text": "A) Continue", "correct": true, "weight": 50 },
             { "text": "B) Escalate", "correct": true, "weight": 50 },
@@ -44,9 +57,9 @@
   ],
   "gates": [
     {
-      "title": "AE Gate Case 1 to Case 2 Question 3",
-      "afterNodeTitle": "AE Case 1",
-      "beforeNodeTitle": "AE Case 2",
+      "title": "AE Gate before Q3",
+      "afterNodeTitle": "AE Case 1 Q1-2",
+      "beforeNodeTitle": "AE Case 2 Q3",
       "beforeQuestionNumber": 3
     }
   ]

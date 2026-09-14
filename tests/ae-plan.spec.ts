@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { buildAEPlan, formatAEPlanSummary } from '../src/ae/plan.js';
+import { TEMPLATE_LIBRARY_TITLES } from '../src/lams/ae-graph.js';
 
 function validInput() {
   return {
@@ -64,7 +65,7 @@ test('builds a deterministic AE execution plan from validated structured input',
   expect(plan.requiredAENodes).toBe(2);
   expect(plan.requiredAEGates).toBe(1);
   expect(plan.totalMarks).toBe(16);
-  expect(plan.nodes[0]?.description).toBe('AE Case 1');
+  expect(plan.nodes[0]?.description).toBe('');
   expect(plan.nodes[0]?.questions[0]).toEqual(
     expect.objectContaining({
       number: 1,
@@ -77,12 +78,12 @@ test('builds a deterministic AE execution plan from validated structured input',
     })
   );
   expect(plan.nodes[0]?.questions[0]?.promptHtml).toBe(
-    '<p><strong><u>Case 1</u></strong></p><p><br></p><p>QUESTION 1</p><p><br></p><p>Which action is best?</p>'
+    '<div><strong><u>Case 1</u></strong></div><div><br></div><div>QUESTION 1</div><div><br></div><div>Which action is best?</div>'
   );
   expect(plan.nodes[0]?.questions[0]?.options).toEqual([
-    { text: 'First option', creditPercent: 0 },
-    { text: 'Correct option', creditPercent: 100 },
-    { text: 'Third option', creditPercent: 0 }
+    { text: 'First option', html: 'First option', creditPercent: 0 },
+    { text: 'Correct option', html: 'Correct option', creditPercent: 100 },
+    { text: 'Third option', html: 'Third option', creditPercent: 0 }
   ]);
   expect(plan.activitySettings).toEqual({
     shuffleQuestions: false,
@@ -142,9 +143,9 @@ test('supports multiple correct answers with equal default weights', () => {
   const question = buildAEPlan(input).nodes[0]!.questions[0]!;
   expect(question.multipleAnswersAllowed).toBe(true);
   expect(question.options).toEqual([
-    { text: 'First option', creditPercent: 50 },
-    { text: 'Correct option', creditPercent: 50 },
-    { text: 'Third option', creditPercent: 0 }
+    { text: 'First option', html: 'First option', creditPercent: 50 },
+    { text: 'Correct option', html: 'Correct option', creditPercent: 50 },
+    { text: 'Third option', html: 'Third option', creditPercent: 0 }
   ]);
 });
 
@@ -204,9 +205,9 @@ test('rejects an AE gate that precedes the first AE node', () => {
   expect(() => buildAEPlan(input)).toThrow(/requires 1 AE gates; found 2|afterNodeTitle/i);
 });
 
-test('node description defaults to the node title', () => {
+test('AE activities carry no description unless one is supplied', () => {
   const plan = buildAEPlan(validInput());
-  expect(plan.nodes.map((node) => node.description)).toEqual(['AE Case 1', 'AE Case 2']);
+  expect(plan.nodes.map((node) => node.description)).toEqual(['', '']);
 });
 
 test('honors an explicit node description and rejects an empty one', () => {
@@ -215,7 +216,7 @@ test('honors an explicit node description and rejects an empty one', () => {
   nodes[0]!.description = 'Case 1: A Patient with Changing Antibiotic Exposure';
   const plan = buildAEPlan(input);
   expect(plan.nodes[0]!.description).toBe('Case 1: A Patient with Changing Antibiotic Exposure');
-  expect(plan.nodes[1]!.description).toBe('AE Case 2');
+  expect(plan.nodes[1]!.description).toBe('');
 
   nodes[0]!.description = '   ';
   expect(() => buildAEPlan(input)).toThrow('nodes[0].description');
@@ -226,4 +227,100 @@ test('marks MCQ questions for sequential answer letters and essays against it', 
   const questions = plan.nodes.flatMap((node) => node.questions);
   expect(questions.map((question) => `${question.type}:${question.prefixSequentialLetters}`))
     .toEqual(['mcq:true', 'essay:false', 'mcq:true']);
+});
+
+test('carries Source-of-Truth emphasis into the prompt and options and escapes anything else', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.prompt =
+    'Case 1: <u>Changing exposure</u>\n1. A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>? <script>x</script>';
+  input.nodes[0]!.questions[0]!.options = [
+    { text: 'A. <strong>600</strong> mg', correct: true },
+    { text: 'I:1 and I:2', correct: false }
+  ];
+
+  const question = buildAEPlan(input).nodes[0]!.questions[0]!;
+  expect(question.promptHtml).toBe(
+    // The Source-of-Truth already styled this heading, so it keeps its own emphasis.
+    '<div>Case 1: <u>Changing exposure</u></div><div><br></div>' +
+    '<div>1. A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>? &lt;script&gt;x&lt;/script&gt;</div>'
+  );
+  expect(question.options).toEqual([
+    { text: '600 mg', html: '<strong>600</strong> mg', creditPercent: 100 },
+    { text: 'I:1 and I:2', html: 'I:1 and I:2', creditPercent: 0 }
+  ]);
+});
+
+test('still applies the house bold-underline to an unformatted Case heading', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.prompt = 'Case 1\nWhich action is best?';
+  expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toBe(
+    '<div><strong><u>Case 1</u></strong></div><div><br></div><div>Which action is best?</div>'
+  );
+});
+
+test('accepts reviewed image placement and captions and rejects an unknown placement', () => {
+  const input = validInput() as Record<string, unknown>;
+  const question = (input.nodes as Array<Record<string, unknown>>)[0]!.questions as Array<Record<string, unknown>>;
+  question[0]!.images = [{ path: 'pedigree.png', placement: 'before', caption: '<strong>Figure 1.</strong> Pedigree' }];
+  expect(buildAEPlan(input).nodes[0]!.questions[0]!.images).toEqual([
+    { path: 'pedigree.png', placement: 'before', caption: '<strong>Figure 1.</strong> Pedigree' }
+  ]);
+
+  (question[0]!.images as Array<Record<string, unknown>>)[0]!.placement = 'beside';
+  expect(() => buildAEPlan(input)).toThrow('placement must be "before" or "after"');
+});
+
+test('uses the spelling LAMS gives each toolkit template', () => {
+  // The gate template's title is lower case in the DOM; CSS attribute matching is case-sensitive,
+  // so "Gate" silently matches nothing and gate creation times out.
+  expect(TEMPLATE_LIBRARY_TITLES.Gate).toBe('gate');
+  expect(TEMPLATE_LIBRARY_TITLES.Assessment).toBe('Assessment');
+});
+
+test('carries a Source-of-Truth table into the prompt as a table', () => {
+  const plan = buildAEPlan({
+    sourceLabel: 'Clinical Pharmacokinetics',
+    breakMarkerCount: 0,
+    nodes: [{
+      title: 'AE Case 1 Q1',
+      questions: [{
+        number: 1,
+        type: 'mcq',
+        prompt: 'Her data are summarised below.\n<table><tr><td width="34%"><strong>Parameter</strong></td><td width="66%">Finding</td></tr><tr><td>Body weight</td><td>60 kg</td></tr></table>\n1. What loading dose is required?',
+        options: [{ text: 'A. 300 mg', correct: true }, { text: 'B. 600 mg', correct: false }]
+      }]
+    }],
+    gates: []
+  });
+  const html = plan.nodes[0]!.questions[0]!.promptHtml;
+  // Every cell is a td: Word styles its header row with bold runs, not a th, so it stays
+  // left-aligned, and the document's column proportions carry over.
+  expect(html).toContain('<tr><td width="34%"><strong>Parameter</strong></td><td width="66%">Finding</td></tr>');
+  expect(html).toContain('<tr><td>Body weight</td><td>60 kg</td></tr>');
+  expect(html).not.toContain('<th');
+  // The table is its own block, never wrapped in a div or escaped.
+  expect(html).not.toContain('&lt;table&gt;');
+  expect(html).not.toContain('<div><table');
+});
+
+test('a reviewed table cannot smuggle styling through its cell attributes', () => {
+  const plan = buildAEPlan({
+    sourceLabel: 'Clinical Pharmacokinetics',
+    breakMarkerCount: 0,
+    nodes: [{
+      title: 'AE Case 1 Q1',
+      questions: [{
+        number: 1,
+        type: 'mcq',
+        prompt: '<table><tr><td width="34%" style="color:red" onclick="x()">Parameter</td></tr></table>\n1. Which dose? (4 marks)',
+        options: [{ text: 'A. 300 mg', correct: true }, { text: 'B. 600 mg', correct: false }]
+      }]
+    }],
+    gates: []
+  });
+  const html = plan.nodes[0]!.questions[0]!.promptHtml;
+  // The width proportion survives because it is the document's own layout; nothing else does.
+  expect(html).toContain('<td width="34%">Parameter</td>');
+  expect(html).not.toContain('style=');
+  expect(html).not.toContain('onclick');
 });

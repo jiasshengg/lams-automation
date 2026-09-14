@@ -35,7 +35,9 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Inspect and list Authoring nodes.
 - Determine whether the Authoring surface uses HTML, SVG, canvas, iframes, or another representation.
 - Validate required nodes, counts, connections, Team Setup associations, and gate names.
-- Extract embedded DOCX images with question associations and import them through the observed CKEditor upload endpoint.
+- Extract embedded DOCX images with question associations, captions, and above/below placement, and import them through the observed CKEditor upload endpoint.
+- Preserve the bold, italic, underline, superscript, and subscript of the Source-of-Truth in AE prompts and options; escape every other tag.
+- Name AE nodes from their Case headings and question range (`AE Case 3 Q3-6`, `AE Case 1 Q1 to Case 2 Q2`) and leave AE activity descriptions empty.
 - Write reviewed AE MCQ/essay questions and canonical activity settings.
 - Reconcile missing AE Assessment nodes, permission gates, Team Setup associations, and reviewed linear transitions; remove exact gate-bypass transitions and replace exact misconfigured planned AE gates when verified.
 - Extend the vendor-neutral skill only with behavior already supported by the reusable automation.
@@ -79,6 +81,9 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - `src/lams/lesson-copy.ts`: Save As, rename, destination selection, and copy verification.
 - `src/lams/authoring.ts`: Authoring-page inspection and node extraction.
 - `src/lams/validation.ts`: later validation rules and reporting.
+- `src/ae/sot-paragraphs.ts`: DOCX paragraph reading with the emphasis observed in each run.
+- `src/ae/inline-html.ts`: the inline-HTML allowlist shared by extraction and reviewed AE input.
+- `src/ae/draft.ts`: reviewable AE plan JSON transcribed from an AE Source-of-Truth.
 - `src/lams/ae-editor.ts`: AE Assessment question/settings mutation.
 - `src/lams/ae-graph.ts`: verified AE node/gate/transition reconciliation and targeted graph repair.
 - `src/docx/`: DOCX archive, embedded-media, and question-assignment handling.

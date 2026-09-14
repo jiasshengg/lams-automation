@@ -22,6 +22,8 @@ export const AE_ACTIVITY_CHECKBOXES: readonly AECheckboxRequirement[] = Object.f
   },
   {
     key: 'discloseAnswersInMonitor',
+    // LAMS renders this label without "and other groups'" while the activity is ungrouped; the
+    // grouped wording below is the one that applies once Team Setup is associated.
     label: "Disclose student's and other groups' answers in monitor",
     expected: true
   },

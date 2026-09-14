@@ -1,9 +1,10 @@
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
+import { inlineHtmlToText, sanitizeInlineHtml } from '../ae/inline-html.js';
 import type { AENodePlan, AEPlan, AEQuestionPlan } from '../ae/plan.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 import { applyAEActivitySettings } from './ae-settings.js';
 import { inspectAuthoringGraph, openActivityProperties, type GraphNode } from './authoring.js';
-import { imageHtml, uploadCkEditorImages } from './ckeditor-media.js';
+import { imageHtml, uploadCkEditorImages, type UploadedImage } from './ckeditor-media.js';
 import {
   ACTIVITY_DIALOG,
   MAX_MARK_INPUT,
@@ -47,7 +48,13 @@ export class LamsAEEditor {
     const title = activityFrame.locator('#assessment\\.title');
     await title.waitFor({ state: 'visible', timeout: this.timeoutMs });
     await title.fill(nodePlan.title);
-    await setCkEditor(activityFrame, ACTIVITY_DESCRIPTION_EDITOR, `<p>${escapeHtml(nodePlan.description)}</p>`);
+    // AE activities are identified by their title alone; a description is written only
+    // when the reviewed plan supplies one, and is otherwise cleared to stay deterministic.
+    await setCkEditor(
+      activityFrame,
+      ACTIVITY_DESCRIPTION_EDITOR,
+      nodePlan.description === '' ? '' : `<div>${sanitizeInlineHtml(nodePlan.description)}</div>`
+    );
 
     const rows = activityFrame.locator('#referencesTable tbody tr');
     const existingCount = await rows.count();
@@ -59,16 +66,16 @@ export class LamsAEEditor {
 
     const updatedQuestions: string[] = [];
     const createdQuestions: string[] = [];
-    const uploadedImageUrls: string[] = [];
+    const uploadedImages: UploadedImage[] = [];
     let importedImages = 0;
     for (let index = 0; index < nodePlan.questions.length; index += 1) {
       const question = nodePlan.questions[index]!;
       const assets = this.questionImages.get(question.number) ?? [];
       if (index < existingCount) {
-        uploadedImageUrls.push(...await this.editQuestion(activityFrame, index, question, assets));
+        uploadedImages.push(...await this.editQuestion(activityFrame, index, question, assets));
         updatedQuestions.push(question.title);
       } else {
-        uploadedImageUrls.push(...await this.createQuestion(activityFrame, question, assets));
+        uploadedImages.push(...await this.createQuestion(activityFrame, question, assets));
         createdQuestions.push(question.title);
       }
       importedImages += assets.length;
@@ -76,7 +83,7 @@ export class LamsAEEditor {
 
     await applyAEActivitySettings(this.page, { commit: true, actionTimeoutMs: this.timeoutMs });
     await this.applyAttemptSettings(activityFrame);
-    await this.verifyPrintView(activityFrame, nodePlan, uploadedImageUrls);
+    await this.verifyPrintView(activityFrame, nodePlan, uploadedImages);
     await activityFrame.locator('#saveButton').click();
     await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
 
@@ -89,15 +96,30 @@ export class LamsAEEditor {
 
   async associateWithTeamSetup(nodeTitle: string, teamSetupName: string): Promise<void> {
     const graph = await inspectAuthoringGraph(this.page);
-    const activity = uniqueNode(graph.nodes, nodeTitle, 'tool');
+    await this.associateNodeWithTeamSetup(uniqueNode(graph.nodes, nodeTitle, 'tool'), teamSetupName);
+  }
+
+  /**
+   * Grouping by uiid rather than title, so a freshly dropped shell can be grouped while it is still
+   * named "Assessment". LAMS disables the team-based Assessment settings (disclose answers in
+   * monitor, leaders from Select Leader) until the activity is grouped, so this has to run before
+   * the settings are written, not after the node is titled.
+   */
+  async associateNodeWithTeamSetup(node: GraphNode, teamSetupName: string): Promise<void> {
+    const graph = await inspectAuthoringGraph(this.page);
     const teamSetup = uniqueNode(graph.nodes, teamSetupName, 'grouping');
-    await openActivityProperties(this.page, activity.uiid, nodeTitle, this.timeoutMs);
+    const current = graph.nodes.find((candidate) => candidate.uiid === node.uiid);
+    if (current?.grouped && current.groupingUiid === teamSetup.uiid) return;
+    await openActivityProperties(this.page, node.uiid, node.name, this.timeoutMs);
     const field = this.page.locator('#propertiesDialog .propertiesContentFieldGrouping:visible');
     await field.selectOption({ label: teamSetupName });
     await field.blur();
-    const saved = uniqueNode((await inspectAuthoringGraph(this.page)).nodes, nodeTitle, 'tool');
-    if (!saved.grouped || saved.groupingUiid !== teamSetup.uiid) {
-      throw new Error(`AE node "${nodeTitle}" was not associated with Team Setup "${teamSetupName}".`);
+    // Clicking empty canvas dismisses the properties dialog. Left open it intercepts the
+    // double-click that opens the activity editor (same idiom as createTransition).
+    await this.page.locator('#canvas').click({ position: { x: 5, y: 5 } });
+    const saved = (await inspectAuthoringGraph(this.page)).nodes.find((candidate) => candidate.uiid === node.uiid);
+    if (!saved?.grouped || saved.groupingUiid !== teamSetup.uiid) {
+      throw new Error(`AE node "${node.name}" (uiid ${node.uiid}) was not associated with Team Setup "${teamSetupName}".`);
     }
   }
 
@@ -106,35 +128,48 @@ export class LamsAEEditor {
     await this.page.waitForTimeout(500);
   }
 
+  /** Leaves Authoring the way the toolbar's Close does, once the design is saved and verified. */
+  async closeAuthoring(): Promise<void> {
+    const close = this.page.locator('#closeButton');
+    if (!(await close.isVisible().catch(() => false))) return;
+    await close.click();
+    // Closing navigates away from the design, so the canvas it was editing goes with it.
+    await this.page
+      .locator('#canvas')
+      .waitFor({ state: 'detached', timeout: this.timeoutMs })
+      .catch(() => undefined);
+    console.log('Closed the Authoring page.');
+  }
+
   private async editQuestion(
     activityFrame: Frame,
     rowIndex: number,
     question: AEQuestionPlan,
     images: QuestionImageAsset[]
-  ): Promise<string[]> {
+  ): Promise<UploadedImage[]> {
     const row = activityFrame.locator('#referencesTable tbody tr').nth(rowIndex);
     await row.locator('.edit-reference-link').click();
     const questionFrame = await childFrame(activityFrame.locator('iframe[src*="editReference.do"]'), this.timeoutMs);
-    const uploadedUrls = await this.populateQuestion(questionFrame, question, images, true);
+    const uploaded = await this.populateQuestion(questionFrame, question, images, true);
     await activityFrame.locator('iframe[src*="editReference.do"]').waitFor({ state: 'detached', timeout: this.timeoutMs });
     await this.applyReferenceFields(activityFrame, question);
-    return uploadedUrls;
+    return uploaded;
   }
 
   private async createQuestion(
     activityFrame: Frame,
     question: AEQuestionPlan,
     images: QuestionImageAsset[]
-  ): Promise<string[]> {
+  ): Promise<UploadedImage[]> {
     await activityFrame.locator('#createQuestionDropdown').click();
     await activityFrame.getByRole('button', { name: question.type === 'mcq' ? 'Multiple choice' : 'Essay', exact: true }).click();
     const modal = activityFrame.locator(`${QUESTION_MODAL}.show`);
     await modal.waitFor({ state: 'visible', timeout: this.timeoutMs });
     const questionFrame = await childFrame(modal.locator('iframe'), this.timeoutMs);
-    const uploadedUrls = await this.populateQuestion(questionFrame, question, images, false);
+    const uploaded = await this.populateQuestion(questionFrame, question, images, false);
     await modal.waitFor({ state: 'hidden', timeout: this.timeoutMs });
     await this.applyReferenceFields(activityFrame, question);
-    return uploadedUrls;
+    return uploaded;
   }
 
   private async populateQuestion(
@@ -142,12 +177,12 @@ export class LamsAEEditor {
     question: AEQuestionPlan,
     images: QuestionImageAsset[],
     existing: boolean
-  ): Promise<string[]> {
+  ): Promise<UploadedImage[]> {
     await frame.locator('#assessmentQuestionForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
     await frame.locator('#title').fill(question.title);
     await waitForCkEditor(frame, 'description');
     const uploaded = await uploadCkEditorImages(this.page, frame, 'description', images);
-    await setCkEditor(frame, 'description', `${question.promptHtml}${imageHtml(uploaded)}`);
+    await setCkEditor(frame, 'description', questionDescriptionHtml(question.promptHtml, uploaded));
 
     const advanced = frame.locator('#advancedSettingsCollapse');
     if (!(await advanced.isVisible())) {
@@ -161,7 +196,7 @@ export class LamsAEEditor {
       await this.applyPrefixToggle(frame, question);
       for (let index = 0; index < question.options.length; index += 1) {
         const option = question.options[index]!;
-        await setCkEditor(frame, `optionName${index}`, `<p>${escapeHtml(option.text)}</p>`);
+        await setCkEditor(frame, `optionName${index}`, `<div>${option.html}</div>`);
       }
       await applyAEAnswerScoring(frame, question);
     }
@@ -169,7 +204,7 @@ export class LamsAEEditor {
     const save = existing ? frame.locator('#saveAsButton') : frame.locator('#saveButton');
     await save.waitFor({ state: 'visible', timeout: this.timeoutMs });
     await save.click();
-    return uploaded.map((image) => image.url);
+    return uploaded;
   }
 
   /** LAMS only exposes the answer-prefix toggle for multiple choice questions. */
@@ -217,13 +252,21 @@ export class LamsAEEditor {
     }
   }
 
-  private async verifyPrintView(frame: Frame, nodePlan: AENodePlan, uploadedImageUrls: string[]): Promise<void> {
+  private async verifyPrintView(frame: Frame, nodePlan: AENodePlan, uploadedImages: UploadedImage[]): Promise<void> {
     const popupPromise = this.page.waitForEvent('popup', { timeout: this.timeoutMs });
     await frame.locator('button[onclick*="showQuestionsPrintPage"]').click();
     const printPage = await popupPromise;
     try {
-      await printPage.waitForLoadState('domcontentloaded');
-      await verifyAEPrintContent(printPage, nodePlan, uploadedImageUrls);
+      await printPage.waitForLoadState('load');
+      // The Print View fills itself in after load, so reading it immediately can see an empty body.
+      // Best effort only: if the text never arrives, verifyAEPrintContent reports exactly what is
+      // missing, which is more useful than a timeout here.
+      await printPage
+        .locator('body')
+        .filter({ hasText: nodePlan.questions[0]!.title })
+        .waitFor({ state: 'visible', timeout: this.timeoutMs })
+        .catch(() => undefined);
+      await verifyAEPrintContent(printPage, nodePlan, uploadedImages);
     } finally {
       await printPage.close();
     }
@@ -232,13 +275,43 @@ export class LamsAEEditor {
   private async openActivityFrame(uiid: number, title: string): Promise<Frame> {
     const node = this.page.locator(`#canvas > svg > g.svg-activity-tool[uiid="${uiid}"]`);
     const iframe = this.page.locator('iframe[id^="dialogActivity"]:visible');
-    if (await iframe.count() === 0) await node.dblclick({ delay: 80 });
-    await iframe.waitFor({ state: 'visible', timeout: this.timeoutMs });
-    const frame = await childFrame(iframe, this.timeoutMs);
-    await frame.locator('#authoringForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
-    console.log(`Opened AE Assessment activity: ${title}`);
-    return frame;
+    // The dialog's src carries hasLeaderSelection and the grouping flags, so when the surrounding
+    // design has just changed LAMS discards the dialog rather than reloading it - the frame
+    // detaches and the iframe leaves the DOM. Reopening it from the canvas is the only recovery,
+    // so the whole open sequence retries, not just the frame lookup.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        // Clicking an activity selects it, so the wiring pass leaves the properties dialog open
+        // over the canvas, where it swallows the double-click that opens the editor.
+        if (await this.page.locator('#propertiesDialog').isVisible()) {
+          await this.page.locator('#canvas').click({ position: { x: 5, y: 5 } });
+        }
+        if (await iframe.count() === 0) await node.dblclick({ delay: 80 });
+        await iframe.waitFor({ state: 'visible', timeout: this.timeoutMs });
+        const frame = await childFrame(iframe, this.timeoutMs);
+        await frame.locator('#authoringForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
+        console.log(`Opened AE Assessment activity: ${title}`);
+        return frame;
+      } catch (error) {
+        const recoverable = error instanceof Error && /detached|Timeout/i.test(error.message);
+        if (!recoverable || attempt >= 3) throw error;
+        console.log(`Activity dialog for "${title}" went away while opening; reopening (attempt ${attempt + 1}).`);
+      }
+    }
   }
+}
+
+/** Keeps each figure on the side of the question stem the Source-of-Truth printed it. */
+export function questionDescriptionHtml(promptHtml: string, images: UploadedImage[]): string {
+  const before = imageHtml(images, 'before');
+  const after = imageHtml(images, 'after');
+  if (before === '') return `${promptHtml}${after}`;
+  // A figure printed above the stem still belongs below the case narrative that introduces it
+  // ("...the karyotype below:"), so it goes immediately before the numbered stem rather than above
+  // the case heading. With no numbered stem to find, it leads the prompt as it reads in the source.
+  const stem = /<div>(?=(?:<[^>]+>)*\s*\d+\s*[.)])/i.exec(promptHtml);
+  const at = stem?.index ?? 0;
+  return `${promptHtml.slice(0, at)}${before}${promptHtml.slice(at)}${after}`;
 }
 
 export async function applyAEAnswerScoring(
@@ -352,29 +425,43 @@ function normalize(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[character]!);
-}
-
 /** Compare against browser-decoded text so escaped punctuation matches Print View. */
-export async function verifyAEPrintContent(printPage: Page, nodePlan: AENodePlan, uploadedImageUrls: string[]): Promise<void> {
+export async function verifyAEPrintContent(
+  printPage: Page,
+  nodePlan: AENodePlan,
+  uploadedImages: Pick<UploadedImage, 'url' | 'caption'>[]
+): Promise<void> {
   const text = normalize(await printPage.locator('body').innerText());
   for (const question of nodePlan.questions) {
+    // Block boundaries read as a space; inline emphasis must not, or a
+    // superscript such as 10<sup>9</sup> would be compared as "10 9". Authored blocks are divs
+    // (CKEditor's Normal (DIV) format); paragraphs stay listed for content authored elsewhere.
     const promptText = await printPage.evaluate(
-      (html) => new DOMParser().parseFromString(html.replace(/<[^>]*>/g, ' '), 'text/html').body.textContent ?? '',
+      (html) =>
+        new DOMParser().parseFromString(
+          html.replace(/<\/p>|<\/div>|<\/t[dhr]>|<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, ''),
+          'text/html'
+        ).body.textContent ?? '',
       question.promptHtml
     );
     const expected = [question.title, promptText, ...question.options.map((option) => option.text)];
     for (const value of expected) {
-      if (!text.includes(normalize(value))) throw new Error(`AE Print View for "${nodePlan.title}" omitted expected text: "${normalize(value)}".`);
+      if (!text.includes(normalize(value))) {
+        throw new Error(
+          `AE Print View for "${nodePlan.title}" omitted expected text: "${normalize(value)}". ` +
+            `Print View held ${text.length} characters: "${text.slice(0, 300)}".`
+        );
+      }
     }
   }
   const imageUrls = new Set(
     await printPage.locator('img').evaluateAll((elements) => elements.map((element) => (element as HTMLImageElement).src))
   );
-  for (const url of uploadedImageUrls) {
-    if (!imageUrls.has(url)) throw new Error(`AE Print View for "${nodePlan.title}" omitted uploaded image: ${url}`);
+  for (const image of uploadedImages) {
+    if (!imageUrls.has(image.url)) throw new Error(`AE Print View for "${nodePlan.title}" omitted uploaded image: ${image.url}`);
+    const caption = normalize(inlineHtmlToText(image.caption));
+    if (caption !== '' && !text.includes(caption)) {
+      throw new Error(`AE Print View for "${nodePlan.title}" omitted the caption for ${image.url}: "${caption}".`);
+    }
   }
 }

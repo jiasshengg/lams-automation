@@ -1,4 +1,5 @@
 import type { QuestionImageRequest } from '../config.js';
+import { escapeHtmlText, inlineHtmlToText, sanitizeInlineHtml, stripOptionPrefixHtml } from './inline-html.js';
 
 export type AEQuestionType = 'mcq' | 'essay';
 
@@ -22,6 +23,7 @@ export interface AEQuestionInput {
 
 export interface AENodeInput {
   title: string;
+  /** Optional. AE activities carry no description unless the reviewed input supplies one. */
   description?: string;
   questions: AEQuestionInput[];
 }
@@ -45,7 +47,10 @@ export interface AEPlanInput {
 }
 
 export interface AEOptionPlan {
+  /** Visible option text, used for Print View verification. */
   text: string;
+  /** The same option with its Source-of-Truth emphasis, written to CKEditor. */
+  html: string;
   creditPercent: number;
 }
 
@@ -142,7 +147,7 @@ export function buildAEPlan(value: unknown): AEPlan {
   let expectedQuestionNumber = 1;
   const nodes = input.nodes.map<AENodePlan>((node) => ({
     title: node.title,
-    description: node.description ?? node.title,
+    description: node.description ?? '',
     questions: node.questions.map((question) => {
       if (question.number !== expectedQuestionNumber) {
         throw new Error(
@@ -266,10 +271,11 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
     saveAsNewVersion: true,
     selectLatestVersion: true,
     options: options.map((option, index) => {
-      const text = stripOptionPrefix(option.text);
-      if (text === '') throw new Error(`Question ${question.number} option ${index + 1} is empty after removing its prefix`);
+      const html = stripOptionPrefix(option.text);
+      if (html === '') throw new Error(`Question ${question.number} option ${index + 1} is empty after removing its prefix`);
       return {
-        text,
+        text: inlineHtmlToText(html),
+        html,
         creditPercent: option.correct === true ? (hasExplicitWeights ? option.weight! : defaultCorrectWeight) : 0
       };
     }),
@@ -278,34 +284,68 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
   };
 }
 
+/**
+ * Each newline-separated line becomes one CKEditor block. CKEditor is configured for Normal
+ * (DIV) here, so blocks are divs rather than paragraphs. Emphasis carried over
+ * from the Source-of-Truth survives; every other tag is escaped by the sanitizer.
+ */
+const TABLE_LINE = /^\s*<table\b[\s\S]*<\/table>\s*$/i;
+
+/**
+ * Tables are rebuilt from their rows and cells rather than passed through: the inline sanitizer
+ * deliberately escapes every block tag, and re-deriving the structure keeps that guarantee - only
+ * the allowlisted inline tags can reach the authoring surface, inside cells we emitted ourselves.
+ */
+function renderPromptTable(line: string, number: number): string {
+  const rows = [...line.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map((row) =>
+    [...(row[1] ?? '').matchAll(/<(td|th)\b([^>]*)>([\s\S]*?)<\/\1>/gi)].map((cell) => ({
+      // Only a plain percentage survives, so a reviewed table cannot carry styling of its own.
+      width: /\bwidth=["'](\d{1,3})%["']/i.exec(cell[2] ?? '')?.[1] ?? null,
+      html: sanitizeInlineHtml(cell[3] ?? '')
+    }))
+  );
+  if (rows.length === 0 || rows.some((cells) => cells.length === 0)) {
+    throw new Error(`Question ${number} contains a table with no readable rows or cells`);
+  }
+  const body = rows
+    .map((cells) =>
+      `<tr>${cells.map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}>${cell.html}</td>`).join('')}</tr>`
+    )
+    .join('');
+  // border/cellpadding/cellspacing reproduce Word's TableGrid style: single ruled lines throughout.
+  return `<table border="1" cellpadding="4" cellspacing="0" width="100%">${body}</table>`;
+}
+
 function normalizePrompt(prompt: string, number: number): string {
   const cleaned = prompt
     .replace(/\[\s*(?:\d+|x)\s+marks?\s*\]/gi, '')
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter((line) => inlineHtmlToText(line) !== '');
   if (cleaned.length === 0) throw new Error(`Question ${number} prompt is empty after removing mark annotations`);
 
   const paragraphs: string[] = [];
   cleaned.forEach((line, index) => {
-    const escaped = escapeHtml(line);
-    if (/^Case\s+\S+/i.test(line)) {
-      paragraphs.push(`<p><strong><u>${escaped}</u></strong></p>`);
-      if (index < cleaned.length - 1) paragraphs.push('<p><br></p>');
+    const html = sanitizeInlineHtml(line);
+    const text = inlineHtmlToText(line);
+    const caseHeading = /^Case\s+\S+/i.test(text);
+    // A Case heading the Source-of-Truth already styled keeps its own emphasis; only
+    // an unformatted heading receives the house bold-underline treatment.
+    if (TABLE_LINE.test(line)) {
+      paragraphs.push(renderPromptTable(line, number));
       return;
     }
-    if (/^QUESTION\s+\d+\s*$/i.test(line)) {
-      paragraphs.push(`<p>${escaped}</p>`);
-      if (index < cleaned.length - 1) paragraphs.push('<p><br></p>');
-      return;
+    const styled = caseHeading && html === escapeHtmlText(text) ? `<strong><u>${html}</u></strong>` : html;
+    paragraphs.push(`<div>${styled}</div>`);
+    if ((caseHeading || /^QUESTION\s+\d+\s*$/i.test(text)) && index < cleaned.length - 1) {
+      paragraphs.push('<div><br></div>');
     }
-    paragraphs.push(`<p>${escaped}</p>`);
   });
   return paragraphs.join('');
 }
 
 function stripOptionPrefix(value: string): string {
-  return value.replace(/^\s*[A-Z]\s*[).:-]\s*/i, '').trim();
+  return stripOptionPrefixHtml(sanitizeInlineHtml(value));
 }
 
 /** A leading gate is the first gate and declares no preceding AE node. */
@@ -431,6 +471,16 @@ function parseQuestionImage(value: unknown, label: string): QuestionImageRequest
     if (width <= 0) throw new Error(`${label} widthPx must be positive`);
     image.widthPx = width;
   }
+  if (value.placement !== undefined) {
+    if (value.placement !== 'before' && value.placement !== 'after') {
+      throw new Error(`${label} placement must be "before" or "after"`);
+    }
+    image.placement = value.placement;
+  }
+  if (value.caption !== undefined) {
+    if (typeof value.caption !== 'string') throw new Error(`${label} caption must be a string`);
+    image.caption = value.caption;
+  }
   return image;
 }
 
@@ -462,13 +512,6 @@ function positiveInteger(value: unknown, label: string): number {
   const parsed = numberValue(value, label);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${label} must be a positive integer`);
   return parsed;
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => {
-    const entities: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return entities[character]!;
-  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
