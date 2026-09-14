@@ -108,9 +108,23 @@ Run `npm run extract:ae-sot -- --sot-docx '<PATH>' [--out '<JSON_PATH>'] [--draf
 - inventories explicit marks, selectable/open-response types, detected answer keys, Case headings, and embedded images;
 - reports warnings that require review.
 
-Do not use page boundaries as separators. Case headings are not separators either, but they do name the nodes. The extractor does not fully preserve tables or rationales in executable AE JSON.
+Do not use page boundaries as separators. Case headings are not separators either, but they do name the nodes. Rationales are not carried into executable AE JSON.
 
-`--draft` additionally writes a reviewable AE plan JSON transcribed from the document: node titles, case context, stems and options with their emphasis, detected answer keys, explicit marks, and gates. Hand transcription is where titles, emphasis, and figure order drift from the Source-of-Truth, so prefer the draft over retyping. It is still a draft: resolve every `_review` note and `TODO_` key before `plan:ae` or `apply:ae`.
+`--draft` additionally writes a reviewable AE plan JSON transcribed from the document: node titles, case context, stems and options with their emphasis, detected answer keys, explicit marks, and gates. Hand transcription is where titles, emphasis, and figure order drift from the Source-of-Truth, so always generate the draft; never retype it. It is still a draft: resolve every `_review` note and `TODO_` key before `plan:ae` or `apply:ae`.
+
+## AE layout follows the Source-of-Truth
+
+Prompts follow the document's layout while the paragraph format (Normal) and font stay at the LAMS defaults:
+
+- one prompt line per Word paragraph; an empty line is a blank line, from either a typed empty paragraph or paragraph spacing of 6pt or more (contextual spacing between same-style paragraphs is honoured);
+- a `{{image}}` line marks where a figure printed inside the case text is written; an unfilled slot is dropped;
+- Word lettered and Roman lists receive the labels Word prints, so they parse as answer options; decimal lists are left alone so they never read as question stems;
+- text after a page break inside a node, when it is not an option, answer key, or rationale, opens the next question's prompt;
+- tables keep their printed width (grid twips / 15 px, at most 1200 px), column percentages, and `center`/`right` cell alignment.
+
+## Source-of-Truth check
+
+`plan:ae`, `apply:ae`, and `run:tbl` re-read `sourceDocx`, rebuild the plan the document produces, and stop before opening the browser when node count, node titles, question placement, question types, prompts, or option text differ. Answer keys, marks, and weights are not compared. An AE JSON without `sourceDocx` is refused. `--skip-sot-check` bypasses the check for a difference the user has confirmed is intentional.
 
 ## AE node title convention
 

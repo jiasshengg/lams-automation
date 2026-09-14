@@ -1,5 +1,8 @@
 import type { QuestionImageRequest } from '../config.js';
 import { escapeHtmlText, inlineHtmlToText, sanitizeInlineHtml, stripOptionPrefixHtml } from './inline-html.js';
+import { IMAGE_SLOT_HTML, IMAGE_SLOT_LINE } from './prompt-lines.js';
+
+export { IMAGE_SLOT_HTML, IMAGE_SLOT_LINE };
 
 export type AEQuestionType = 'mcq' | 'essay';
 
@@ -301,6 +304,7 @@ function renderPromptTable(line: string, number: number): string {
     [...(row[1] ?? '').matchAll(/<(td|th)\b([^>]*)>([\s\S]*?)<\/\1>/gi)].map((cell) => ({
       // Only a plain percentage survives, so a reviewed table cannot carry styling of its own.
       width: /\bwidth=["'](\d{1,3})%["']/i.exec(cell[2] ?? '')?.[1] ?? null,
+      align: /\balign=["'](center|right)["']/i.exec(cell[2] ?? '')?.[1]?.toLowerCase() ?? null,
       html: sanitizeInlineHtml(cell[3] ?? '')
     }))
   );
@@ -309,23 +313,51 @@ function renderPromptTable(line: string, number: number): string {
   }
   const body = rows
     .map((cells) =>
-      `<tr>${cells.map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}>${cell.html}</td>`).join('')}</tr>`
+      `<tr>${cells
+        .map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}${cell.align === null ? '' : ` align="${cell.align}"`}>${cell.html}</td>`)
+        .join('')}</tr>`
     )
     .join('');
+  // The document's printed width in pixels; anything missing or wider than the editor fills the line.
+  const declared = Number(/^\s*<table\b[^>]*\bwidth=["'](\d{1,4})["']/i.exec(line)?.[1] ?? 0);
+  const width = declared > 0 && declared <= MAX_TABLE_WIDTH_PX ? String(declared) : '100%';
   // border/cellpadding/cellspacing reproduce Word's TableGrid style: single ruled lines throughout.
-  return `<table border="1" cellpadding="4" cellspacing="0" width="100%">${body}</table>`;
+  return `<table border="1" cellpadding="4" cellspacing="0" width="${width}">${body}</table>`;
+}
+
+const MAX_TABLE_WIDTH_PX = 1200;
+
+const MARK_ANNOTATION = /\[\s*(?:\d+|x)\s+marks?\s*\]/gi;
+const BLANK_LINE = '<div><br></div>';
+
+/**
+ * Each prompt line becomes one block in the LAMS default Normal format, and each empty line a
+ * blank line, so the prompt reads with the paragraphs and gaps the Source-of-Truth prints.
+ */
+function promptEntries(prompt: string): string[] {
+  const entries = prompt.split(/\r?\n/).flatMap((raw) => {
+    const line = raw.replace(MARK_ANNOTATION, '').trim();
+    if (line === IMAGE_SLOT_LINE) return [IMAGE_SLOT_HTML];
+    if (inlineHtmlToText(line) !== '') return [line];
+    // A line emptied only by removing its mark annotation was never a blank line in the document.
+    return inlineHtmlToText(raw.trim()) === '' ? [BLANK_LINE] : [];
+  });
+  const content = entries.flatMap((entry, index) => (entry === BLANK_LINE ? [] : [index]));
+  return content.length === 0 ? [] : entries.slice(content[0], content.at(-1)! + 1);
 }
 
 function normalizePrompt(prompt: string, number: number): string {
-  const cleaned = prompt
-    .replace(/\[\s*(?:\d+|x)\s+marks?\s*\]/gi, '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => inlineHtmlToText(line) !== '');
-  if (cleaned.length === 0) throw new Error(`Question ${number} prompt is empty after removing mark annotations`);
+  const cleaned = promptEntries(prompt);
+  if (!cleaned.some((entry) => entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML)) {
+    throw new Error(`Question ${number} prompt is empty after removing mark annotations`);
+  }
 
   const paragraphs: string[] = [];
   cleaned.forEach((line, index) => {
+    if (line === BLANK_LINE || line === IMAGE_SLOT_HTML) {
+      paragraphs.push(line);
+      return;
+    }
     const html = sanitizeInlineHtml(line);
     const text = inlineHtmlToText(line);
     const caseHeading = /^Case\s+\S+/i.test(text);
@@ -337,7 +369,9 @@ function normalizePrompt(prompt: string, number: number): string {
     }
     const styled = caseHeading && html === escapeHtmlText(text) ? `<strong><u>${html}</u></strong>` : html;
     paragraphs.push(`<div>${styled}</div>`);
-    if ((caseHeading || /^QUESTION\s+\d+\s*$/i.test(text)) && index < cleaned.length - 1) {
+    // The heading's blank line is added only where the document did not already leave one.
+    const next = cleaned[index + 1];
+    if ((caseHeading || /^QUESTION\s+\d+\s*$/i.test(text)) && next !== undefined && next !== BLANK_LINE) {
       paragraphs.push('<div><br></div>');
     }
   });

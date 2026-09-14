@@ -2,7 +2,7 @@ import { resolveInputFile } from './input-file.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildAEDraft } from './ae/draft.js';
-import { analyzeAESOT, extractSOTParagraphs, formatAESOTSummary, readDocumentXmlFromDocx } from './ae/sot-docx.js';
+import { analyzeAESOT, extractSOTParagraphs, formatAESOTSummary, readSOTDocxParts } from './ae/sot-docx.js';
 import { inspectDocxImages } from './docx/media.js';
 
 async function main(): Promise<void> {
@@ -15,8 +15,8 @@ async function main(): Promise<void> {
   const absoluteInput = await resolveInputFile(inputPath, '.docx');
   if (path.extname(absoluteInput).toLowerCase() !== '.docx') throw new Error('AE SOT input must be a .docx file.');
   const buffer = await readFile(absoluteInput);
-  const documentXml = readDocumentXmlFromDocx(buffer);
-  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml), path.basename(absoluteInput, path.extname(absoluteInput)));
+  const { documentXml, ...layout } = readSOTDocxParts(buffer);
+  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), path.basename(absoluteInput, path.extname(absoluteInput)));
   const output = JSON.stringify(analysis, null, 2);
   const outputPath = readArgument('--out');
   if (outputPath) {

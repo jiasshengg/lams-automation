@@ -1,13 +1,15 @@
 import { resolveInputFile } from './input-file.js';
 import { readFile } from 'node:fs/promises';
 import { buildAEPlan, formatAEPlanSummary } from './ae/plan.js';
+import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 
 async function main(): Promise<void> {
   const inputPath = readArgument('--ae-json');
-  if (!inputPath) throw new Error('Usage: npm run plan:ae -- --ae-json <path> [--json]');
+  if (!inputPath) throw new Error('Usage: npm run plan:ae -- --ae-json <path> [--json] [--skip-sot-check]');
   const absolutePath = await resolveInputFile(inputPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
   const plan = buildAEPlan(parsed);
+  await assertAEPlanMatchesSOT(plan);
   console.log(process.argv.includes('--json') ? JSON.stringify(plan, null, 2) : formatAEPlanSummary(plan));
 }
 
