@@ -97,6 +97,7 @@ test('commit applies gate, grouping, questions, answer-required, advanced settin
   const result = await executeIratAutomation(editor, request, { commit: true });
 
   expect(result.committed).toBe(true);
+  expect(result.deletedQuestions).toEqual([]);
   expect(result.updatedQuestions).toEqual(['Question 1']);
   expect(calls).toEqual([
     'inspect',
@@ -142,6 +143,9 @@ function fakeEditor(calls: string[]): IratEditor {
     },
     async associateWithTeamSetup(name) {
       calls.push(`team:${name}`);
+    },
+    async deleteQuestion(title) {
+      calls.push(`delete:${title}`);
     },
     async createQuestion(question) {
       calls.push(`create:${question.title}`);
@@ -199,6 +203,52 @@ test('missing questions are planned in dry run and created on commit', async () 
   expect(result.createdQuestions).toEqual(['Question 1']);
   expect(result.updatedQuestions).toEqual([]);
   expect(calls).toContain('create:Question 1');
+});
+
+test('deletes only an explicitly authorized extra question before writing the requested inventory', async () => {
+  const calls: string[] = [];
+  const editor = fakeEditor(calls);
+  const inspect = editor.inspect.bind(editor);
+  editor.inspect = async () => ({
+    ...await inspect(),
+    questions: [
+      { title: 'Placeholder', type: 'multiple-choice', mandatory: true },
+      { title: 'Question 1', type: 'multiple-choice', mandatory: false }
+    ]
+  });
+  const input = { ...request, deleteQuestionTitles: ['Placeholder'] };
+
+  const result = await executeIratAutomation(editor, input, { commit: true });
+
+  expect(result.deletedQuestions).toEqual(['Placeholder']);
+  expect(calls.indexOf('delete:Placeholder')).toBeLessThan(calls.indexOf('question:Question 1'));
+  expect(result.readiness.checks.find((check) => check.label === 'Existing question — Placeholder')?.passed).toBe(true);
+});
+
+test('an authorized deletion title already absent is an idempotent no-op', async () => {
+  const calls: string[] = [];
+  const result = await executeIratAutomation(fakeEditor(calls), { ...request, deleteQuestionTitles: ['Old placeholder'] }, { commit: true });
+  expect(result.deletedQuestions).toEqual([]);
+  expect(calls).not.toContain('delete:Old placeholder');
+});
+
+test('reports every unapproved extra question title and stops before all writes', async () => {
+  const calls: string[] = [];
+  const editor = fakeEditor(calls);
+  const inspect = editor.inspect.bind(editor);
+  editor.inspect = async () => ({
+    ...await inspect(),
+    questions: [
+      { title: 'Different placeholder A', type: 'multiple-choice', mandatory: true },
+      { title: 'Question 1', type: 'multiple-choice', mandatory: false },
+      { title: 'Legacy test row', type: 'multiple-choice', mandatory: true }
+    ]
+  });
+
+  await expect(executeIratAutomation(editor, request, { commit: true })).rejects.toThrow(
+    'Report these exact extra question titles to the user and request an explicit instruction for each one: "Different placeholder A", "Legacy test row". Ask whether each question should be kept completely untouched; updated while keeping its current title; updated and renamed with an exact new title; deleted; or handled according to another exact instruction. Do not continue or infer an action until the user answers.'
+  );
+  expect(calls).toEqual(['inspect']);
 });
 
 test('SoT-sized run updates matching questions and creates the remaining 24', async () => {

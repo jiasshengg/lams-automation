@@ -93,6 +93,12 @@ export const ADVANCED_TOGGLES = {
  */
 export const DISPLAY_ALL_AFTER_COMPLETION_LABEL = 'Display all questions and answers once the student finishes';
 
+interface QuestionBankReference {
+  baseUid: string;
+  currentUid: string;
+  currentLabel: string;
+}
+
 export class LamsIratEditor implements IratEditor {
   private activityFrame: Frame | undefined;
   private readonly uploadedImageUrls = new Set<string>();
@@ -169,6 +175,40 @@ export class LamsIratEditor implements IratEditor {
     const updated = uniqueGraphNode(await inspectAuthoringGraph(this.page), this.request.activityName, 'tool');
     if (!updated.grouped || updated.groupingUiid !== teamSetup.uiid) {
       throw new Error(`iRAT was not associated with "${teamSetupName}" after selecting it.`);
+    }
+  }
+
+  /** Removes only one exact activity reference after LAMS shows its deletion warning. */
+  async deleteQuestion(title: string): Promise<void> {
+    const frame = await this.ensureActivityFrame();
+    const beforeTitles = await questionTitles(frame);
+    const normalizedTitle = normalizeText(title);
+    if (beforeTitles.filter((candidate) => candidate === normalizedTitle).length !== 1) {
+      throw new Error(`Expected one iRAT question named "${title}" before deletion.`);
+    }
+    const row = await exactQuestionRow(frame, title);
+    const deleteButton = row.getByRole('button', { name: 'Delete', exact: true });
+    if ((await deleteButton.count()) !== 1) {
+      throw new Error(`Expected one Delete action for iRAT question "${title}".`);
+    }
+    await deleteButton.click();
+
+    const dialog = frame.getByRole('dialog', { name: 'Delete', exact: true });
+    await dialog.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    const warning = dialog.getByText('Do you really want to delete this question?', { exact: true });
+    if ((await warning.count()) !== 1) {
+      throw new Error(`The deletion dialog for "${title}" did not contain the verified warning.`);
+    }
+    const expectedTitles = beforeTitles.filter((candidate) => candidate !== normalizedTitle);
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await frame.waitForFunction(({ titles, selector }) => {
+      const actual = Array.from(document.querySelectorAll(selector)).map((element) =>
+        (element.textContent ?? '').replace(/\s+/g, ' ').trim()
+      );
+      return JSON.stringify(actual) === JSON.stringify(titles);
+    }, { titles: expectedTitles, selector: `#referencesTable tbody tr ${QUESTION_TITLE}` }, { timeout: this.timeoutMs });
+    if ((await questionTitles(frame)).includes(normalizedTitle)) {
+      throw new Error(`iRAT question "${title}" was still present after confirming deletion.`);
     }
   }
 
@@ -403,13 +443,18 @@ export class LamsIratEditor implements IratEditor {
           }
         }
       }
-      if (this.uploadedImageUrls.size > 0) {
+      const expectedImageCount = [...this.questionImages.values()].reduce((sum, images) => sum + images.length, 0);
+      if (this.uploadedImageUrls.size > 0 || expectedImageCount > 0) {
         const printableImages = new Set(
-          await printPage.locator('img').evaluateAll((elements) => elements.map((element) => (element as HTMLImageElement).src))
+          await printPage.locator('img[src*="/www/secure/"]').evaluateAll((elements) => elements.map((element) => (element as HTMLImageElement).src))
         );
+        if (this.uploadedImageUrls.size === 0 && printableImages.size !== expectedImageCount) {
+          throw new Error(`Print View contained ${printableImages.size} stored iRAT image(s); expected ${expectedImageCount} from the SoT.`);
+        }
         for (const url of this.uploadedImageUrls) {
           if (!printableImages.has(url)) throw new Error(`Print View did not contain uploaded iRAT image: ${url}`);
         }
+        printableImages.forEach(url => this.uploadedImageUrls.add(url));
       }
     } finally {
       await printPage.close();
@@ -434,9 +479,13 @@ export class LamsIratEditor implements IratEditor {
     await this.page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: this.timeoutMs });
 
     const trat = matchingTratRequest(this.request);
+    const savedGraph = await inspectAuthoringGraph(this.page);
+    const savedIratFrame = await this.openActivityFrame(uniqueGraphNode(savedGraph, this.request.activityName, 'tool'));
+    const questionBankReferences = await this.readIratQuestionBankReferences(savedIratFrame);
+    await this.closeActivityWithoutSaving(savedIratFrame);
     const tratNode = uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool');
     const tratFrame = await this.openActivityFrame(tratNode);
-    await this.verifyTratQuestionSync(tratFrame, { repairStaleVersions: true });
+    await this.verifyTratQuestionSync(tratFrame, { repairStaleVersions: true }, questionBankReferences);
     await applyTratAdvancedSettings(
       tratFrame,
       trat.confidenceSourceActivityName,
@@ -465,7 +514,7 @@ export class LamsIratEditor implements IratEditor {
     const savedTratFrame = await this.openActivityFrame(
       uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool')
     );
-    await this.verifyTratQuestionSync(savedTratFrame, { repairStaleVersions: false });
+    await this.verifyTratQuestionSync(savedTratFrame, { repairStaleVersions: false }, questionBankReferences);
     const tratSettings = await applyTratAdvancedSettings(
       savedTratFrame,
       trat.confidenceSourceActivityName,
@@ -506,38 +555,29 @@ export class LamsIratEditor implements IratEditor {
    */
   private async verifyTratQuestionSync(
     frame: Frame,
-    options: { repairStaleVersions: boolean }
+    options: { repairStaleVersions: boolean },
+    questionBankReferences?: Map<string, QuestionBankReference>
   ): Promise<void> {
-    // Scratchie changed from a table to Bootstrap list items in the deployed LAMS build.
-    // Both renderings expose stable containers; select the one that is actually present
-    // instead of assuming the Assessment tool's #itemTable exists in Scratchie.
-    const modernList = frame.locator('#scratchieItemsList');
-    const legacyTable = frame.locator('#itemTable');
-    const modern = await modernList.isVisible().catch(() => false);
-    if (modern) await modernList.waitFor({ state: 'visible', timeout: this.timeoutMs });
-    else await legacyTable.waitFor({ state: 'visible', timeout: this.timeoutMs });
-    const rows = modern
-      ? modernList.locator('.scratchie-item-list-item')
-      : legacyTable.locator('tbody tr');
-    const titles: string[] = [];
-    for (let index = 0; index < (await rows.count()); index += 1) {
-      const row = rows.nth(index);
-      const titleCell = modern
-        ? row.locator('.fw-semibold.text-break')
-        : (await row.locator('td:has(> .item-sequence-id)').count()) === 1
-          ? row.locator('td:has(> .item-sequence-id)')
-          : row.locator(QUESTION_TITLE);
-      if ((await titleCell.count()) !== 1) {
-        throw new Error(`Could not read one title from tRAT question row ${index + 1}.`);
-      }
-      titles.push(normalizeText(await titleCell.innerText()));
-    }
+    const { rows, modern } = await this.tratQuestionRows(frame);
+    let titles = await readTratTitles(rows, modern);
     const expectedTitles = this.request.questions.map((question) => normalizeText(question.title));
     if (JSON.stringify(titles) !== JSON.stringify(expectedTitles)) {
-      throw new Error(`tRAT question inventory/order did not match iRAT: ${JSON.stringify(titles)}.`);
+      if (!options.repairStaleVersions) {
+        throw new Error(`tRAT question inventory/order did not match iRAT: ${JSON.stringify(titles)}.`);
+      }
+      const missing = missingTratQuestionSuffix(titles, this.request.questions);
+      if (!questionBankReferences) throw new Error('Question Bank repair requires verified iRAT question references.');
+      await this.importMissingTratQuestions(frame, rows, modern, missing, questionBankReferences);
+      titles = await readTratTitles(rows, modern);
+      if (JSON.stringify(titles) !== JSON.stringify(expectedTitles)) {
+        throw new Error(`tRAT question inventory/order did not match iRAT after Question Bank repair: ${JSON.stringify(titles)}.`);
+      }
     }
     if (options.repairStaleVersions) {
-      await this.selectNewestTratQuestionVersions(frame, rows, modern);
+      if (!questionBankReferences) throw new Error('tRAT version reconciliation requires verified iRAT question references.');
+      await this.selectCurrentIratVersionsInTrat(frame, rows, modern, questionBankReferences);
+    } else if (questionBankReferences) {
+      await this.verifyTratVersionLabels(rows, modern, questionBankReferences);
     }
     const staleVersions = await this.countStaleTratVersions(frame);
     if (staleVersions > 0) {
@@ -579,33 +619,196 @@ export class LamsIratEditor implements IratEditor {
   }
 
   /**
+   * Imports shared iRAT questions that LAMS omitted from Scratchie after creating them.
+   * This is deliberately suffix-only: existing tRAT rows must already be the exact
+   * requested prefix, so the repair never deletes, replaces, or reorders unrelated rows.
+   */
+  private async importMissingTratQuestions(
+    frame: Frame,
+    rows: Locator,
+    modern: boolean,
+    missing: IratQuestionRequest[],
+    questionBankReferences: Map<string, QuestionBankReference>
+  ): Promise<void> {
+    if (!modern) {
+      throw new Error(`tRAT is missing ${missing.length} question(s), but this legacy layout has no verified Question Bank import path.`);
+    }
+    const header = frame.locator('#question-bank-card-header');
+    const panel = frame.locator('#question-bank-collapse');
+    if (!(await panel.isVisible())) await header.click();
+    await panel.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    await frame.waitForFunction(() => !document.querySelector('#question-bank-collapse')?.classList.contains('contains-nothing'), undefined, {
+      timeout: this.timeoutMs
+    });
+    const filter = panel.locator('#filter-questions');
+    await filter.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    // The panel's first jqGrid request starts after the collapse HTML is injected. Let
+    // that request finish before starting a filtered search so its response cannot be
+    // mistaken for the first requested question's results.
+    await panel.locator('#load_questions-grid').waitFor({ state: 'hidden', timeout: this.timeoutMs });
+
+    for (const question of missing) {
+      const query = questionBankSearchTerm(stripHtml(question.content));
+      const searchResponse = this.page.waitForResponse(
+        response => response.url().includes('/searchQB/getPagedQuestions.do'),
+        { timeout: this.timeoutMs }
+      );
+      await filter.fill(query);
+      await filter.press('Enter');
+      if (!(await searchResponse).ok()) throw new Error(`Question Bank search failed while locating "${question.title}".`);
+      await panel.locator('#load_questions-grid').waitFor({ state: 'hidden', timeout: this.timeoutMs });
+
+      const candidates = panel.locator('#questions-grid tr.jqgrow');
+      const requestedTitle = normalizeText(question.title);
+      const requestedContent = normalizeText(stripHtml(question.content));
+      const reference = questionBankReferences.get(requestedTitle);
+      if (!reference) throw new Error(`No verified iRAT Question Bank reference was found for "${question.title}".`);
+      const matches: number[] = [];
+      for (let index = 0; index < (await candidates.count()); index += 1) {
+        const candidate = candidates.nth(index);
+        const title = normalizeText(await candidate.locator('.question-title-grid').innerText());
+        const content = normalizeText(await candidate.locator('.question-description-grid').innerText());
+        const uid = normalizeText(await candidate.locator('td[aria-describedby="questions-grid_questionUid"]').innerText());
+        if (title === requestedTitle && content === requestedContent && uid === reference.baseUid) matches.push(index);
+      }
+      const before = await rows.count();
+      const selectedUid = panel.locator('#selected-question-uid');
+      if (matches.length > 1) {
+        throw new Error(`Expected at most one exact Question Bank match for "${question.title}"; found ${matches.length}.`);
+      }
+      if (matches.length === 1) {
+        const candidate = candidates.nth(matches[0]!);
+        const questionUid = normalizeText(await candidate.locator('td[aria-describedby="questions-grid_questionUid"]').innerText());
+        await candidate.click();
+        await selectedUid.waitFor({ state: 'attached', timeout: this.timeoutMs });
+        if ((await selectedUid.inputValue()) !== questionUid) {
+          throw new Error(`Question Bank selected an unexpected version while locating "${question.title}".`);
+        }
+        if (reference.currentUid !== reference.baseUid) {
+          const versionMenu = panel.locator('#question-detail-area button.dropdown-toggle');
+          if ((await versionMenu.count()) !== 1) {
+            throw new Error(`Question Bank did not expose one version menu for "${question.title}".`);
+          }
+          await versionMenu.click();
+          const currentVersion = panel.locator(`#question-detail-area .dropdown-item[onclick*="loadQuestionDetailsArea(${reference.currentUid})"]`);
+          if ((await currentVersion.count()) !== 1) {
+            throw new Error(`Question Bank did not offer the current iRAT version for "${question.title}".`);
+          }
+          await currentVersion.click();
+          await frame.waitForFunction(uid => (document.querySelector('#selected-question-uid') as HTMLInputElement | null)?.value === uid,
+            reference.currentUid, { timeout: this.timeoutMs });
+        }
+      } else {
+        // Image-bearing current versions are not always indexed by the Question Bank
+        // search. The exact current UID was read from this lesson's iRAT row, so load
+        // that read-only detail directly and still verify its title/content before import.
+        await frame.evaluate(uid => {
+          const loader = (window as typeof window & { loadQuestionDetailsArea?: (questionUid: number) => void }).loadQuestionDetailsArea;
+          if (typeof loader !== 'function') throw new Error('Question Bank detail loader is unavailable.');
+          loader(Number(uid));
+        }, reference.currentUid);
+        await frame.waitForFunction(uid => (document.querySelector('#selected-question-uid') as HTMLInputElement | null)?.value === uid,
+          reference.currentUid, { timeout: this.timeoutMs });
+      }
+      if ((await selectedUid.inputValue()) !== reference.currentUid) {
+        throw new Error(`Question Bank did not select the verified current iRAT version for "${question.title}".`);
+      }
+      const detail = panel.locator('#question-detail-area');
+      const detailTitle = normalizeText(await detail.locator('.card-title').innerText());
+      const detailContent = normalizeText(await detail.locator('.question-description').innerText());
+      if (detailTitle !== requestedTitle || detailContent !== requestedContent) {
+        throw new Error(`Verified Question Bank UID did not match the requested title/content for "${question.title}".`);
+      }
+      const importResponse = this.page.waitForResponse(
+        response => response.url().includes('/authoring/importQbQuestion.do'),
+        { timeout: this.timeoutMs }
+      );
+      await panel.locator('#import-button').click();
+      if (!(await importResponse).ok()) throw new Error(`Question Bank import failed for "${question.title}".`);
+      await frame.waitForFunction(({ count, title }) => {
+        const items = Array.from(document.querySelectorAll('#scratchieItemsList .scratchie-item-list-item'));
+        const last = items.at(-1)?.querySelector('.fw-semibold.text-break')?.textContent ?? '';
+        return items.length === count + 1 && last.replace(/\s+/g, ' ').trim() === title;
+      }, { count: before, title: requestedTitle }, { timeout: this.timeoutMs });
+    }
+  }
+
+  private async tratQuestionRows(frame: Frame): Promise<{ rows: Locator; modern: boolean }> {
+    // Scratchie changed from a table to Bootstrap list items in the deployed LAMS build.
+    // Both renderings expose stable containers; select the one that is actually present
+    // instead of assuming the Assessment tool's #itemTable exists in Scratchie.
+    const modernList = frame.locator('#scratchieItemsList');
+    const legacyTable = frame.locator('#itemTable');
+    const modern = await modernList.isVisible().catch(() => false);
+    if (modern) await modernList.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    else await legacyTable.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    return {
+      modern,
+      rows: modern ? modernList.locator('.scratchie-item-list-item') : legacyTable.locator('tbody tr')
+    };
+  }
+
+  /** Reads the exact Question Bank family and selected version for every iRAT row. */
+  private async readIratQuestionBankReferences(frame: Frame): Promise<Map<string, QuestionBankReference>> {
+    const references = new Map<string, QuestionBankReference>();
+    for (const question of this.request.questions) {
+      const row = await exactQuestionRow(frame, question.title);
+      const entries = await row.locator('.question-version-dropdown .dropdown-item button[onclick*="changeItemQuestionVersion"]').evaluateAll(buttons =>
+        buttons.map(button => ({
+          text: (button.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          onclick: button.getAttribute('onclick') ?? '',
+          current: button.closest('.dropdown-item')?.classList.contains('disabled') ?? false
+        }))
+      );
+      const base = entries.find(entry => /^Version\s*1$/i.test(entry.text));
+      const current = entries.find(entry => entry.current);
+      const baseUid = base ? questionVersionUid(base.onclick) : undefined;
+      const currentUid = current ? questionVersionUid(current.onclick) : undefined;
+      if (!baseUid || !currentUid) {
+        throw new Error(`Could not read the Question Bank family/current version for "${question.title}".`);
+      }
+      references.set(normalizeText(question.title), { baseUid, currentUid, currentLabel: normalizeText(current!.text) });
+    }
+    return references;
+  }
+
+  /**
    * LAMS may acknowledge the iRAT sync confirmation while leaving Scratchie references
    * on their previous shared-question versions. When that verified state is visible,
-   * choose the newest offered version for each exact tRAT row, then verify the complete
+   * select the exact current iRAT version for each same-titled tRAT row, then verify the complete
    * Print View against the request before the activity is saved.
    */
-  private async selectNewestTratQuestionVersions(frame: Frame, rows: Locator, modern: boolean): Promise<void> {
-    let staleCount = await this.countStaleTratVersions(frame);
-    if (staleCount === 0) return;
-    if (!modern) {
-      throw new Error(`tRAT shows ${staleCount} stale question version(s), but this legacy layout has no verified repair path.`);
-    }
-
+  private async selectCurrentIratVersionsInTrat(
+    frame: Frame,
+    rows: Locator,
+    modern: boolean,
+    questionBankReferences: Map<string, QuestionBankReference>
+  ): Promise<void> {
     for (let index = 0; index < (await rows.count()); index += 1) {
       const row = rows.nth(index);
+      const [title] = await readTratTitles(row, modern);
+      const reference = questionBankReferences.get(title!);
+      if (!reference) throw new Error(`No verified iRAT version was found for tRAT question "${title}".`);
       const warning = row.getByRole('button', { name: 'There is a newer version of this question', exact: true });
-      if ((await warning.count()) === 0) continue;
       const versionMenu = row.locator('button.dropdown-toggle');
       if ((await versionMenu.count()) !== 1) {
         throw new Error(`Could not find one tRAT version menu for question row ${index + 1}.`);
       }
-      await versionMenu.click();
-      const candidates = row.locator('button.dropdown-item:not(.disabled)');
-      if ((await candidates.count()) === 0) {
-        throw new Error(`tRAT question row ${index + 1} reports a newer version but offers none.`);
+      const selectedLabel = normalizeText(await versionMenu.innerText());
+      if (selectedLabel === reference.currentLabel && (await warning.count()) === 0) continue;
+      if (!modern) {
+        throw new Error(`tRAT question "${title}" is ${selectedLabel}; iRAT is ${reference.currentLabel}, but this legacy layout has no verified repair path.`);
       }
-      const newestLabel = normalizeText(await candidates.last().innerText());
-      await candidates.last().click();
+      await versionMenu.click();
+      const candidates = row.locator('button.dropdown-item[onclick*="changeItemQuestionVersion"]');
+      const onclickValues = await candidates.evaluateAll(buttons => buttons.map(button => button.getAttribute('onclick') ?? ''));
+      const matchingIndexes = onclickValues
+        .map((onclick, candidateIndex) => questionVersionUid(onclick) === reference.currentUid ? candidateIndex : -1)
+        .filter(candidateIndex => candidateIndex >= 0);
+      if (matchingIndexes.length !== 1) {
+        throw new Error(`Expected one ${reference.currentLabel} (${reference.currentUid}) choice for tRAT question "${title}"; found ${matchingIndexes.length}.`);
+      }
+      await candidates.nth(matchingIndexes[0]!).click();
 
       const deadline = Date.now() + this.timeoutMs;
       let updated = false;
@@ -617,14 +820,34 @@ export class LamsIratEditor implements IratEditor {
         const stillWarns = await freshRow
           .getByRole('button', { name: 'There is a newer version of this question', exact: true })
           .count();
-        updated = selectedLabel === newestLabel && stillWarns === 0;
+        updated = selectedLabel === reference.currentLabel && stillWarns === 0;
         if (updated) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       } while (Date.now() < deadline);
       if (!updated) {
-        throw new Error(`Selecting the newest tRAT version did not update question row ${index + 1}.`);
+        throw new Error(`Selecting ${reference.currentLabel} did not update tRAT question "${title}".`);
       }
-      staleCount = await this.countStaleTratVersions(frame);
+    }
+  }
+
+  private async verifyTratVersionLabels(
+    rows: Locator,
+    modern: boolean,
+    questionBankReferences: Map<string, QuestionBankReference>
+  ): Promise<void> {
+    for (let index = 0; index < (await rows.count()); index += 1) {
+      const row = rows.nth(index);
+      const [title] = await readTratTitles(row, modern);
+      const reference = questionBankReferences.get(title!);
+      if (!reference) throw new Error(`No verified iRAT version was found for tRAT question "${title}".`);
+      const versionMenu = row.locator('button.dropdown-toggle');
+      if ((await versionMenu.count()) !== 1) {
+        throw new Error(`Could not verify one selected tRAT version for question "${title}".`);
+      }
+      const selectedLabel = normalizeText(await versionMenu.innerText());
+      if (selectedLabel !== reference.currentLabel) {
+        throw new Error(`Post-save tRAT version mismatch for "${title}": selected ${selectedLabel}, expected ${reference.currentLabel} from iRAT.`);
+      }
     }
   }
 
@@ -918,6 +1141,52 @@ async function verifyDefaultFormatting(frame: Frame, id: string, requested: stri
 
 function stripHtml(value: string): string {
   return value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ');
+}
+
+/**
+ * Returns the only safe automatic tRAT inventory repair: missing requested rows after
+ * an exact existing prefix. Any extra, reordered, or differently named row is ambiguous.
+ */
+export function missingTratQuestionSuffix(
+  observedTitles: string[],
+  requestedQuestions: IratQuestionRequest[]
+): IratQuestionRequest[] {
+  const observed = observedTitles.map(normalizeText);
+  const expected = requestedQuestions.map(question => normalizeText(question.title));
+  const exactPrefix = observed.length < expected.length && observed.every((title, index) => title === expected[index]);
+  if (!exactPrefix) {
+    throw new Error(`tRAT question inventory/order did not match iRAT: ${JSON.stringify(observed)}.`);
+  }
+  return requestedQuestions.slice(observed.length);
+}
+
+/** Choose a distinctive contiguous plain-text fragment for the Question Bank filter. */
+export function questionBankSearchTerm(content: string): string {
+  const segments = normalizeText(content).match(/[\p{L}][\p{L} '-]{23,}/gu) ?? [];
+  const longest = segments.map(segment => normalizeText(segment)).sort((a, b) => b.length - a.length)[0];
+  if (!longest) throw new Error('Question content has no stable plain-text fragment for Question Bank search.');
+  return longest.slice(0, 100).trim();
+}
+
+export function questionVersionUid(onclick: string): string | undefined {
+  return /changeItemQuestionVersion\(\s*\d+\s*,\s*\d+\s*,\s*(\d+)\s*\)/.exec(onclick)?.[1];
+}
+
+async function readTratTitles(rows: Locator, modern: boolean): Promise<string[]> {
+  const titles: string[] = [];
+  for (let index = 0; index < (await rows.count()); index += 1) {
+    const row = rows.nth(index);
+    const titleCell = modern
+      ? row.locator('.fw-semibold.text-break')
+      : (await row.locator('td:has(> .item-sequence-id)').count()) === 1
+        ? row.locator('td:has(> .item-sequence-id)')
+        : row.locator(QUESTION_TITLE);
+    if ((await titleCell.count()) !== 1) {
+      throw new Error(`Could not read one title from tRAT question row ${index + 1}.`);
+    }
+    titles.push(normalizeText(await titleCell.innerText()));
+  }
+  return titles;
 }
 
 /** Returns exact inline-tagged segments requested by the SoT but absent from Print View. */

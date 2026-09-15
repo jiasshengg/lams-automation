@@ -77,6 +77,7 @@ Use the per-run `irat` object for the changing iRAT Source-of-Truth data. It con
 
 - exact gate name, description, password type, dynamic-password state, and rotation seconds;
 - exact iRAT and Team Setup node names;
+- optional `deleteQuestionTitles`, containing only exact existing iRAT question-reference titles the user explicitly authorizes removing after a prior inspection reports them; an inspection that first discovers extra rows stops before all writes and asks for a per-title direction (keep untouched, update with the title unchanged, update with an exact new title, delete, or another exact instruction), titles may not overlap the intended final inventory, duplicates are rejected, and already-absent authorized titles are safe no-ops;
 - one structured entry per question with type, content, mandatory state, and answers; `title` is optional and defaults to `Question N` from `sourceQuestionNumber` (or the one-based position), which is the required LAMS naming;
 - exact answer correctness and weight, where correct weights total 100 and incorrect weights are zero;
 - `advanced` toggles: `shuffleQuestions`, `shuffleAnswers`, `questionsNumbering`, `displayAllQuestions` (Advanced card question distribution = all questions), `displayAllAfterCompletion` (Feedback & Results: "Display all questions and answers once the student finishes"), `answerJustification`, and `confidenceLevels`. Every toggle defaults to `true`, matching deployment guide step 5, so only a deliberate deviation needs to be spelled out.

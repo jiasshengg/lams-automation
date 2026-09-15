@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
+import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionVersionUid, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
 
 const request: IratRequest = {
   activityName: 'iRAT', teamSetupName: 'Team Setup',
@@ -34,14 +34,29 @@ async function fixture(
         <button onclick="document.querySelector('#menu').hidden=false">Create question</button>
         <div id="menu" hidden><button onclick="openQuestion(false)">Multiple choice</button></div>
         <table id="referencesTable"><tbody></tbody></table>
+        <div id="delete-question-modal" role="dialog" aria-label="Delete" hidden>
+          <p>Do you really want to delete this question?</p>
+          <button onclick="document.querySelector('#delete-question-modal').hidden=true">Cancel</button>
+          <button onclick="confirmQuestionDelete()">Delete</button>
+        </div>
         <div id="qb-question-authoring-modal" hidden></div>
         <script>
           window.saves=[];
+          window.pendingQuestionDelete=null;
           function row(title) {
             const tr = document.createElement('tr');
-            tr.innerHTML='<td><span class="fw-semibold"></span></td><td><input class="max-mark-input" value="1"></td><td><button class="text-danger" onclick="toggleQuestionRequired(this)">Answer required</button><button class="edit-reference-link" onclick="openQuestion(true)">Edit</button></td>';
+            tr.innerHTML='<td><span class="fw-semibold"></span></td><td><input class="max-mark-input" value="1"></td><td><button class="text-danger" onclick="toggleQuestionRequired(this)">Answer required</button><button class="edit-reference-link" onclick="openQuestion(true)">Edit</button><button class="delete-reference-link" aria-label="Delete" onclick="askQuestionDelete(this)">Delete</button></td>';
             tr.querySelector('span').textContent=title;
             return tr;
+          }
+          function askQuestionDelete(button) {
+            window.pendingQuestionDelete=button.closest('tr');
+            document.querySelector('#delete-question-modal').hidden=false;
+          }
+          function confirmQuestionDelete() {
+            window.pendingQuestionDelete?.remove();
+            window.pendingQuestionDelete=null;
+            document.querySelector('#delete-question-modal').hidden=true;
           }
           // Mirrors LAMS: the stored value comes back from the server, and the class is
           // only stamped when the reply matches what the handler predicted.
@@ -103,7 +118,7 @@ async function fixture(
             content:CKEDITOR.instances.description.data,feedback:CKEDITOR.instances.feedback?.data,
             answers:Array.from(document.querySelectorAll('.single-option-table')).map((_,i)=>CKEDITOR.instances['optionName'+i].data)};
           if(!data.title || !data.content || data.answers.some(a=>!a))throw Error('Incomplete question');
-          if(${syncPromptOnQuestionSave} && !confirm("You've made edits to the questions. Sync with the matching tRAT?")) return;
+          if(${syncPromptOnQuestionSave} && !confirm("You've made edits to the questions in this activity. Would you like to sync these changes with the corresponding TBL RAT activity?")) return;
           parent.saved(data,${editing});
         }
       </script>` });
@@ -146,6 +161,14 @@ test('existing questions still require Save as new version', async ({ page }) =>
   expect(await page.evaluate(() => (window as unknown as { saves: {version:boolean}[] }).saves.map(s=>s.version))).toEqual([true]);
 });
 
+test('deletes one exact iRAT question only after confirming the verified dialog', async ({ page }) => {
+  const editor = await fixture(page, true);
+  await editor.deleteQuestion('Question 1');
+  await expect(page.locator('#referencesTable tbody tr')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Delete', exact: true })).toBeHidden();
+  await expect(editor.deleteQuestion('Question 1')).rejects.toThrow('before deletion');
+});
+
 for (const existing of [false, true]) {
   test(`confirms the tRAT sync prompt raised by an ${existing ? 'existing' : 'new'} question save`, async ({ page }) => {
     const editor = await fixture(page, existing, true, 'value => value', 0, true);
@@ -156,7 +179,7 @@ for (const existing of [false, true]) {
     if (existing) await editor.updateQuestion(question);
     else await editor.createQuestion(question);
     expect(editor.confirmedDialogs).toEqual([
-      "You've made edits to the questions. Sync with the matching tRAT?"
+      "You've made edits to the questions in this activity. Would you like to sync these changes with the corresponding TBL RAT activity?"
     ]);
     expect(await page.evaluate(() => (window as unknown as { saves: unknown[] }).saves)).toHaveLength(1);
   });
@@ -216,6 +239,67 @@ test('tRAT Print View formatting check detects a lost inline tag', () => {
     '<em>lac</em>'
   ]);
   expect(missingInlineFormatting(printable, 'H<sub>2</sub>O')).toEqual([]);
+});
+
+test('tRAT inventory repair permits only an exact missing suffix', () => {
+  const questions = ['Question 1', 'Question 2', 'Question 3'].map(title => ({
+    title, type: 'multiple-choice', marks: 1, content: title, mandatory: true, answers: []
+  }));
+  expect(missingTratQuestionSuffix(['Question 1'], questions).map(question => question.title)).toEqual([
+    'Question 2', 'Question 3'
+  ]);
+  expect(() => missingTratQuestionSuffix(['Question 2'], questions)).toThrow('inventory/order did not match');
+  expect(() => missingTratQuestionSuffix(['Question 1', 'Unexpected'], questions)).toThrow('inventory/order did not match');
+  expect(() => missingTratQuestionSuffix(['Question 1', 'Question 2', 'Question 3'], questions)).toThrow('inventory/order did not match');
+});
+
+test('Question Bank searches use a stable plain-text fragment', () => {
+  expect(questionBankSearchTerm('A sample contains 10<sup>9</sup> drug molecules. Which fraction is generally available to cross membranes?'))
+    .toBe('Which fraction is generally available to cross membranes');
+  expect(() => questionBankSearchTerm('1 + 1 = 2')).toThrow('no stable plain-text fragment');
+});
+
+test('reads the selected Question Bank version UID from a LAMS version action', () => {
+  expect(questionVersionUid('javascript:changeItemQuestionVersion(17, 76784, 76759); return false;')).toBe('76759');
+  expect(questionVersionUid('not a version action')).toBeUndefined();
+});
+
+test('tRAT reconciliation selects the exact current iRAT version instead of the last offered version', async ({ page }) => {
+  await page.setContent(`
+    <div id="scratchieItemsList">
+      <div class="scratchie-item-list-item">
+        <span class="fw-semibold text-break">Question 1</span>
+        <button class="dropdown-toggle">Version 14</button>
+        <button aria-label="There is a newer version of this question"></button>
+        <button class="dropdown-item" onclick="changeItemQuestionVersion(1, 100, 1500)">Version 15</button>
+        <button class="dropdown-item" onclick="changeItemQuestionVersion(1, 100, 9900)">Version 99</button>
+      </div>
+    </div>
+    <script>
+      window.changeItemQuestionVersion = (_item, _family, version) => {
+        if (version !== 1500) throw new Error('Wrong version selected');
+        document.querySelector('.dropdown-toggle').textContent = 'Version 15';
+        document.querySelector('[aria-label="There is a newer version of this question"]').remove();
+      };
+    </script>
+  `);
+  const editor = new LamsIratEditor(page, request, 1500);
+  const reconcile = editor as unknown as {
+    selectCurrentIratVersionsInTrat: (
+      frame: Page['mainFrame'] extends () => infer T ? T : never,
+      rows: ReturnType<Page['locator']>,
+      modern: boolean,
+      references: Map<string, { baseUid: string; currentUid: string; currentLabel: string }>
+    ) => Promise<void>;
+  };
+  await reconcile.selectCurrentIratVersionsInTrat(
+    page.mainFrame(),
+    page.locator('#scratchieItemsList .scratchie-item-list-item'),
+    true,
+    new Map([['Question 1', { baseUid: '100', currentUid: '1500', currentLabel: 'Version 15' }]])
+  );
+  await expect(page.locator('.dropdown-toggle')).toHaveText('Version 15');
+  await expect(page.getByRole('button', { name: 'There is a newer version of this question', exact: true })).toHaveCount(0);
 });
 
 // Activity-level settings mirror the observed card layout: everything sits behind

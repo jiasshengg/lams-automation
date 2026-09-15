@@ -106,6 +106,21 @@ test('accepts changing iRAT content as a per-run request', async () => {
   expect(config.irat?.questions[0]?.answers.filter((answer) => answer.correct).map((answer) => answer.weight)).toEqual([60, 40]);
 });
 
+test('accepts exact iRAT deletion titles and rejects ambiguous deletion requests', async () => {
+  const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
+  const accepted = await loadConfig('configs/example.json', {
+    irat: { ...base.irat, deleteQuestionTitles: ['Placeholder Q1', 'Placeholder Q2'] }
+  });
+  expect(accepted.irat?.deleteQuestionTitles).toEqual(['Placeholder Q1', 'Placeholder Q2']);
+
+  await expect(loadConfig('configs/example.json', {
+    irat: { ...base.irat, deleteQuestionTitles: ['Placeholder', ' Placeholder '] }
+  })).rejects.toThrow('Duplicate iRAT deletion title');
+  await expect(loadConfig('configs/example.json', {
+    irat: { ...base.irat, deleteQuestionTitles: [base.irat.questions[0].title] }
+  })).rejects.toThrow('cannot be both requested and deleted');
+});
+
 test('rejects iRAT correct-answer weights that do not total 100', async () => {
   const base = JSON.parse(await (await import('node:fs/promises')).readFile('configs/example.json', 'utf8'));
   base.irat.questions[0].answers[0].weight = 80;

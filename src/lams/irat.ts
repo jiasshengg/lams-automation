@@ -45,6 +45,7 @@ export interface IratEditor {
   inspect(): Promise<IratObservedState>;
   updateGate(gate: IratRequest['gate']): Promise<void>;
   associateWithTeamSetup(teamSetupName: string): Promise<void>;
+  deleteQuestion(title: string): Promise<void>;
   updateQuestion(question: IratQuestionRequest): Promise<void>;
   createQuestion(question: IratQuestionRequest): Promise<void>;
   applyAnswerRequired(questions: IratQuestionRequest[]): Promise<string[]>;
@@ -56,6 +57,7 @@ export interface IratEditor {
 export interface IratAutomationResult {
   committed: boolean;
   readiness: IratReadinessReport;
+  deletedQuestions: string[];
   updatedQuestions: string[];
   createdQuestions: string[];
 }
@@ -115,6 +117,13 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
       action: `Associate ${request.activityName} with ${request.teamSetupName}`
     }
   ];
+  for (const title of request.deleteQuestionTitles ?? []) {
+    steps.push({
+      phase: 'question',
+      questionTitle: title,
+      action: `Delete the exact existing iRAT question reference "${title}" after confirming the LAMS deletion dialog`
+    });
+  }
   request.questions.forEach((question) => {
     steps.push({
       phase: 'question',
@@ -147,13 +156,26 @@ export async function executeIratAutomation(
   if (!readiness.passed) {
     throw new Error(`iRAT preflight failed: ${readiness.checks.filter((check) => !check.passed).map((check) => check.detail).join('; ')}`);
   }
-  if (!options.commit) return { committed: false, readiness, updatedQuestions: [], createdQuestions: [] };
+  if (!options.commit) return { committed: false, readiness, deletedQuestions: [], updatedQuestions: [], createdQuestions: [] };
 
   await editor.updateGate(request.gate);
   await editor.associateWithTeamSetup(request.teamSetupName);
+  const deletionTitles = new Set((request.deleteQuestionTitles ?? []).map(normalizeQuestionTitle));
+  const deletedQuestions: string[] = [];
+  for (const title of request.deleteQuestionTitles ?? []) {
+    const matches = observed.questions.filter((question) => normalizeQuestionTitle(question.title) === normalizeQuestionTitle(title));
+    if (matches.length === 1) {
+      await editor.deleteQuestion(title);
+      deletedQuestions.push(title);
+    }
+  }
   const updatedQuestions: string[] = [];
   const createdQuestions: string[] = [];
-  const existingTitles = new Set(observed.questions.map((question) => normalizeQuestionTitle(question.title)));
+  const existingTitles = new Set(
+    observed.questions
+      .map((question) => normalizeQuestionTitle(question.title))
+      .filter((title) => !deletionTitles.has(title))
+  );
   for (const question of request.questions) {
     if (existingTitles.has(normalizeQuestionTitle(question.title))) {
       await editor.updateQuestion(question);
@@ -167,7 +189,7 @@ export async function executeIratAutomation(
   await editor.updateAdvancedSettings(request.advanced);
   await editor.verifyPrintView(request);
   await editor.save();
-  return { committed: true, readiness, updatedQuestions, createdQuestions };
+  return { committed: true, readiness, deletedQuestions, updatedQuestions, createdQuestions };
 }
 
 export function requireIratRequest(config: LamsConfig): IratRequest {
@@ -204,16 +226,54 @@ function validateObservedState(observed: IratObservedState, request: IratRequest
     }
   ];
   const requestedTitles = request.questions.map((question) => normalizeQuestionTitle(question.title));
+  const deletionTitles = (request.deleteQuestionTitles ?? []).map(normalizeQuestionTitle);
   checks.push({
     label: 'Unique requested question titles',
     passed: new Set(requestedTitles).size === requestedTitles.length,
     detail: 'Requested question titles must be unique after whitespace normalization'
   });
+  checks.push({
+    label: 'Unique deletion question titles',
+    passed: new Set(deletionTitles).size === deletionTitles.length,
+    detail: 'Explicit deletion titles must be unique after whitespace normalization'
+  });
+  const unexpectedTitles = observed.questions
+    .map((question) => normalizeQuestionTitle(question.title))
+    .filter((title) => !requestedTitles.includes(title) && !deletionTitles.includes(title));
+  checks.push({
+    label: 'Unexpected existing questions',
+    passed: unexpectedTitles.length === 0,
+    detail: unexpectedTitles.length === 0
+      ? 'No unapproved extra question rows were found'
+      : `Stopped before writes. Report these exact extra question titles to the user and request an explicit instruction for each one: ${unexpectedTitles.map((title) => `"${title}"`).join(', ')}. Ask whether each question should be kept completely untouched; updated while keeping its current title; updated and renamed with an exact new title; deleted; or handled according to another exact instruction. Do not continue or infer an action until the user answers.`
+  });
+  for (const title of deletionTitles) {
+    const matches = observed.questions.filter((question) => normalizeQuestionTitle(question.title) === title);
+    const overlapsRequest = requestedTitles.includes(title);
+    checks.push({
+      label: `Delete question — ${title}`,
+      passed: matches.length <= 1 && !overlapsRequest,
+      detail: overlapsRequest
+        ? `Question "${title}" cannot be both requested and deleted`
+        : matches.length > 1
+          ? `Question "${title}" has ${matches.length} matches; deletion target is ambiguous`
+          : matches.length === 1
+            ? `Found exactly one explicitly authorized question reference to delete`
+            : `Question "${title}" is already absent`
+    });
+  }
   for (const question of observed.questions) {
+    const normalizedTitle = normalizeQuestionTitle(question.title);
+    const requested = requestedTitles.includes(normalizedTitle);
+    const authorizedDeletion = deletionTitles.includes(normalizedTitle);
     checks.push({
       label: `Existing question — ${question.title}`,
-      passed: requestedTitles.includes(normalizeQuestionTitle(question.title)),
-      detail: `Existing question "${question.title}" must be included in the complete request; deletion is unsupported`
+      passed: requested || authorizedDeletion,
+      detail: requested
+        ? `Existing question "${question.title}" is included in the complete request`
+        : authorizedDeletion
+          ? `Existing question "${question.title}" is explicitly authorized for deletion`
+          : `Existing question "${question.title}" must be included in the complete request or explicitly authorized for deletion`
     });
   }
   for (const question of request.questions) {

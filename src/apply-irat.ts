@@ -44,6 +44,7 @@ async function main(): Promise<void> {
     console.log('\niRAT application: COMPLETE');
     console.log(`Lesson: ${config.lessonTitle}`);
     console.log(`Folder: ${config.destinationFolderPath.join(' > ')}`);
+    console.log(`Questions deleted (${result.deletedQuestions.length}): ${result.deletedQuestions.join(', ')}`);
     console.log(`Questions updated (${result.updatedQuestions.length}): ${result.updatedQuestions.join(', ')}`);
     console.log(`Questions created (${result.createdQuestions.length}): ${result.createdQuestions.join(', ')}`);
     console.log(`Question images imported: ${[...questionImages.values()].reduce((sum, images) => sum + images.length, 0)}`);

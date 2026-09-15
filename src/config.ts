@@ -86,6 +86,8 @@ export interface IratQuestionRequest {
 export interface IratRequest {
   /** Optional DOCX whose embedded images are assigned to questions by question number/order. */
   sourceDocx?: string;
+  /** Exact existing iRAT question titles the user explicitly authorizes removing. */
+  deleteQuestionTitles?: string[];
   gate: {
     name: string;
     description: string;
@@ -409,6 +411,25 @@ function validateIratRequest(value: unknown): void {
       throw new Error(`Correct answer weights must total 100 in iRAT question "${question.title}"; found ${correctWeight}.`);
     }
   });
+  if (value.deleteQuestionTitles !== undefined) {
+    if (!Array.isArray(value.deleteQuestionTitles)) {
+      throw new Error('irat.deleteQuestionTitles must be an array.');
+    }
+    const deletionTitles = new Set<string>();
+    value.deleteQuestionTitles.forEach((title, index) => {
+      if (typeof title !== 'string' || title.trim() === '') {
+        throw new Error(`irat.deleteQuestionTitles[${index}] must be a non-empty string.`);
+      }
+      const normalized = title.replace(/\s+/g, ' ').trim();
+      if (deletionTitles.has(normalized)) {
+        throw new Error(`Duplicate iRAT deletion title: "${title}".`);
+      }
+      if ([...titles].some((requestedTitle) => requestedTitle.replace(/\s+/g, ' ').trim() === normalized)) {
+        throw new Error(`iRAT question "${title}" cannot be both requested and deleted.`);
+      }
+      deletionTitles.add(normalized);
+    });
+  }
   if (value.sourceDocx !== undefined && (typeof value.sourceDocx !== 'string' || value.sourceDocx.trim() === '')) {
     throw new Error('irat.sourceDocx must be a non-empty string when provided.');
   }
