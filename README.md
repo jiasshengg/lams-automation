@@ -40,10 +40,11 @@ The shared LAMS URL defaults to `https://ilams.lamsinternational.com/lams/index.
 Use read-only discovery with partial details:
 
 ```bash
-npm run discover:lessons -- --config configs/local.json --request-json '{"workspaceCourse":"Your course name"}' --query 'FOM TBL06 2025'
+npm run discover:lessons -- --config configs/local.json --query 'FOM TBL06 2025'
+npm run discover:lessons -- --config configs/local.json --exact-title '[Jss-Demo-Test]'
 ```
 
-The command selects the configured/requested course and searches the global Authoring library under `Courses`, including accessible folders outside that course. Every search term must occur in the lesson title or its folder path (case-insensitive). Omit `--query` to list all lessons, or use `--roots 'Exact folder A|Exact folder B'` to restrict the search to direct child folders under `Courses`. There is no hardcoded playground folder.
+The command opens the global Authoring library directly and searches under `Courses`. Every search term must occur in the lesson title or its folder path (case-insensitive); `--exact-title` checks title equality instead. Omit both search options to list all lessons, or use `--roots 'Exact folder A|Exact folder B'` to restrict the search to direct child folders under `Courses`. There is no hardcoded playground folder.
 
 Results contain the exact `sourceLessonTitle` and `sourceFolderPath` needed by later commands. The agent resolves these for the user; multiple plausible matches require a choice. Discovery never opens or changes a lesson. Traversal is limited to 1000 folder expansions by default; `--max-expansions` changes the limit. A limit, unknown tree state, or missing root produces an error and diagnostics rather than a misleading complete result.
 

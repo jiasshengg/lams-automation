@@ -33,6 +33,8 @@ Omit `--dry-run` to perform the requested rename. It updates the inline title, u
 
 ## Inspection and validation
 
+Global read-only lesson discovery opens Author directly without selecting a workspace course, because the Authoring library is global. Lesson-specific inspection and every mutation still verify `workspaceCourse` first.
+
 `npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'` prints SVG/runtime node information and transitions without modifying the graph.
 
 `npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'` may exit with code `2` for a validly executed inspection whose expectations failed. Treat that as a validation result, not an automation crash. Report every failed check.

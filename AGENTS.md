@@ -6,7 +6,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
 
 ## LAMS safety boundary
 
-- Find, open, and verify the course specified by `workspaceCourse` before opening the Author interface.
+- Before lesson-specific inspection or mutation, find, open, and verify the course specified by `workspaceCourse` before opening the Author interface. Global read-only Authoring-library discovery may open Author directly because selecting a course does not scope that library.
 - Treat navigation and DOM inspection as read-only.
 - When a lesson is in scope for a requested workflow, automatically fix any supported, verified issues found within that lesson; the user does not need to request the fixes separately. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
 - Automatically remove exact gate-bypass transitions and replace exact planned AE gates whose verified type/settings are wrong. Delete or rewire only elements that the reviewed plan proves must change; never infer that unrelated nodes are extra.

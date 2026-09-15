@@ -4,7 +4,7 @@ import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './confi
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { discoverLessons } from './lams/lesson-discovery.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
+import { openLams } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   if (process.argv.includes('--commit')) throw new Error('discover:lessons is read-only and does not accept --commit.');
@@ -13,17 +13,20 @@ async function main(): Promise<void> {
   if (!Number.isInteger(maxExpansions) || maxExpansions < 1) throw new Error('--max-expansions must be a positive integer.');
   const roots = readArgument('--roots')?.split('|').map(root => root.trim()).filter(Boolean);
   if (roots && !roots.length) throw new Error('--roots must contain at least one folder name.');
+  const query = readArgument('--query');
+  const exactTitle = readArgument('--exact-title');
+  if (query !== undefined && exactTitle !== undefined) throw new Error('Use either --query or --exact-title, not both.');
   const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;
   try {
     await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     const candidates = await discoverLessons(activePage, {
       ...(roots ? { roots } : {}),
-      query: readArgument('--query') ?? '',
+      query: query ?? '',
+      ...(exactTitle !== undefined ? { exactTitle } : {}),
       maxExpansions,
       timeoutMs: config.browser.actionTimeoutMs,
       onProgress: message => console.log(message)

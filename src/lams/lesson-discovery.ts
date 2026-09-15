@@ -5,6 +5,8 @@ export interface DiscoveryOptions {
   roots?: string[];
   /** Every whitespace-separated term must occur in the title or folder path. */
   query?: string;
+  /** When supplied, return only lessons whose title exactly matches this value. */
+  exactTitle?: string;
   maxExpansions?: number;
   timeoutMs: number;
   onProgress?: (message: string) => void;
@@ -72,74 +74,80 @@ function queryTerms(query: string | undefined): string[] {
   return (query ?? '').toLocaleLowerCase().split(/\s+/).filter(Boolean);
 }
 
-function matchesQuery(candidate: LessonCandidate, terms: string[]): boolean {
+function matchesCandidate(candidate: LessonCandidate, terms: string[], exactTitle: string | undefined): boolean {
   const searchable = [...candidate.sourceFolderPath, candidate.sourceLessonTitle].join(' ').toLocaleLowerCase();
-  return terms.every(term => searchable.includes(term));
+  return terms.every(term => searchable.includes(term)) &&
+    (exactTitle === undefined || candidate.sourceLessonTitle.toLocaleLowerCase() === exactTitle);
 }
 
 /**
- * Reads the native folder-content endpoint used by LAMS's lazy Authoring tree in
- * bounded parallel batches. This preserves complete traversal without serially
- * clicking and waiting for hundreds of unrelated folders to render. It returns
- * undefined on older pages without the observed LAMS_URL global so the verified
- * DOM traversal remains available as a fallback.
+ * Traverse LAMS's observed lazy-folder endpoint one request at a time. The server
+ * has returned HTML under burst traffic, so this deliberately avoids Promise.all.
+ * Any non-JSON response abandons the shortcut before returning results and lets
+ * the verified DOM traversal take over.
  */
 async function discoverWithFolderApi(
   page: Page,
   options: DiscoveryOptions,
-  terms: string[]
+  terms: string[],
+  exactTitle: string | undefined
 ): Promise<LessonCandidate[] | undefined> {
   const lamsUrl = await page.evaluate(() => (window as Window & { LAMS_URL?: unknown }).LAMS_URL);
   if (typeof lamsUrl !== 'string' || !lamsUrl.trim()) return undefined;
   const baseUrl = new URL(lamsUrl, page.url());
-  if (baseUrl.origin !== new URL(page.url()).origin) {
-    throw new Error('The native folder-content URL is not same-origin with the Authoring page.');
-  }
+  if (baseUrl.origin !== new URL(page.url()).origin) return undefined;
   const limit = options.maxExpansions ?? 1000;
   let requests = 0;
-  async function getFolderBatch(folderIDs: Array<number | null>): Promise<FolderContentsResponse[]> {
-    if ((requests += folderIDs.length) > limit) {
+
+  async function getFolder(folderID: number | null): Promise<FolderContentsResponse | undefined> {
+    if (++requests > limit) {
       throw new Error('Discovery expansion budget exhausted; results are incomplete. Narrow --roots or increase --max-expansions.');
     }
-    const urls = folderIDs.map(folderID => {
-      const url = new URL('home/getFolderContents.do', baseUrl);
-      if (folderID !== null) url.searchParams.set('folderID', String(folderID));
-      url.searchParams.set('allowInvalidDesigns', 'true');
-      return url.toString();
-    });
-    const responses = await page.evaluate(async ({ requestUrls, timeoutMs }) => Promise.all(requestUrls.map(async requestUrl => {
+    const url = new URL('home/getFolderContents.do', baseUrl);
+    url.searchParams.set('folderID', folderID === null ? '' : String(folderID));
+    url.searchParams.set('allowInvalidDesigns', 'true');
+    const response = await page.evaluate(async ({ requestUrl, timeoutMs }) => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await fetch(requestUrl, { credentials: 'same-origin', signal: controller.signal });
-        return { ok: response.ok, status: response.status, statusText: response.statusText, body: await response.json() as unknown };
+        const result = await fetch(requestUrl, { credentials: 'same-origin', signal: controller.signal });
+        return {
+          ok: result.ok,
+          status: result.status,
+          contentType: result.headers.get('content-type') ?? '',
+          text: await result.text()
+        };
       } finally {
         clearTimeout(timeout);
       }
-    })), { requestUrls: urls, timeoutMs: options.timeoutMs });
-    return responses.map(response => {
-      if (!response.ok) throw new Error(`LAMS discovery request failed (${response.status} ${response.statusText}).`);
-      const body = response.body as FolderContentsResponse;
-      if ((body.folders !== undefined && !Array.isArray(body.folders)) ||
-        (body.learningDesigns !== undefined && !Array.isArray(body.learningDesigns))) {
-        throw new Error('LAMS folder discovery returned an unrecognised response.');
-      }
-      body.folders ??= [];
-      body.learningDesigns ??= [];
-      return body;
-    });
+    }, { requestUrl: url.toString(), timeoutMs: options.timeoutMs });
+    if (!response.ok) throw new Error(`LAMS discovery request failed (${response.status}).`);
+    if (!response.contentType.toLocaleLowerCase().includes('json')) return undefined;
+    let body: FolderContentsResponse;
+    try {
+      body = JSON.parse(response.text) as FolderContentsResponse;
+    } catch {
+      return undefined;
+    }
+    if ((body.folders !== undefined && !Array.isArray(body.folders)) ||
+      (body.learningDesigns !== undefined && !Array.isArray(body.learningDesigns))) return undefined;
+    body.folders ??= [];
+    body.learningDesigns ??= [];
+    return body;
   }
 
-  const [topLevel] = await getFolderBatch([null]);
-  const courses = topLevel!.folders!.filter(folder => folder.name === 'Courses');
+  const topLevel = await getFolder(null);
+  if (!topLevel) return undefined;
+  const courses = topLevel.folders!.filter(folder => folder.name === 'Courses');
   if (courses.length !== 1) throw new Error(`Expected one top-level Courses folder; found ${courses.length}.`);
   const coursesEntry = { id: courses[0]!.folderID, path: ['Courses'] };
   let queue: Array<{ id: number; path: string[] }> = [coursesEntry];
   if (options.roots?.length) {
-    const [courseContents] = await getFolderBatch([coursesEntry.id]);
+    const courseContents = await getFolder(coursesEntry.id);
+    if (!courseContents) return undefined;
     queue = [];
     for (const root of options.roots) {
-      const matches = courseContents!.folders!.filter(folder => folder.name === root);
+      const matches = courseContents.folders!.filter(folder => folder.name === root);
       if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
       queue.push({ id: matches[0]!.folderID, path: ['Courses', root] });
     }
@@ -147,36 +155,26 @@ async function discoverWithFolderApi(
 
   const candidates = new Map<number, LessonCandidate>();
   const visited = new Set<number>();
-  let nextProgress = 50;
   while (queue.length > 0) {
-    const batch = queue.splice(0, 16).filter(entry => !visited.has(entry.id));
-    if (batch.length === 0) continue;
-    batch.forEach(entry => visited.add(entry.id));
-    const contents = await getFolderBatch(batch.map(entry => entry.id));
-    for (let index = 0; index < batch.length; index += 1) {
-      const entry = batch[index]!;
-      const content = contents[index]!;
-      for (const design of content.learningDesigns!) {
-        if (typeof design.name !== 'string' || !Number.isInteger(design.learningDesignId)) {
-          throw new Error('LAMS folder discovery returned an invalid design entry.');
-        }
-        const candidate = { sourceLessonTitle: design.name, sourceFolderPath: entry.path };
-        if (matchesQuery(candidate, terms)) candidates.set(design.learningDesignId, candidate);
+    const entry = queue.shift()!;
+    if (visited.has(entry.id)) continue;
+    visited.add(entry.id);
+    const content = await getFolder(entry.id);
+    if (!content) return undefined;
+    for (const design of content.learningDesigns!) {
+      if (typeof design.name !== 'string' || !Number.isInteger(design.learningDesignId)) {
+        throw new Error('LAMS folder discovery returned an invalid design entry.');
       }
-      for (const folder of content.folders!) {
-        if (typeof folder.name !== 'string' || !Number.isInteger(folder.folderID)) {
-          throw new Error('LAMS folder discovery returned an invalid folder entry.');
-        }
-        queue.push({
-          id: folder.folderID,
-          path: [...entry.path, folder.isRunSequencesFolder ? 'Run sequences' : folder.name]
-        });
+      const candidate = { sourceLessonTitle: design.name, sourceFolderPath: entry.path };
+      if (matchesCandidate(candidate, terms, exactTitle)) candidates.set(design.learningDesignId, candidate);
+    }
+    for (const folder of content.folders!) {
+      if (typeof folder.name !== 'string' || !Number.isInteger(folder.folderID)) {
+        throw new Error('LAMS folder discovery returned an invalid folder entry.');
       }
+      queue.push({ id: folder.folderID, path: [...entry.path, folder.isRunSequencesFolder ? 'Run sequences' : folder.name] });
     }
-    if (visited.size >= nextProgress) {
-      options.onProgress?.(`Scanned ${visited.size} Authoring folders; ${queue.length} queued.`);
-      nextProgress = Math.ceil((visited.size + 1) / 50) * 50;
-    }
+    if (visited.size % 50 === 0) options.onProgress?.(`Scanned ${visited.size} Authoring folders; ${queue.length} queued.`);
   }
   options.onProgress?.(`Completed Authoring scan across ${visited.size} folders.`);
   return [...candidates.values()].sort((a, b) =>
@@ -191,8 +189,10 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: options.timeoutMs });
   const terms = queryTerms(options.query);
-  const apiResults = await discoverWithFolderApi(page, options, terms);
+  const exactTitle = options.exactTitle?.toLocaleLowerCase();
+  const apiResults = await discoverWithFolderApi(page, options, terms, exactTitle);
   if (apiResults) return apiResults;
+  options.onProgress?.('Folder endpoint did not return JSON; continuing with rendered-tree discovery.');
   let expansions = 0;
 
   async function expand(index: number, rows: TreeRow[]): Promise<void> {
@@ -216,6 +216,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
       last = current;
       return stable;
     }, { timeout: options.timeoutMs, intervals: [250, 250, 500] }).toBe(true);
+    options.onProgress?.(`Expanded ${expansions} Authoring folder${expansions === 1 ? '' : 's'}.`);
   }
 
   let rows = await readTree(dialog);
@@ -236,6 +237,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
     if (index < 0) break;
     await expand(index, rows);
   }
-  return rows.filter(row => !row.folder && inScope(row) && terms.every(term => row.path.join(' ').toLocaleLowerCase().includes(term)))
+  return rows.filter(row => !row.folder && inScope(row) &&
+      matchesCandidate({ sourceLessonTitle: row.text, sourceFolderPath: row.path.slice(0, -1) }, terms, exactTitle))
     .map(row => ({ sourceLessonTitle: row.text, sourceFolderPath: row.path.slice(0, -1) }));
 }
