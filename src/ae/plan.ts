@@ -314,7 +314,7 @@ function renderPromptTable(line: string, number: number): string {
   const body = rows
     .map((cells) =>
       `<tr>${cells
-        .map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}${cell.align === null ? '' : ` align="${cell.align}"`}>${cell.html}</td>`)
+        .map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}${cell.align === null ? '' : ` align="${cell.align}"`} style="${TABLE_CELL_STYLE}">${cell.html}</td>`)
         .join('')}</tr>`
     )
     .join('');
@@ -322,10 +322,16 @@ function renderPromptTable(line: string, number: number): string {
   const declared = Number(/^\s*<table\b[^>]*\bwidth=["'](\d{1,4})["']/i.exec(line)?.[1] ?? 0);
   const width = declared > 0 && declared <= MAX_TABLE_WIDTH_PX ? String(declared) : '100%';
   // border/cellpadding/cellspacing reproduce Word's TableGrid style: single ruled lines throughout.
-  return `<table border="1" cellpadding="4" cellspacing="0" width="${width}">${body}</table>`;
+  return `<table border="1" cellpadding="4" cellspacing="0" width="${width}" style="${TABLE_STYLE}">${body}</table>`;
 }
 
 const MAX_TABLE_WIDTH_PX = 1200;
+// LAMS's components.css sets `td { border-width: 0 }`, which overrides the border attribute and
+// leaves only the outer frame, so Word's TableGrid lines are written as inline styles. Padding,
+// top alignment and line height follow Word's default cell margins and single line spacing.
+// The font is deliberately left unset so tables use the LAMS site default, not the SoT's font.
+const TABLE_STYLE = 'border-collapse:collapse;border:1px solid #000';
+const TABLE_CELL_STYLE = 'border:1px solid #000;padding:0 7px;vertical-align:top;line-height:1.15';
 
 const MARK_ANNOTATION = /\[\s*(?:\d+|x)\s+marks?\s*\]/gi;
 const BLANK_LINE = '<div><br></div>';

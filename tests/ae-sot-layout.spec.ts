@@ -199,6 +199,10 @@ test('a line holding only a mark annotation is removed rather than left as a bla
   );
 });
 
+// LAMS's components.css zeroes td border-width, so Word's TableGrid lines must be inline styles.
+const TABLE = 'border-collapse:collapse;border:1px solid #000';
+const CELL = 'border:1px solid #000;padding:0 7px;vertical-align:top;line-height:1.15';
+
 test('a table keeps the width and cell alignment the document gives it', () => {
   const cell = (text: string, twips: number, center = false) =>
     `<w:tc><w:tcPr><w:tcW w:w="${twips}" w:type="dxa"/></w:tcPr><w:p>${center ? '<w:pPr><w:jc w:val="center"/></w:pPr>' : ''}<w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
@@ -218,7 +222,7 @@ test('a table keeps the width and cell alignment the document gives it', () => {
     gates: []
   });
   expect(plan.nodes[0]!.questions[0]!.promptHtml).toContain(
-    '<table border="1" cellpadding="4" cellspacing="0" width="600"><tr><td width="33%" align="center">Route</td><td width="67%">Dose</td></tr></table>'
+    `<table border="1" cellpadding="4" cellspacing="0" width="600" style="${TABLE}"><tr><td width="33%" align="center" style="${CELL}">Route</td><td width="67%" style="${CELL}">Dose</td></tr></table>`
   );
 });
 
@@ -233,7 +237,7 @@ test('a reviewed table keeps only a sane width and a centre or right alignment',
     gates: []
   });
   const html = plan.nodes[0]!.questions[0]!.promptHtml;
-  expect(html).toContain('<table border="1" cellpadding="4" cellspacing="0" width="100%"><tr><td>A</td><td align="right">B</td></tr></table>');
+  expect(html).toContain(`<table border="1" cellpadding="4" cellspacing="0" width="100%" style="${TABLE}"><tr><td style="${CELL}">A</td><td align="right" style="${CELL}">B</td></tr></table>`);
 });
 
 test('places each figure in the slot the document printed it in', () => {

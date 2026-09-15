@@ -277,6 +277,9 @@ test('uses the spelling LAMS gives each toolkit template', () => {
   expect(TEMPLATE_LIBRARY_TITLES.Assessment).toBe('Assessment');
 });
 
+// The grid style the renderer writes on every cell, because LAMS's stylesheet zeroes td borders.
+const CELL = 'border:1px solid #000;padding:0 7px;vertical-align:top;line-height:1.15';
+
 test('carries a Source-of-Truth table into the prompt as a table', () => {
   const plan = buildAEPlan({
     sourceLabel: 'Clinical Pharmacokinetics',
@@ -295,8 +298,8 @@ test('carries a Source-of-Truth table into the prompt as a table', () => {
   const html = plan.nodes[0]!.questions[0]!.promptHtml;
   // Every cell is a td: Word styles its header row with bold runs, not a th, so it stays
   // left-aligned, and the document's column proportions carry over.
-  expect(html).toContain('<tr><td width="34%"><strong>Parameter</strong></td><td width="66%">Finding</td></tr>');
-  expect(html).toContain('<tr><td>Body weight</td><td>60 kg</td></tr>');
+  expect(html).toContain(`<tr><td width="34%" style="${CELL}"><strong>Parameter</strong></td><td width="66%" style="${CELL}">Finding</td></tr>`);
+  expect(html).toContain(`<tr><td style="${CELL}">Body weight</td><td style="${CELL}">60 kg</td></tr>`);
   expect(html).not.toContain('<th');
   // The table is its own block, never wrapped in a div or escaped.
   expect(html).not.toContain('&lt;table&gt;');
@@ -319,8 +322,9 @@ test('a reviewed table cannot smuggle styling through its cell attributes', () =
     gates: []
   });
   const html = plan.nodes[0]!.questions[0]!.promptHtml;
-  // The width proportion survives because it is the document's own layout; nothing else does.
-  expect(html).toContain('<td width="34%">Parameter</td>');
-  expect(html).not.toContain('style=');
+  // The width proportion survives because it is the document's own layout; the only style is
+  // the fixed grid the renderer writes itself.
+  expect(html).toContain(`<td width="34%" style="${CELL}">Parameter</td>`);
+  expect(html).not.toContain('color:red');
   expect(html).not.toContain('onclick');
 });
