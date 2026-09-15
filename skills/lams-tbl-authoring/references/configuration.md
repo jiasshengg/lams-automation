@@ -93,7 +93,7 @@ When `irat.sourceDocx` is set, inline formatting also comes from the SoT: before
 
 ## Browser fields
 
-Keep `headless` false during development. Store the persistent profile only under ignored `.playwright/`. The user completes authentication manually when needed.
+Keep `headless` false during development. Store the persistent profile only under ignored `.playwright/`. Configure one stable `browser.userDataDir` per computer and use that exact resolved directory for `npm run setup`, `npm run login:lams`, and all workflow entry points. Do not use a temporary/incognito profile, generate a new profile per run, copy an authenticated profile between computers, or force-kill the browser after login. The user completes authentication manually and chooses **Yes** when Microsoft asks **Stay signed in?** if organisational policy permits. After the authenticated LAMS course-menu control appears, close the Playwright context normally to flush cookies and storage, then verify persistence with a second launch. A repeated Microsoft prompt despite these steps can be required by tenant, Conditional Access, or browser session policy and must be reported rather than bypassed.
 
 For read-only AE inspection, `selectors.aeOpenActivity` is a stable local-environment selector for the Open control shown after selecting one exact AE SVG node. Discover it from authenticated DOM diagnostics; do not infer it from the training video. Keep it in ignored `configs/local.json`, not per-run JSON.
 
