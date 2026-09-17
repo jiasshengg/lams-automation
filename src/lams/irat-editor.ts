@@ -826,6 +826,7 @@ export class LamsIratEditor implements IratEditor {
   /** Reads the exact Question Bank family and selected version for every iRAT row. */
   private async readIratQuestionBankReferences(frame: Frame): Promise<Map<string, QuestionBankReference>> {
     const references = new Map<string, QuestionBankReference>();
+    await waitForReferenceRows(frame, this.request.questions.map((question) => normalizeText(question.title)), this.timeoutMs);
     const snapshots = await snapshotIratReferenceRows(frame.locator('#referencesTable tbody tr'));
     for (const question of this.request.questions) {
       const matches = snapshots.filter(snapshot => snapshot.title === normalizeText(question.title));
@@ -1251,6 +1252,22 @@ export function questionVersionUid(onclick: string): string | undefined {
 /** Reads the exact Question Bank UID exposed by a single-version row's stats action. */
 export function questionStatsUid(onclick: string): string | undefined {
   return /[?&]qbQuestionUid=(\d+)/.exec(onclick)?.[1];
+}
+
+/**
+ * LAMS appends the Assessment reference rows one at a time after the activity frame opens,
+ * and each row's mark input and answer-required toggle land after its title. A snapshot
+ * taken as soon as the table is visible can therefore see a partial table or a row with an
+ * empty controls cell. Wait until the title list is exactly the expected one and every row
+ * carries both controls before reading it.
+ */
+export async function waitForReferenceRows(target: Frame | Page, expectedTitles: string[], timeoutMs: number): Promise<void> {
+  await target.waitForFunction(({ titles, selectors }) => {
+    const rows = Array.from(document.querySelectorAll('#referencesTable tbody tr'));
+    const actual = rows.map((row) => (row.querySelector(selectors.title)?.textContent ?? '').replace(/\s+/g, ' ').trim());
+    if (JSON.stringify(actual) !== JSON.stringify(titles)) return false;
+    return rows.every((row) => row.querySelector(selectors.required) && row.querySelector(selectors.mark));
+  }, { titles: expectedTitles, selectors: { title: QUESTION_TITLE, required: REQUIRED_TOGGLE, mark: MAX_MARK_INPUT } }, { timeout: timeoutMs });
 }
 
 /**

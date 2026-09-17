@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { MAX_MARK_INPUT, QUESTION_TITLE, QUESTION_TYPE_BADGE, readRequiredState, REQUIRED_TOGGLE } from '../src/lams/irat-editor.js';
+import { MAX_MARK_INPUT, QUESTION_TITLE, QUESTION_TYPE_BADGE, readRequiredState, REQUIRED_TOGGLE, waitForReferenceRows } from '../src/lams/irat-editor.js';
 
 interface ReferenceRow {
   title: string;
@@ -144,4 +144,43 @@ test('a toggle carrying neither class family reads as unknown', async ({ page })
   );
 
   expect(await readToggle(page.locator('#referencesTable tbody tr').first())).toBeNull();
+});
+
+test('waitForReferenceRows resolves only once every expected row has rendered its controls', async ({ page }) => {
+  // LAMS appends the reference rows one at a time after the activity frame opens, so a
+  // snapshot taken as soon as the table is visible can catch a row whose controls are
+  // still missing. The wait must hold until the last row is complete.
+  await page.setContent('<table id="referencesTable"><tbody></tbody></table>');
+  const titles = ['Question 1', 'Question 2', 'Question 3'];
+  await page.evaluate((rowTitles) => {
+    const body = document.querySelector('#referencesTable tbody')!;
+    rowTitles.forEach((title, index) => {
+      setTimeout(() => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td><span class="fw-semibold">${title}</span></td><td class="text-end"></td>`;
+        body.appendChild(row);
+        // Controls land in a second pass, as observed in the captured mid-render DOM.
+        setTimeout(() => {
+          row.lastElementChild!.innerHTML =
+            '<input name="maxMark" value="1.0" class="max-mark-input">' +
+            '<button type="button" class="btn btn-sm btn-outline-danger" onclick="javascript:toggleQuestionRequired(this)"></button>';
+        }, 150);
+      }, 100 * (index + 1));
+    });
+  }, titles);
+
+  await waitForReferenceRows(page, titles, 5000);
+
+  const rows = page.locator('#referencesTable tbody tr');
+  expect(await rows.count()).toBe(3);
+  for (let index = 0; index < 3; index += 1) {
+    expect(await rows.nth(index).locator(REQUIRED_TOGGLE).count()).toBe(1);
+  }
+});
+
+test('waitForReferenceRows times out when a row never receives its controls', async ({ page }) => {
+  await page.setContent(
+    '<table id="referencesTable"><tbody><tr><td><span class="fw-semibold">Question 1</span></td><td></td></tr></tbody></table>'
+  );
+  await expect(waitForReferenceRows(page, ['Question 1'], 500)).rejects.toThrow();
 });
