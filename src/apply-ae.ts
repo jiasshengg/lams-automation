@@ -1,6 +1,5 @@
-import path from 'node:path';
+import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { readFile } from 'node:fs/promises';
-import { chromium } from '@playwright/test';
 import { buildAEPlan } from './ae/plan.js';
 import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
@@ -27,7 +26,7 @@ async function main(): Promise<void> {
   // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
   await assertAEPlanMatchesSOT(plan);
   const teamSetup = readArgument('--team-setup') ?? config.irat?.teamSetupName ?? 'Team Setup';
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
+  const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? await context.newPage();
   let activePage = page;

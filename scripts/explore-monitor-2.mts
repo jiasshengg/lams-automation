@@ -1,16 +1,15 @@
+import { launchLamsBrowser } from './setup/browser-profile.mjs';
 /**
  * Confirms the monitoring URL that openMonitorLesson(id) resolves to, by hovering the
  * lesson row (the action buttons only render on hover) and clicking Monitor.
  *
  * Read-only: monitoring is a view, and nothing is edited or submitted.
  */
-import path from 'node:path';
-import { chromium } from '@playwright/test';
 
 const BASE_URL = 'https://ilams.lamsinternational.com/lams/index.do';
 
 async function main(): Promise<void> {
-  const context = await chromium.launchPersistentContext(path.resolve('.playwright/lams-profile'), {
+  const context = await launchLamsBrowser('.playwright/lams-profile', {
     headless: false,
     viewport: null
   });

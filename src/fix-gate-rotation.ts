@@ -1,5 +1,4 @@
-import path from 'node:path';
-import { chromium } from '@playwright/test';
+import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
@@ -17,7 +16,7 @@ async function main(): Promise<void> {
   }
 
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
+  const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;

@@ -1,5 +1,4 @@
-import path from 'node:path';
-import { chromium } from '@playwright/test';
+import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { loadEnvFile } from './load-env.js';
 import { closeAuthoring, openAuthoring } from './lams/authoring.js';
@@ -37,8 +36,8 @@ async function main(): Promise<void> {
     throw new Error(`--slow-mo must be a non-negative number of milliseconds; received "${slowMoArgument}".`);
   }
   if (slowMoMs) console.log(`Slow motion: pausing ${slowMoMs}ms before each action.`);
-  const context = await chromium.launchPersistentContext(
-    path.resolve(config.browser.userDataDir),
+  const context = await launchLamsBrowser(
+    config.browser.userDataDir,
     // Slow motion is only ever useful on a visible browser, so it forces headed mode.
     browserLaunchOptions(config, slowMoMs !== undefined ? { headless: false, slowMoMs } : {})
   );

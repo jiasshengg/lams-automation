@@ -1,3 +1,4 @@
+import { launchLamsBrowser } from './setup/browser-profile.mjs';
 /**
  * Discovery pass for the monitoring step: reads the lesson id straight out of each
  * Monitor link, then opens one to confirm the resulting monitoring URL.
@@ -5,7 +6,6 @@
  * Read-only: monitoring is a view, and nothing is edited or submitted.
  */
 import path from 'node:path';
-import { chromium } from '@playwright/test';
 import { writeSnapshot } from './snapshot.mts';
 
 const BASE_URL = 'https://ilams.lamsinternational.com/lams/index.do';
@@ -26,7 +26,7 @@ const DUMP_ROWS = `(() => {
 })()`;
 
 async function main(): Promise<void> {
-  const context = await chromium.launchPersistentContext(path.resolve('.playwright/lams-profile'), {
+  const context = await launchLamsBrowser('.playwright/lams-profile', {
     headless: false,
     viewport: null
   });

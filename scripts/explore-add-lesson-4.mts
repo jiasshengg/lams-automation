@@ -1,3 +1,4 @@
+import { launchLamsBrowser } from './setup/browser-profile.mjs';
 /**
  * Fourth discovery pass: fills the Advanced tab the way the real workflow does, then
  * advances past Next to capture the Course groupings step.
@@ -5,7 +6,6 @@
  * Stops before the final commit: no lesson is created.
  */
 import path from 'node:path';
-import { chromium } from '@playwright/test';
 import { writeSnapshot } from './snapshot.mts';
 
 const BASE_URL = 'https://ilams.lamsinternational.com/lams/home/addLesson.do?organisationID=509';
@@ -35,7 +35,7 @@ const DUMP = `(() => {
 })()`;
 
 async function main(): Promise<void> {
-  const context = await chromium.launchPersistentContext(path.resolve('.playwright/lams-profile'), {
+  const context = await launchLamsBrowser('.playwright/lams-profile', {
     headless: false,
     viewport: null
   });

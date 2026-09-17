@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { chromium } from '@playwright/test';
+import { launchLamsBrowser, resolveBrowserProfile } from './browser-profile.mjs';
 import { root } from './doctor.mjs';
 import { readBrowserChannel } from './local-config.mjs';
 
@@ -29,33 +29,56 @@ export async function readLoginSettings(configPath = path.join(root, 'configs/lo
     ? Math.max(configuredTimeout, MINIMUM_SETUP_LOGIN_TIMEOUT_MS)
     : MINIMUM_SETUP_LOGIN_TIMEOUT_MS;
 
-  return { baseUrl, userDataDir: path.resolve(root, userDataDir), timeoutMs, channel: readBrowserChannel(configPath) };
+  return { baseUrl, userDataDir: resolveBrowserProfile(userDataDir), timeoutMs, channel: readBrowserChannel(configPath) };
 }
 
-export async function openLamsSignIn() {
-  const settings = await readLoginSettings();
-  const context = await chromium.launchPersistentContext(settings.userDataDir, { headless: false, ...(settings.channel ? { channel: settings.channel } : {}) });
+async function waitForCourseMenu(context, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const page of context.pages()) {
+      if (await page.getByRole('button', { name: 'Toggle course menu', exact: true }).isVisible().catch(() => false)) return true;
+    }
+    if (context.pages().length === 0) throw new Error('The LAMS browser window was closed before sign-in could be verified.');
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+export async function openLamsSignIn({
+  settings: suppliedSettings,
+  launch = launchLamsBrowser,
+  verify = waitForCourseMenu
+} = {}) {
+  const settings = suppliedSettings ?? await readLoginSettings();
+  const options = { headless: false, ...(settings.channel ? { channel: settings.channel } : {}) };
+  const context = await launch(settings.userDataDir, options);
   try {
     const page = context.pages()[0] ?? await context.newPage();
     await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });
     console.log(`Opened LAMS in the automation browser: ${settings.baseUrl}`);
     console.log(`Sign in in the browser window. Setup will wait up to ${Math.round(settings.timeoutMs / 60_000)} minutes.`);
-
-    const deadline = Date.now() + settings.timeoutMs;
-    while (Date.now() < deadline) {
-      for (const candidate of context.pages()) {
-        if (await candidate.getByRole('button', { name: 'Toggle course menu', exact: true }).isVisible().catch(() => false)) {
-          console.log('PASS LAMS sign-in verified. The authenticated automation profile has been saved locally.');
-          return true;
-        }
-      }
-      if (context.pages().length === 0) throw new Error('The LAMS browser window was closed before sign-in could be verified.');
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    console.log('If Microsoft asks "Stay signed in?", choose Yes if organisational policy permits.');
+    if (!await verify(context, settings.timeoutMs)) {
+      throw new Error('LAMS sign-in was not verified before the setup timeout. Run npm run login:lams to try again.');
     }
-    throw new Error('LAMS sign-in was not verified before the setup timeout. Run npm run login:lams to try again.');
+    console.log('PASS LAMS sign-in verified for the current session.');
   } finally {
     await context.close();
   }
+
+  console.log('Checking authentication after browser restart. Please do not sign in during this automatic check.');
+  const restarted = await launch(settings.userDataDir, options);
+  try {
+    const page = restarted.pages()[0] ?? await restarted.newPage();
+    await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });
+    if (!await verify(restarted, 60_000)) {
+      throw new Error(`Authentication was not verified after browser restart. Profile: ${settings.userDataDir}. Run npm run login:lams with the same profile to retry. Microsoft or organisational session policy may require reauthentication.`);
+    }
+  } finally {
+    await restarted.close();
+  }
+  console.log('PASS Authentication persisted across browser restart. Future sign-in or MFA may still be required by organisational policy.');
+  return true;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

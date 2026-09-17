@@ -1,5 +1,5 @@
+import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import path from 'node:path';
-import { chromium } from '@playwright/test';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     throw new Error(`Edit ${path.resolve(configPath)} and set the real LAMS baseUrl before running the rename flow.`);
   }
 
-  const context = await chromium.launchPersistentContext(path.resolve(config.browser.userDataDir), browserLaunchOptions(config));
+  const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;

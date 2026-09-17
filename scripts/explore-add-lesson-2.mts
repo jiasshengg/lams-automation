@@ -1,3 +1,4 @@
+import { launchLamsBrowser } from './setup/browser-profile.mjs';
 /**
  * Second discovery pass over Add Lesson: expands the recently-used-designs panel,
  * selects the most recent design, enables scheduling, and snapshots the fields that
@@ -6,14 +7,13 @@
  * Stops before "Add now": no lesson is created.
  */
 import path from 'node:path';
-import { chromium } from '@playwright/test';
 import { writeSnapshot } from './snapshot.mts';
 
 const BASE_URL = 'https://ilams.lamsinternational.com/lams/home/addLesson.do?organisationID=509';
 const OUT_DIR = path.resolve('artifacts', 'explore2');
 
 async function main(): Promise<void> {
-  const context = await chromium.launchPersistentContext(path.resolve('.playwright/lams-profile'), {
+  const context = await launchLamsBrowser('.playwright/lams-profile', {
     headless: false,
     viewport: null
   });

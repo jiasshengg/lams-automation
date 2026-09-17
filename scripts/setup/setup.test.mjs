@@ -104,3 +104,62 @@ test('Windows launcher runs the bootstrap with a process-scoped execution policy
   const windowsLauncher = readFileSync(path.join(root, 'Setup Windows.cmd'), 'utf8');
   assert.match(windowsLauncher, /-ExecutionPolicy Bypass/);
 });
+
+test('profile resolution is independent of working directory and preserves absolute paths', async () => {
+  const { resolveBrowserProfile } = await import('./browser-profile.mjs');
+  const moduleUrl = new URL('./browser-profile.mjs', import.meta.url).href;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { resolveBrowserProfile } from ${JSON.stringify(moduleUrl)}; console.log(resolveBrowserProfile());`
+  ], { cwd: os.tmpdir(), encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), path.join(root, '.playwright/lams-profile'));
+  const absolute = path.join(os.tmpdir(), 'custom-lams-profile');
+  assert.equal(resolveBrowserProfile(absolute), absolute);
+  assert.throws(() => resolveBrowserProfile(' '), /non-empty path/);
+});
+
+function loginFixture(results, closeFails = false) {
+  const events = [];
+  const settings = { baseUrl: 'https://example.test/lams', userDataDir: path.join(root, '.playwright/lams-profile'), timeoutMs: 300_000, channel: 'chrome' };
+  let launches = 0;
+  return {
+    events,
+    options: {
+      settings,
+      launch: async (profile, options) => {
+        const id = ++launches;
+        assert.equal(profile, settings.userDataDir);
+        assert.deepEqual(options, { headless: false, channel: 'chrome' });
+        events.push(`launch ${id}`);
+        return {
+          id,
+          pages: () => [{ goto: async (url) => { assert.equal(url, settings.baseUrl); events.push(`navigate ${id}`); } }],
+          close: async () => { events.push(`close ${id}`); if (closeFails) throw new Error('close failed'); }
+        };
+      },
+      verify: async (context) => { events.push(`verify ${context.id}`); return results[context.id - 1]; }
+    }
+  };
+}
+
+test('login closes before restarting the same profile and verifies both sessions', async () => {
+  const { openLamsSignIn } = await import('./login.mjs');
+  const fixture = loginFixture([true, true]);
+  assert.equal(await openLamsSignIn(fixture.options), true);
+  assert.deepEqual(fixture.events, ['launch 1', 'navigate 1', 'verify 1', 'close 1', 'launch 2', 'navigate 2', 'verify 2', 'close 2']);
+});
+
+test('failed persistence check closes browser and reports retry without claiming a cookie cause', async () => {
+  const { openLamsSignIn } = await import('./login.mjs');
+  const fixture = loginFixture([true, false]);
+  await assert.rejects(openLamsSignIn(fixture.options), /Authentication was not verified after browser restart.*login:lams/);
+  assert.equal(fixture.events.at(-1), 'close 2');
+});
+
+test('failed initial login or profile flush never starts the restart check', async () => {
+  const { openLamsSignIn } = await import('./login.mjs');
+  for (const fixture of [loginFixture([false]), loginFixture([true], true)]) {
+    await assert.rejects(openLamsSignIn(fixture.options));
+    assert.deepEqual(fixture.events, ['launch 1', 'navigate 1', 'verify 1', 'close 1']);
+  }
+});

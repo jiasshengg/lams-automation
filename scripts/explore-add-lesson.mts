@@ -1,3 +1,4 @@
+import { launchLamsBrowser } from './setup/browser-profile.mjs';
 /**
  * Walks the Add Lesson wizard on the live site and snapshots each step so the index
  * selectors can be written against the real DOM.
@@ -5,14 +6,13 @@
  * Deliberately stops before "Add now": it fills and inspects, but never creates a lesson.
  */
 import path from 'node:path';
-import { chromium } from '@playwright/test';
 import { writeSnapshot } from './snapshot.mts';
 
 const BASE_URL = 'https://ilams.lamsinternational.com/lams/index.do';
 const OUT_DIR = path.resolve('artifacts', 'explore');
 
 async function main(): Promise<void> {
-  const context = await chromium.launchPersistentContext(path.resolve('.playwright/lams-profile'), {
+  const context = await launchLamsBrowser('.playwright/lams-profile', {
     headless: false,
     viewport: null
   });

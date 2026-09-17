@@ -1,3 +1,4 @@
+import { launchLamsBrowser } from './setup/browser-profile.mjs';
 /**
  * Selector discovery probe.
  *
@@ -9,7 +10,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { chromium, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
 
 const BASE_URL = process.argv[2] ?? 'https://ilams.lamsinternational.com/lams/index.do';
 const OUT_DIR = path.resolve('artifacts', 'probe');
@@ -88,7 +89,7 @@ async function snapshot(page: Page, index: number): Promise<void> {
 
 async function main(): Promise<void> {
   await mkdir(OUT_DIR, { recursive: true });
-  const context = await chromium.launchPersistentContext(path.resolve('.playwright/lams-profile'), {
+  const context = await launchLamsBrowser('.playwright/lams-profile', {
     headless: false,
     viewport: null
   });
