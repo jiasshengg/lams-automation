@@ -189,3 +189,22 @@ test('manual input cannot produce a successful unattended verification', async (
   await assert.rejects(openLamsSignIn({ ...fixture.options, checkOnly: true, guard: async () => () => { throw new Error('manual input'); } }), /manual input/);
   assert.equal(fixture.events.at(-1), 'close 1');
 });
+
+test('direct runner preserves arguments with spaces and rejects stripped flags', async () => {
+  const { resolveCommand } = await import('../run.mjs');
+  const command = resolveCommand(['run:tbl', '--request-json', 'requests/my lesson.json', '--repair-json', 'repair.json', '--log-file', 'run.log']);
+  assert.deepEqual(command.args.slice(-4), ['--request-json', 'requests/my lesson.json', '--repair-json', 'repair.json']);
+  assert.equal(command.logFile, 'run.log');
+  assert.throws(() => resolveCommand(['run:tbl', 'configs/local.json']), /lost a flag/);
+  assert.throws(() => resolveCommand(['run:tbl', '--config']), /requires a value/);
+});
+
+test('direct runner propagates failed operation status while saving output', () => {
+  const temporary = mkdtempSync(path.join(os.tmpdir(), 'lams-runner-'));
+  try {
+    const log = path.join(temporary, 'run.log');
+    const result = spawnSync(process.execPath, [path.join(root, 'scripts/run.mjs'), 'repair:ae-placeholder', '--log-file', log], { encoding: 'utf8' });
+    assert.equal(result.status, 1);
+    assert.match(readFileSync(log, 'utf8'), /Supply --repair-json/);
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+});

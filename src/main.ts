@@ -7,7 +7,7 @@ import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse, SelectorRequiredError } from './lams/navigation.js';
 
 async function main(): Promise<void> {
-  const configPath = readArgument('--config') ?? 'configs/example.json';
+  const configPath = readArgument('--config') ?? 'configs/local.json';
   const commit = !process.argv.includes('--dry-run');
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { defaultDestinationToSource: true });
   if (config.baseUrl.includes('replace-with-your-lams-host.example')) {

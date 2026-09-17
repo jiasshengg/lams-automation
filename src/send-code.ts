@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
   let identifier = readArgument('--identifier');
   if (!identifier) {
-    const config = await loadConfig(readArgument('--config') ?? 'configs/example.json', parseRequestOverrides(readArgument('--request-json')));
+    const config = await loadConfig(readArgument('--config') ?? 'configs/local.json', parseRequestOverrides(readArgument('--request-json')));
     identifier = config.lessonTitle;
   }
 

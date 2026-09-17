@@ -12,7 +12,7 @@ import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 loadEnvFile();
 
 async function main(): Promise<void> {
-  const configPath = readArgument('--config') ?? 'configs/example.json';
+  const configPath = readArgument('--config') ?? 'configs/local.json';
   const commit = process.argv.includes('--commit');
   const monitorOnly = process.argv.includes('--monitor-only');
   // Recording the code in the Kanban sheet is the last step of the publishing stage, so it
