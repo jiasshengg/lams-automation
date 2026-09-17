@@ -113,6 +113,41 @@ test('commit applies gate, grouping, questions, answer-required, advanced settin
   ]);
 });
 
+test('resume skips only a question whose immutable live version and request hash still match', async () => {
+  const calls: string[] = [];
+  const editor = fakeEditor(calls);
+  const inspect = editor.inspect.bind(editor);
+  editor.inspect = async () => ({
+    ...await inspect(),
+    questions: [{ title: 'Question 1', type: 'multiple-choice', mandatory: true, currentUid: '103', currentLabel: 'Version 3' }]
+  });
+  const result = await executeIratAutomation(editor, request, {
+    commit: true,
+    resumeQuestions: { 'Question 1': { currentUid: '103', currentLabel: 'Version 3', requestHash: 'same' } },
+    questionHash: () => 'same'
+  });
+  expect(result.resumedQuestions).toEqual(['Question 1']);
+  expect(result.updatedQuestions).toEqual([]);
+  expect(calls).not.toContain('question:Question 1');
+  expect(calls.at(-1)).toBe('save');
+});
+
+test('checkpoint conflict stops before every mutation', async () => {
+  const calls: string[] = [];
+  const editor = fakeEditor(calls);
+  const inspect = editor.inspect.bind(editor);
+  editor.inspect = async () => ({
+    ...await inspect(),
+    questions: [{ title: 'Question 1', type: 'multiple-choice', mandatory: true, currentUid: '104', currentLabel: 'Version 4' }]
+  });
+  await expect(executeIratAutomation(editor, request, {
+    commit: true,
+    resumeQuestions: { 'Question 1': { currentUid: '103', currentLabel: 'Version 3', requestHash: 'same' } },
+    questionHash: () => 'same'
+  })).rejects.toThrow('checkpoint conflict');
+  expect(calls).toEqual(['inspect']);
+});
+
 test('plan includes one versioned update for every configured question', () => {
   const plan = createIratPlan(request);
   expect(plan.filter((step) => step.phase === 'question')).toHaveLength(1);

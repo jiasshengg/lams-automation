@@ -25,6 +25,17 @@ export interface IratObservedQuestion {
   title: string;
   type: string;
   mandatory: boolean;
+  marks?: number;
+  baseUid?: string;
+  currentUid?: string;
+  currentLabel?: string;
+}
+
+export interface IratSavedQuestionReference {
+  title: string;
+  baseUid: string;
+  currentUid: string;
+  currentLabel: string;
 }
 
 export interface IratObservedState {
@@ -46,8 +57,8 @@ export interface IratEditor {
   updateGate(gate: IratRequest['gate']): Promise<void>;
   associateWithTeamSetup(teamSetupName: string): Promise<void>;
   deleteQuestion(title: string): Promise<void>;
-  updateQuestion(question: IratQuestionRequest): Promise<void>;
-  createQuestion(question: IratQuestionRequest): Promise<void>;
+  updateQuestion(question: IratQuestionRequest): Promise<IratSavedQuestionReference | void>;
+  createQuestion(question: IratQuestionRequest): Promise<IratSavedQuestionReference | void>;
   applyAnswerRequired(questions: IratQuestionRequest[]): Promise<string[]>;
   updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void>;
   verifyPrintView(request: IratRequest): Promise<void>;
@@ -60,6 +71,13 @@ export interface IratAutomationResult {
   deletedQuestions: string[];
   updatedQuestions: string[];
   createdQuestions: string[];
+  resumedQuestions: string[];
+}
+
+export interface IratResumeQuestion {
+  currentUid: string;
+  currentLabel: string;
+  requestHash: string;
 }
 
 export async function prepareIratAutomation(page: Page, config: LamsConfig): Promise<IratReadinessReport> {
@@ -149,14 +167,38 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
 export async function executeIratAutomation(
   editor: IratEditor,
   request: IratRequest,
-  options: { commit: boolean }
+  options: {
+    commit: boolean;
+    resumeQuestions?: Record<string, IratResumeQuestion>;
+    questionHash?: (question: IratQuestionRequest) => string;
+    onQuestionSaved?: (question: IratQuestionRequest, reference: IratSavedQuestionReference) => Promise<void>;
+  }
 ): Promise<IratAutomationResult> {
   const observed = await editor.inspect();
   const readiness = validateObservedState(observed, request);
   if (!readiness.passed) {
     throw new Error(`iRAT preflight failed: ${readiness.checks.filter((check) => !check.passed).map((check) => check.detail).join('; ')}`);
   }
-  if (!options.commit) return { committed: false, readiness, deletedQuestions: [], updatedQuestions: [], createdQuestions: [] };
+  if (!options.commit) return { committed: false, readiness, deletedQuestions: [], updatedQuestions: [], createdQuestions: [], resumedQuestions: [] };
+
+  const resumable = new Set<string>();
+  for (const question of request.questions) {
+    const title = normalizeQuestionTitle(question.title);
+    const checkpoint = options.resumeQuestions?.[title];
+    if (!checkpoint) continue;
+    const live = observed.questions.find(candidate => normalizeQuestionTitle(candidate.title) === title);
+    const expectedRequestHash = options.questionHash?.(question);
+    if (
+      !live?.currentUid ||
+      live.currentUid !== checkpoint.currentUid ||
+      (expectedRequestHash !== undefined && expectedRequestHash !== checkpoint.requestHash)
+    ) {
+      throw new Error(
+        `iRAT checkpoint conflict for "${question.title}": the live selected version or resolved request changed; refusing to guess or create another version.`
+      );
+    }
+    resumable.add(title);
+  }
 
   await editor.updateGate(request.gate);
   await editor.associateWithTeamSetup(request.teamSetupName);
@@ -171,25 +213,35 @@ export async function executeIratAutomation(
   }
   const updatedQuestions: string[] = [];
   const createdQuestions: string[] = [];
+  const resumedQuestions: string[] = [];
   const existingTitles = new Set(
     observed.questions
       .map((question) => normalizeQuestionTitle(question.title))
       .filter((title) => !deletionTitles.has(title))
   );
   for (const question of request.questions) {
+    if (resumable.has(normalizeQuestionTitle(question.title))) {
+      resumedQuestions.push(question.title);
+      continue;
+    }
+    let reference: IratSavedQuestionReference | void;
     if (existingTitles.has(normalizeQuestionTitle(question.title))) {
-      await editor.updateQuestion(question);
+      reference = await editor.updateQuestion(question);
       updatedQuestions.push(question.title);
     } else {
-      await editor.createQuestion(question);
+      reference = await editor.createQuestion(question);
       createdQuestions.push(question.title);
+    }
+    if (options.onQuestionSaved) {
+      if (!reference) throw new Error(`Saved question "${question.title}" did not expose a version UID for recovery checkpointing.`);
+      await options.onQuestionSaved(question, reference);
     }
   }
   await editor.applyAnswerRequired(request.questions);
   await editor.updateAdvancedSettings(request.advanced);
   await editor.verifyPrintView(request);
   await editor.save();
-  return { committed: true, readiness, deletedQuestions, updatedQuestions, createdQuestions };
+  return { committed: true, readiness, deletedQuestions, updatedQuestions, createdQuestions, resumedQuestions };
 }
 
 export function requireIratRequest(config: LamsConfig): IratRequest {

@@ -118,7 +118,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
     const xml = paragraph.xml;
     const text = paragraph.text;
     if (text !== '' && paragraph.imageCount === 0) {
-      const caption = isCaption(text) ? paragraph.html : '';
+      const caption = isCaption(text, xml) ? paragraph.html : '';
       for (const pending of awaitingCaption.splice(0)) pending.caption = caption;
     }
     const question = text.match(QUESTION_START);
@@ -185,13 +185,21 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
  * answer options, answer keys, rationales, and new sections all belong to the
  * document structure instead, so an image followed by one of them has no caption.
  */
-export function isCaption(text: string): boolean {
-  return (
+export function isCaption(text: string, paragraphXml = ''): boolean {
+  const structurallyPossible = (
     !QUESTION_START.test(text) &&
     !SECTION_BOUNDARY.test(text) &&
     !/^[A-Z][.)]\s+\S/.test(text) &&
     !/^(?:Answer|Rationale)\b/i.test(text)
   );
+  if (!structurallyPossible) return false;
+  // Unlabelled iRAT options can be plain sentences, so position alone cannot prove a
+  // caption. Require either Word's Caption paragraph style or a conventional visible
+  // caption prefix; otherwise the first option after a figure would be duplicated under
+  // the image and inside the answer list.
+  const captionStyle = /<w:pStyle\b[^>]*w:val=["']Caption["']/i.test(paragraphXml);
+  const captionPrefix = /^(?:fig(?:ure)?|table|chart|diagram|image|illustration)\s*(?:\d+|[A-Z])?\s*[.:-]?\s+/i.test(text);
+  return captionStyle || captionPrefix;
 }
 
 /** `a:srcRect` edges are thousandths of a percent of the original, and default to zero. */

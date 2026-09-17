@@ -1,7 +1,7 @@
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
-import { matchingTratRequest, type IratEditor, type IratObservedQuestion, type IratObservedState } from './irat.js';
+import { matchingTratRequest, type IratEditor, type IratObservedQuestion, type IratObservedState, type IratSavedQuestionReference } from './irat.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 import { imageHtml, uploadCkEditorImages } from './ckeditor-media.js';
 import { applyTratAdvancedSettings, DEFAULT_TRAT_ADVANCED_SETTINGS } from './trat-settings.js';
@@ -99,6 +99,11 @@ interface QuestionBankReference {
   currentLabel: string;
 }
 
+export interface LamsIratEditorHooks {
+  onIratSaved?: () => Promise<void>;
+  onTratSynced?: () => Promise<void>;
+}
+
 export class LamsIratEditor implements IratEditor {
   private activityFrame: Frame | undefined;
   private readonly uploadedImageUrls = new Set<string>();
@@ -109,7 +114,8 @@ export class LamsIratEditor implements IratEditor {
     private readonly page: Page,
     private readonly request: IratRequest,
     private readonly timeoutMs: number,
-    private readonly questionImages: Map<string, QuestionImageAsset[]> = new Map()
+    private readonly questionImages: Map<string, QuestionImageAsset[]> = new Map(),
+    private readonly hooks: LamsIratEditorHooks = {}
   ) {}
 
   async inspect(): Promise<IratObservedState> {
@@ -212,15 +218,55 @@ export class LamsIratEditor implements IratEditor {
     }
   }
 
-  async updateQuestion(question: IratQuestionRequest): Promise<void> {
-    await this.writeQuestion(question, true);
+  async updateQuestion(question: IratQuestionRequest): Promise<IratSavedQuestionReference | void> {
+    return this.writeQuestion(question, true);
   }
 
-  async createQuestion(question: IratQuestionRequest): Promise<void> {
-    await this.writeQuestion(question, false);
+  /**
+   * Selects one immediately newer iRAT version left by a failed post-question-save run.
+   * Refuses gaps or several newer versions so recovery cannot guess among shared edits.
+   */
+  async selectImmediateNewerQuestionVersion(title: string): Promise<string | undefined> {
+    const frame = await this.ensureActivityFrame();
+    const row = await exactQuestionRow(frame, title);
+    const entries = await row.locator('.question-version-dropdown .dropdown-item button[onclick*="changeItemQuestionVersion"]').evaluateAll(buttons =>
+      buttons.map(button => ({
+        text: (button.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        disabled: button.closest('.dropdown-item')?.classList.contains('disabled') ?? false
+      }))
+    );
+    const current = entries.find(entry => entry.disabled);
+    const currentNumber = current ? /^Version\s*(\d+)$/i.exec(current.text)?.[1] : undefined;
+    if (!currentNumber) return undefined;
+    const nextLabel = `Version ${Number(currentNumber) + 1}`;
+    const newerIndexes = entries
+      .map((entry, index) => entry.text === nextLabel && !entry.disabled ? index : -1)
+      .filter(index => index >= 0);
+    const later = entries.filter(entry => {
+      const number = /^Version\s*(\d+)$/i.exec(entry.text)?.[1];
+      return number !== undefined && Number(number) > Number(currentNumber) + 1;
+    });
+    if (later.length > 0 || newerIndexes.length !== 1) return undefined;
+    await row.locator('.question-version-dropdown button.dropdown-toggle').click();
+    await row.locator('.question-version-dropdown .dropdown-item button[onclick*="changeItemQuestionVersion"]')
+      .nth(newerIndexes[0]!)
+      .click();
+    await frame.waitForFunction(({ questionTitle, expected }) => {
+      const candidates = Array.from(document.querySelectorAll('#referencesTable tbody tr'));
+      const match = candidates.find(candidate =>
+        (candidate.querySelector('td .fw-semibold')?.textContent ?? '').replace(/\s+/g, ' ').trim() === questionTitle
+      );
+      const selected = (match?.querySelector('.question-version-dropdown button.dropdown-toggle')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+      return selected === expected;
+    }, { questionTitle: normalizeText(title), expected: nextLabel }, { timeout: this.timeoutMs });
+    return nextLabel;
   }
 
-  private async writeQuestion(question: IratQuestionRequest, existing: boolean): Promise<void> {
+  async createQuestion(question: IratQuestionRequest): Promise<IratSavedQuestionReference | void> {
+    return this.writeQuestion(question, false);
+  }
+
+  private async writeQuestion(question: IratQuestionRequest, existing: boolean): Promise<IratSavedQuestionReference | void> {
     if (question.type !== 'multiple-choice') {
       throw new Error(`Live iRAT editing supports only multiple-choice questions; found "${question.type}".`);
     }
@@ -328,7 +374,14 @@ export class LamsIratEditor implements IratEditor {
     if (Number(await markInput.inputValue()) !== question.marks) {
       throw new Error(`Mark for "${question.title}" did not accept ${question.marks}.`);
     }
-
+    const [snapshot] = await snapshotIratReferenceRows(updatedRow);
+    if (!snapshot?.baseUid || !snapshot.currentUid || !snapshot.currentLabel) return undefined;
+    return {
+      title: snapshot.title,
+      baseUid: snapshot.baseUid,
+      currentUid: snapshot.currentUid,
+      currentLabel: snapshot.currentLabel
+    };
   }
 
   /**
@@ -477,10 +530,24 @@ export class LamsIratEditor implements IratEditor {
     // matching tRAT so its Data import panel can enumerate Assessment activities.
     await this.page.locator('#saveButton').click();
     await this.page.locator('#ldDescriptionFieldModified').waitFor({ state: 'hidden', timeout: this.timeoutMs });
+    await this.hooks.onIratSaved?.();
+
+    await this.syncTratAndVerify();
+  }
+
+  /**
+   * Resumes the post-iRAT-save stage after a verified partial run. This deliberately
+   * does not reopen or save any iRAT question, so recovery cannot create redundant
+   * question versions. Callers must first verify the saved iRAT inventory/Print View.
+   */
+  async resumeTratSyncAndVerify(): Promise<void> {
+    await this.syncTratAndVerify();
+  }
+
+  private async syncTratAndVerify(): Promise<void> {
 
     const trat = matchingTratRequest(this.request);
-    const savedGraph = await inspectAuthoringGraph(this.page);
-    const savedIratFrame = await this.openActivityFrame(uniqueGraphNode(savedGraph, this.request.activityName, 'tool'));
+    const savedIratFrame = await this.ensureActivityFrame();
     const questionBankReferences = await this.readIratQuestionBankReferences(savedIratFrame);
     await this.closeActivityWithoutSaving(savedIratFrame);
     const tratNode = uniqueGraphNode(await inspectAuthoringGraph(this.page), trat.activityName, 'tool');
@@ -531,6 +598,7 @@ export class LamsIratEditor implements IratEditor {
     ) {
       throw new Error('Post-save graph verification failed for the iRAT Gate.');
     }
+    await this.hooks.onTratSynced?.();
   }
 
   /** Accepts and records every confirmation raised by one explicit save action. */
@@ -564,6 +632,15 @@ export class LamsIratEditor implements IratEditor {
     if (JSON.stringify(titles) !== JSON.stringify(expectedTitles)) {
       if (!options.repairStaleVersions) {
         throw new Error(`tRAT question inventory/order did not match iRAT: ${JSON.stringify(titles)}.`);
+      }
+      const authorizedDeletions = new Set((this.request.deleteQuestionTitles ?? []).map(normalizeText));
+      const exactAuthorizedInventory =
+        titles.length > 0 &&
+        titles.length === authorizedDeletions.size &&
+        titles.every(title => authorizedDeletions.has(title));
+      if (exactAuthorizedInventory) {
+        await this.deleteAuthorizedTratQuestions(frame, rows, modern, titles);
+        titles = await readTratTitles(rows, modern);
       }
       const missing = missingTratQuestionSuffix(titles, this.request.questions);
       if (!questionBankReferences) throw new Error('Question Bank repair requires verified iRAT question references.');
@@ -640,76 +717,18 @@ export class LamsIratEditor implements IratEditor {
     await frame.waitForFunction(() => !document.querySelector('#question-bank-collapse')?.classList.contains('contains-nothing'), undefined, {
       timeout: this.timeoutMs
     });
-    const filter = panel.locator('#filter-questions');
-    await filter.waitFor({ state: 'visible', timeout: this.timeoutMs });
-    // The panel's first jqGrid request starts after the collapse HTML is injected. Let
-    // that request finish before starting a filtered search so its response cannot be
-    // mistaken for the first requested question's results.
-    await panel.locator('#load_questions-grid').waitFor({ state: 'hidden', timeout: this.timeoutMs });
 
     for (const question of missing) {
-      const query = questionBankSearchTerm(stripHtml(question.content));
-      const searchResponse = this.page.waitForResponse(
-        response => response.url().includes('/searchQB/getPagedQuestions.do'),
-        { timeout: this.timeoutMs }
-      );
-      await filter.fill(query);
-      await filter.press('Enter');
-      if (!(await searchResponse).ok()) throw new Error(`Question Bank search failed while locating "${question.title}".`);
-      await panel.locator('#load_questions-grid').waitFor({ state: 'hidden', timeout: this.timeoutMs });
-
-      const candidates = panel.locator('#questions-grid tr.jqgrow');
       const requestedTitle = normalizeText(question.title);
       const requestedContent = normalizeText(stripHtml(question.content));
       const reference = questionBankReferences.get(requestedTitle);
       if (!reference) throw new Error(`No verified iRAT Question Bank reference was found for "${question.title}".`);
-      const matches: number[] = [];
-      for (let index = 0; index < (await candidates.count()); index += 1) {
-        const candidate = candidates.nth(index);
-        const title = normalizeText(await candidate.locator('.question-title-grid').innerText());
-        const content = normalizeText(await candidate.locator('.question-description-grid').innerText());
-        const uid = normalizeText(await candidate.locator('td[aria-describedby="questions-grid_questionUid"]').innerText());
-        if (title === requestedTitle && content === requestedContent && uid === reference.baseUid) matches.push(index);
-      }
       const before = await rows.count();
       const selectedUid = panel.locator('#selected-question-uid');
-      if (matches.length > 1) {
-        throw new Error(`Expected at most one exact Question Bank match for "${question.title}"; found ${matches.length}.`);
-      }
-      if (matches.length === 1) {
-        const candidate = candidates.nth(matches[0]!);
-        const questionUid = normalizeText(await candidate.locator('td[aria-describedby="questions-grid_questionUid"]').innerText());
-        await candidate.click();
-        await selectedUid.waitFor({ state: 'attached', timeout: this.timeoutMs });
-        if ((await selectedUid.inputValue()) !== questionUid) {
-          throw new Error(`Question Bank selected an unexpected version while locating "${question.title}".`);
-        }
-        if (reference.currentUid !== reference.baseUid) {
-          const versionMenu = panel.locator('#question-detail-area button.dropdown-toggle');
-          if ((await versionMenu.count()) !== 1) {
-            throw new Error(`Question Bank did not expose one version menu for "${question.title}".`);
-          }
-          await versionMenu.click();
-          const currentVersion = panel.locator(`#question-detail-area .dropdown-item[onclick*="loadQuestionDetailsArea(${reference.currentUid})"]`);
-          if ((await currentVersion.count()) !== 1) {
-            throw new Error(`Question Bank did not offer the current iRAT version for "${question.title}".`);
-          }
-          await currentVersion.click();
-          await frame.waitForFunction(uid => (document.querySelector('#selected-question-uid') as HTMLInputElement | null)?.value === uid,
-            reference.currentUid, { timeout: this.timeoutMs });
-        }
-      } else {
-        // Image-bearing current versions are not always indexed by the Question Bank
-        // search. The exact current UID was read from this lesson's iRAT row, so load
-        // that read-only detail directly and still verify its title/content before import.
-        await frame.evaluate(uid => {
-          const loader = (window as typeof window & { loadQuestionDetailsArea?: (questionUid: number) => void }).loadQuestionDetailsArea;
-          if (typeof loader !== 'function') throw new Error('Question Bank detail loader is unavailable.');
-          loader(Number(uid));
-        }, reference.currentUid);
-        await frame.waitForFunction(uid => (document.querySelector('#selected-question-uid') as HTMLInputElement | null)?.value === uid,
-          reference.currentUid, { timeout: this.timeoutMs });
-      }
+      // Question Bank access is deliberately limited to read and import. The exact
+      // immutable version UID came from this lesson's iRAT reference, so text search,
+      // Question Bank editing, and Question Bank deletion are neither needed nor allowed.
+      await this.loadQuestionBankDetailsReadOnly(frame, reference.currentUid);
       if ((await selectedUid.inputValue()) !== reference.currentUid) {
         throw new Error(`Question Bank did not select the verified current iRAT version for "${question.title}".`);
       }
@@ -719,17 +738,73 @@ export class LamsIratEditor implements IratEditor {
       if (detailTitle !== requestedTitle || detailContent !== requestedContent) {
         throw new Error(`Verified Question Bank UID did not match the requested title/content for "${question.title}".`);
       }
-      const importResponse = this.page.waitForResponse(
-        response => response.url().includes('/authoring/importQbQuestion.do'),
-        { timeout: this.timeoutMs }
-      );
-      await panel.locator('#import-button').click();
-      if (!(await importResponse).ok()) throw new Error(`Question Bank import failed for "${question.title}".`);
+      await this.importQuestionBankReference(panel, question.title);
       await frame.waitForFunction(({ count, title }) => {
         const items = Array.from(document.querySelectorAll('#scratchieItemsList .scratchie-item-list-item'));
         const last = items.at(-1)?.querySelector('.fw-semibold.text-break')?.textContent ?? '';
         return items.length === count + 1 && last.replace(/\s+/g, ' ').trim() === title;
       }, { count: before, title: requestedTitle }, { timeout: this.timeoutMs });
+    }
+  }
+
+  /** Read-only Question Bank detail lookup by an exact verified immutable version UID. */
+  private async loadQuestionBankDetailsReadOnly(frame: Frame, currentUid: string): Promise<void> {
+    await frame.evaluate(uid => {
+      const loader = (window as typeof window & { loadQuestionDetailsArea?: (questionUid: number) => void }).loadQuestionDetailsArea;
+      if (typeof loader !== 'function') throw new Error('Question Bank detail loader is unavailable.');
+      loader(Number(uid));
+    }, currentUid);
+    await frame.waitForFunction(uid =>
+      (document.querySelector('#selected-question-uid') as HTMLInputElement | null)?.value === uid,
+    currentUid, { timeout: this.timeoutMs });
+  }
+
+  /** Imports one verified Question Bank version as an activity reference; never edits it. */
+  private async importQuestionBankReference(panel: Locator, title: string): Promise<void> {
+    const importResponse = this.page.waitForResponse(
+      response => response.url().includes('/authoring/importQbQuestion.do'),
+      { timeout: this.timeoutMs }
+    );
+    await panel.locator('#import-button').click();
+    if (!(await importResponse).ok()) throw new Error(`Question Bank import failed for "${title}".`);
+  }
+
+  /**
+   * Mirrors only the exact placeholder deletions already authorized for iRAT. This path
+   * is used when LAMS accepted the sync prompt but left Scratchie on that complete old
+   * inventory; any mixed, additional, or differently titled tRAT row is rejected above.
+   */
+  private async deleteAuthorizedTratQuestions(
+    frame: Frame,
+    rows: Locator,
+    modern: boolean,
+    titles: string[]
+  ): Promise<void> {
+    if (!modern) throw new Error('Authorized tRAT placeholder deletion is unavailable in the legacy layout.');
+    for (const title of titles) {
+      const currentRows = frame.locator('#scratchieItemsList .scratchie-item-list-item');
+      const matchingIndexes: number[] = [];
+      for (let index = 0; index < (await currentRows.count()); index += 1) {
+        const [candidate] = await readTratTitles(currentRows.nth(index), true);
+        if (candidate === title) matchingIndexes.push(index);
+      }
+      if (matchingIndexes.length !== 1) {
+        throw new Error(`Expected one authorized tRAT placeholder named "${title}"; found ${matchingIndexes.length}.`);
+      }
+      const before = await currentRows.count();
+      await currentRows.nth(matchingIndexes[0]!).getByRole('button', { name: 'Remove', exact: true }).click();
+      const modal = frame.locator('#scratchieDeleteItemModal');
+      await modal.waitFor({ state: 'visible', timeout: this.timeoutMs });
+      if ((await modal.getByText('Do you really want to delete this question?', { exact: true }).count()) !== 1) {
+        throw new Error(`The tRAT deletion dialog for "${title}" did not contain the verified warning.`);
+      }
+      await modal.locator('#scratchieDeleteItemConfirmBtn').click();
+      await frame.waitForFunction(({ count, removedTitle }) => {
+        const items = Array.from(document.querySelectorAll('#scratchieItemsList .scratchie-item-list-item'));
+        const remaining = items.map(item => (item.querySelector('.fw-semibold.text-break')?.textContent ?? '').replace(/\s+/g, ' ').trim());
+        return items.length === count - 1 && !remaining.includes(removedTitle);
+      }, { count: before, removedTitle: title }, { timeout: this.timeoutMs });
+      console.log(`Deleted authorized tRAT placeholder: ${title}`);
     }
   }
 
@@ -751,23 +826,18 @@ export class LamsIratEditor implements IratEditor {
   /** Reads the exact Question Bank family and selected version for every iRAT row. */
   private async readIratQuestionBankReferences(frame: Frame): Promise<Map<string, QuestionBankReference>> {
     const references = new Map<string, QuestionBankReference>();
+    const snapshots = await snapshotIratReferenceRows(frame.locator('#referencesTable tbody tr'));
     for (const question of this.request.questions) {
-      const row = await exactQuestionRow(frame, question.title);
-      const entries = await row.locator('.question-version-dropdown .dropdown-item button[onclick*="changeItemQuestionVersion"]').evaluateAll(buttons =>
-        buttons.map(button => ({
-          text: (button.textContent ?? '').replace(/\s+/g, ' ').trim(),
-          onclick: button.getAttribute('onclick') ?? '',
-          current: button.closest('.dropdown-item')?.classList.contains('disabled') ?? false
-        }))
-      );
-      const base = entries.find(entry => /^Version\s*1$/i.test(entry.text));
-      const current = entries.find(entry => entry.current);
-      const baseUid = base ? questionVersionUid(base.onclick) : undefined;
-      const currentUid = current ? questionVersionUid(current.onclick) : undefined;
-      if (!baseUid || !currentUid) {
-        throw new Error(`Could not read the Question Bank family/current version for "${question.title}".`);
+      const matches = snapshots.filter(snapshot => snapshot.title === normalizeText(question.title));
+      if (matches.length !== 1 || !matches[0]!.baseUid || !matches[0]!.currentUid || !matches[0]!.currentLabel) {
+        throw new Error(`Could not read one Question Bank family/current version for "${question.title}".`);
       }
-      references.set(normalizeText(question.title), { baseUid, currentUid, currentLabel: normalizeText(current!.text) });
+      const snapshot = matches[0]!;
+      references.set(snapshot.title, {
+        baseUid: snapshot.baseUid!,
+        currentUid: snapshot.currentUid!,
+        currentLabel: snapshot.currentLabel!
+      });
     }
     return references;
   }
@@ -791,11 +861,14 @@ export class LamsIratEditor implements IratEditor {
       if (!reference) throw new Error(`No verified iRAT version was found for tRAT question "${title}".`);
       const warning = row.getByRole('button', { name: 'There is a newer version of this question', exact: true });
       const versionMenu = row.locator('button.dropdown-toggle');
-      if ((await versionMenu.count()) !== 1) {
+      const selectedLabel = await readTratSelectedVersionLabel(row);
+      if (!selectedLabel) {
         throw new Error(`Could not find one tRAT version menu for question row ${index + 1}.`);
       }
-      const selectedLabel = normalizeText(await versionMenu.innerText());
       if (selectedLabel === reference.currentLabel && (await warning.count()) === 0) continue;
+      if ((await versionMenu.count()) !== 1) {
+        throw new Error(`tRAT question "${title}" is ${selectedLabel}; iRAT is ${reference.currentLabel}, but no version menu is available.`);
+      }
       if (!modern) {
         throw new Error(`tRAT question "${title}" is ${selectedLabel}; iRAT is ${reference.currentLabel}, but this legacy layout has no verified repair path.`);
       }
@@ -835,16 +908,15 @@ export class LamsIratEditor implements IratEditor {
     modern: boolean,
     questionBankReferences: Map<string, QuestionBankReference>
   ): Promise<void> {
-    for (let index = 0; index < (await rows.count()); index += 1) {
-      const row = rows.nth(index);
-      const [title] = await readTratTitles(row, modern);
-      const reference = questionBankReferences.get(title!);
+    const snapshots = await snapshotTratRows(rows, modern);
+    for (const snapshot of snapshots) {
+      const reference = questionBankReferences.get(snapshot.title);
+      const title = snapshot.title;
       if (!reference) throw new Error(`No verified iRAT version was found for tRAT question "${title}".`);
-      const versionMenu = row.locator('button.dropdown-toggle');
-      if ((await versionMenu.count()) !== 1) {
+      const selectedLabel = snapshot.selectedLabel;
+      if (!selectedLabel) {
         throw new Error(`Could not verify one selected tRAT version for question "${title}".`);
       }
-      const selectedLabel = normalizeText(await versionMenu.innerText());
       if (selectedLabel !== reference.currentLabel) {
         throw new Error(`Post-save tRAT version mismatch for "${title}": selected ${selectedLabel}, expected ${reference.currentLabel} from iRAT.`);
       }
@@ -863,17 +935,7 @@ export class LamsIratEditor implements IratEditor {
     const rows = frame.locator('#referencesTable tbody tr');
     // A ready empty activity has Create question but no reference rows.
     await frame.getByRole('button', { name: 'Create question', exact: true }).waitFor({ state: 'visible', timeout: this.timeoutMs });
-    const questions: IratObservedQuestion[] = [];
-    for (let index = 0; index < (await rows.count()); index += 1) {
-      const row = rows.nth(index);
-      const mandatory = await row.locator(REQUIRED_TOGGLE).evaluate(readRequiredState);
-      if (mandatory === null) throw new Error('Cannot verify an unreadable answer-required flag.');
-      questions.push({
-        title: normalizeText(await row.locator(QUESTION_TITLE).innerText()),
-        type: normalizeQuestionType(await row.locator(QUESTION_TYPE_BADGE).innerText()),
-        mandatory
-      });
-    }
+    const questions = await snapshotIratReferenceRows(rows);
 
     // The activity authoring frame exposes only a Save control. Its dialog is a Bootstrap
     // modal owned by the parent authoring page, so it is dismissed from the modal header.
@@ -903,15 +965,17 @@ export class LamsIratEditor implements IratEditor {
   }
 
   private async openActivityFrame(activity: GraphNode): Promise<Frame> {
-    // A real double click is what LAMS binds to; a dispatched dblclick carries detail 0
-    // and its handler ignores it. The floating properties panel can cover the node, so it
-    // is dismissed first when it is showing.
+    // LAMS binds to the genuine double-click mouse sequence. The persistent properties
+    // overlay is made click-through below so that sequence reaches the verified SVG node.
     await this.dismissPropertiesDialog();
     // The panel can survive every dismissal this build offers. It is only ever in the way
     // of the double-click, so it is made click-through for exactly that action and
     // restored immediately: nothing about the activity or its properties is changed.
+    // Do this whenever the persistent panel exists, not only when isVisible() happens to
+    // report true: Bootstrap can promote it back to .show between that check and the
+    // double-click actionability check.
     const panel = this.page.locator('#propertiesDialog');
-    const covering = await panel.isVisible();
+    const covering = (await panel.count()) === 1;
     if (covering) await setPointerEvents(panel, 'none');
     try {
       await this.canvasNode(activity).dblclick({ delay: 80 });
@@ -970,8 +1034,20 @@ export function verifySavedRequiredFlags(saved: IratObservedQuestion[], requeste
  */
 async function setPointerEvents(locator: Locator, value: string): Promise<void> {
   await locator.evaluate((element, next) => {
-    for (const target of [element, ...element.querySelectorAll('.modal-dialog')]) {
-      (target as HTMLElement).style.pointerEvents = next;
+    for (const target of [element, ...element.querySelectorAll('*')]) {
+      const htmlTarget = target as HTMLElement;
+      if (next) {
+        htmlTarget.dataset.codexPointerEvents = htmlTarget.style.getPropertyValue('pointer-events');
+        htmlTarget.dataset.codexPointerEventsPriority = htmlTarget.style.getPropertyPriority('pointer-events');
+        htmlTarget.style.setProperty('pointer-events', next, 'important');
+      } else {
+        const previous = htmlTarget.dataset.codexPointerEvents ?? '';
+        const priority = htmlTarget.dataset.codexPointerEventsPriority ?? '';
+        if (previous) htmlTarget.style.setProperty('pointer-events', previous, priority);
+        else htmlTarget.style.removeProperty('pointer-events');
+        delete htmlTarget.dataset.codexPointerEvents;
+        delete htmlTarget.dataset.codexPointerEventsPriority;
+      }
     }
   }, value);
 }
@@ -1172,21 +1248,122 @@ export function questionVersionUid(onclick: string): string | undefined {
   return /changeItemQuestionVersion\(\s*\d+\s*,\s*\d+\s*,\s*(\d+)\s*\)/.exec(onclick)?.[1];
 }
 
-async function readTratTitles(rows: Locator, modern: boolean): Promise<string[]> {
-  const titles: string[] = [];
-  for (let index = 0; index < (await rows.count()); index += 1) {
-    const row = rows.nth(index);
-    const titleCell = modern
-      ? row.locator('.fw-semibold.text-break')
-      : (await row.locator('td:has(> .item-sequence-id)').count()) === 1
-        ? row.locator('td:has(> .item-sequence-id)')
-        : row.locator(QUESTION_TITLE);
-    if ((await titleCell.count()) !== 1) {
-      throw new Error(`Could not read one title from tRAT question row ${index + 1}.`);
+/** Reads the exact Question Bank UID exposed by a single-version row's stats action. */
+export function questionStatsUid(onclick: string): string | undefined {
+  return /[?&]qbQuestionUid=(\d+)/.exec(onclick)?.[1];
+}
+
+/**
+ * Reads the complete iRAT reference table in one browser round trip. This is read-only:
+ * it snapshots activity references and immutable Question Bank version identifiers.
+ */
+export async function snapshotIratReferenceRows(rows: Locator): Promise<IratObservedQuestion[]> {
+  const raw = await rows.evaluateAll((elements, selectors) => elements.map((row, index) => {
+    const required = row.querySelector(selectors.required);
+    const classes = required ? [...required.classList] : [];
+    const mandatory = classes.includes('text-danger') || classes.includes('btn-outline-danger')
+      ? true
+      : classes.includes('text-muted') || classes.includes('btn-outline-secondary')
+        ? false
+        : null;
+    const entries = [...row.querySelectorAll('.question-version-dropdown .dropdown-item button[onclick*="changeItemQuestionVersion"]')]
+      .map(button => ({
+        text: (button.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        onclick: button.getAttribute('onclick') ?? '',
+        current: button.closest('.dropdown-item')?.classList.contains('disabled') ?? false
+      }));
+    return {
+      index,
+      title: (row.querySelector(selectors.title)?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      type: (row.querySelector(selectors.type)?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      mandatory,
+      marks: (row.querySelector(selectors.mark) as HTMLInputElement | null)?.value ?? '',
+      entries,
+      singleLabel: (row.querySelector('.badge.bg-secondary-subtle')?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      statsOnclick: row.querySelector('button[onclick*="qb/stats/show.do"][onclick*="qbQuestionUid="]')?.getAttribute('onclick') ?? ''
+    };
+  }), { title: QUESTION_TITLE, type: QUESTION_TYPE_BADGE, required: REQUIRED_TOGGLE, mark: MAX_MARK_INPUT });
+
+  return raw.map(item => {
+    if (!item.title) throw new Error(`Could not read one iRAT title from reference row ${item.index + 1}.`);
+    if (item.mandatory === null) throw new Error(`Cannot verify the answer-required flag for iRAT row ${item.index + 1}.`);
+    const base = item.entries.find(entry => /^Version\s*1$/i.test(entry.text));
+    const current = item.entries.find(entry => entry.current);
+    let baseUid = base ? questionVersionUid(base.onclick) : undefined;
+    let currentUid = current ? questionVersionUid(current.onclick) : undefined;
+    let currentLabel = current ? normalizeText(current.text) : undefined;
+    if (!baseUid && !currentUid && item.entries.length === 0 && /^Version\s*1$/i.test(item.singleLabel)) {
+      const uid = questionStatsUid(item.statsOnclick);
+      if (uid) {
+        baseUid = uid;
+        currentUid = uid;
+        currentLabel = item.singleLabel;
+      }
     }
-    titles.push(normalizeText(await titleCell.innerText()));
-  }
-  return titles;
+    const marks = Number(item.marks);
+    return {
+      title: normalizeText(item.title),
+      type: normalizeQuestionType(item.type),
+      mandatory: item.mandatory,
+      ...(Number.isFinite(marks) ? { marks } : {}),
+      ...(baseUid ? { baseUid } : {}),
+      ...(currentUid ? { currentUid } : {}),
+      ...(currentLabel ? { currentLabel } : {})
+    };
+  });
+}
+
+export interface TratRowSnapshot {
+  title: string;
+  selectedLabel?: string;
+  stale: boolean;
+  versionOnclicks: string[];
+}
+
+/** Reads the complete Scratchie reference list in one read-only browser round trip. */
+export async function snapshotTratRows(rows: Locator, modern: boolean): Promise<TratRowSnapshot[]> {
+  const raw = await rows.evaluateAll((elements, modernLayout) => elements.map((row, index) => {
+    const titleCells = modernLayout
+      ? row.querySelectorAll('.fw-semibold.text-break')
+      : row.querySelectorAll('td:has(> .item-sequence-id)').length === 1
+        ? row.querySelectorAll('td:has(> .item-sequence-id)')
+        : row.querySelectorAll('td .fw-semibold');
+    const menu = row.querySelector('button.dropdown-toggle');
+    const badge = row.querySelector('.badge.bg-secondary-subtle');
+    return {
+      index,
+      titleCount: titleCells.length,
+      title: (titleCells[0]?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      selectedLabel: (menu?.textContent ?? badge?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      stale: Boolean(row.querySelector('.newer-version-prompt, button[aria-label="There is a newer version of this question"]')),
+      versionOnclicks: [...row.querySelectorAll('button.dropdown-item[onclick*="changeItemQuestionVersion"]')]
+        .map(button => button.getAttribute('onclick') ?? '')
+    };
+  }), modern);
+  return raw.map(item => {
+    if (item.titleCount !== 1 || !item.title) {
+      throw new Error(`Could not read one title from tRAT question row ${item.index + 1}.`);
+    }
+    return {
+      title: normalizeText(item.title),
+      ...(item.selectedLabel ? { selectedLabel: normalizeText(item.selectedLabel) } : {}),
+      stale: item.stale,
+      versionOnclicks: item.versionOnclicks
+    };
+  });
+}
+
+async function readTratTitles(rows: Locator, modern: boolean): Promise<string[]> {
+  return (await snapshotTratRows(rows, modern)).map(row => row.title);
+}
+
+/** Reads either a multi-version dropdown label or LAMS's single-Version-1 badge. */
+async function readTratSelectedVersionLabel(row: Locator): Promise<string | undefined> {
+  const menu = row.locator('button.dropdown-toggle');
+  if ((await menu.count()) === 1) return normalizeText(await menu.innerText());
+  const badge = row.locator('.badge.bg-secondary-subtle');
+  if ((await badge.count()) === 1) return normalizeText(await badge.innerText());
+  return undefined;
 }
 
 /** Returns exact inline-tagged segments requested by the SoT but absent from Print View. */

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionVersionUid, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
+import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionStatsUid, questionVersionUid, snapshotIratReferenceRows, snapshotTratRows, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
 
 const request: IratRequest = {
   activityName: 'iRAT', teamSetupName: 'Team Setup',
@@ -262,6 +262,64 @@ test('Question Bank searches use a stable plain-text fragment', () => {
 test('reads the selected Question Bank version UID from a LAMS version action', () => {
   expect(questionVersionUid('javascript:changeItemQuestionVersion(17, 76784, 76759); return false;')).toBe('76759');
   expect(questionVersionUid('not a version action')).toBeUndefined();
+});
+
+test('reads the Question Bank UID from a single-version stats action', () => {
+  expect(questionStatsUid('javascript:window.open("https://example.test/lams/qb/stats/show.do?qbQuestionUid=76966", "_blank")'))
+    .toBe('76966');
+  expect(questionStatsUid('not a stats action')).toBeUndefined();
+});
+
+test('snapshots every iRAT reference row in one read-only DOM evaluation', async ({ page }) => {
+  await page.setContent(`
+    <table id="referencesTable"><tbody>
+      <tr>
+        <td><span class="fw-semibold">Question 1</span><span class="badge bg-primary-subtle">Multiple choice</span></td>
+        <td><input class="max-mark-input" value="2"></td>
+        <td>
+          <button class="text-danger" onclick="toggleQuestionRequired(this)">Answer required</button>
+          <div class="question-version-dropdown">
+            <div class="dropdown-item"><button onclick="changeItemQuestionVersion(1, 101, 101)">Version 1</button></div>
+            <div class="dropdown-item disabled"><button onclick="changeItemQuestionVersion(1, 101, 103)">Version 3</button></div>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td><span class="fw-semibold">Question 2</span><span class="badge bg-primary-subtle">Multiple choice</span></td>
+        <td><input class="max-mark-input" value="1"></td>
+        <td>
+          <button class="btn-outline-secondary" onclick="toggleQuestionRequired(this)">Answer required</button>
+          <span class="badge bg-secondary-subtle">Version 1</span>
+          <button onclick="window.open('/lams/qb/stats/show.do?qbQuestionUid=202')">Stats</button>
+        </td>
+      </tr>
+    </tbody></table>
+  `);
+  expect(await snapshotIratReferenceRows(page.locator('#referencesTable tbody tr'))).toEqual([
+    { title: 'Question 1', type: 'multiple-choice', mandatory: true, marks: 2, baseUid: '101', currentUid: '103', currentLabel: 'Version 3' },
+    { title: 'Question 2', type: 'multiple-choice', mandatory: false, marks: 1, baseUid: '202', currentUid: '202', currentLabel: 'Version 1' }
+  ]);
+});
+
+test('snapshots complete tRAT titles and versions in one read-only DOM evaluation', async ({ page }) => {
+  await page.setContent(`
+    <div id="scratchieItemsList">
+      <div class="scratchie-item-list-item">
+        <span class="fw-semibold text-break">Question 1</span>
+        <button class="dropdown-toggle">Version 3</button>
+        <button class="dropdown-item" onclick="changeItemQuestionVersion(1, 101, 103)">Version 3</button>
+      </div>
+      <div class="scratchie-item-list-item">
+        <span class="fw-semibold text-break">Question 2</span>
+        <span class="badge bg-secondary-subtle">Version 1</span>
+        <button aria-label="There is a newer version of this question"></button>
+      </div>
+    </div>
+  `);
+  expect(await snapshotTratRows(page.locator('#scratchieItemsList .scratchie-item-list-item'), true)).toEqual([
+    { title: 'Question 1', selectedLabel: 'Version 3', stale: false, versionOnclicks: ['changeItemQuestionVersion(1, 101, 103)'] },
+    { title: 'Question 2', selectedLabel: 'Version 1', stale: true, versionOnclicks: [] }
+  ]);
 });
 
 test('tRAT reconciliation selects the exact current iRAT version instead of the last offered version', async ({ page }) => {
