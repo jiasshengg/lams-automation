@@ -91,6 +91,15 @@ test('does not mistake an answer option or the next question for a caption', () 
   expect(images.map((image) => image.caption)).toEqual(['', '']);
 });
 
+test('does not mistake an unlabelled iRAT option after a figure for a caption', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('Refer to the curves below. Which statement is correct? (mark 1)') +
+    paragraph('', drawing) +
+    paragraph('Curve B has a shorter elimination half-life.')
+  ));
+  expect(images[0]?.caption).toBe('');
+});
+
 test('a figure printed before a stem is marked as belonging above it', () => {
   // Whether or not case narrative intervenes, a figure between a heading and the stem illustrates
   // the question below it. questionDescriptionHtml then places it under that narrative.

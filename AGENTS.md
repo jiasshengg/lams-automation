@@ -10,6 +10,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
 - Treat navigation and DOM inspection as read-only.
 - When a lesson is in scope for a requested workflow, automatically fix any supported, verified issues found within that lesson; the user does not need to request the fixes separately. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
 - Automatically remove exact gate-bypass transitions and replace exact planned AE gates whose verified type/settings are wrong. Delete or rewire only elements that the reviewed plan proves must change; never infer that unrelated nodes are extra.
+- Direct Question Bank management is read/import only. Never use a Question Bank edit or delete control or endpoint. Versioned authoring launched from an iRAT activity remains allowed because it creates the requested new version without overwriting the shared version; an explicitly authorized trash action in an iRAT or tRAT activity removes only that lesson's question reference.
 - Never publish or start a copied lesson as a learner-facing lesson unless explicitly requested.
   A request for the full/end-to-end/complete TBL flow, or for the lesson to be deployed,
   published, or made ready for the cohort, is such an explicit request and includes the
