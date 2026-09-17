@@ -138,7 +138,9 @@ function loginFixture(results, closeFails = false) {
           close: async () => { events.push(`close ${id}`); if (closeFails) throw new Error('close failed'); }
         };
       },
-      verify: async (context) => { events.push(`verify ${context.id}`); return results[context.id - 1]; }
+      verify: async (context) => { events.push(`verify ${context.id}`); return results[context.id - 1]; },
+      platform: 'darwin',
+      formSignIn: async (context) => { events.push(`form sign-in ${context.id}`); }
     }
   };
 }
@@ -148,6 +150,13 @@ test('login closes before restarting the same profile and verifies both sessions
   const fixture = loginFixture([true, true]);
   assert.equal(await openLamsSignIn(fixture.options), true);
   assert.deepEqual(fixture.events, ['launch 1', 'navigate 1', 'verify 1', 'close 1', 'launch 2', 'navigate 2', 'verify 2', 'close 2']);
+});
+
+test('Windows sign-in uses the ADFS form identity only for the interactive phase', async () => {
+  const { openLamsSignIn } = await import('./login.mjs');
+  const fixture = loginFixture([true, true]);
+  assert.equal(await openLamsSignIn({ ...fixture.options, platform: 'win32' }), true);
+  assert.deepEqual(fixture.events, ['launch 1', 'form sign-in 1', 'navigate 1', 'verify 1', 'close 1', 'launch 2', 'navigate 2', 'verify 2', 'close 2']);
 });
 
 test('failed persistence check closes browser and reports retry without claiming a cookie cause', async () => {

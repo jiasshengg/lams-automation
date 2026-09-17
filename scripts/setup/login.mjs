@@ -44,6 +44,42 @@ async function waitForCourseMenu(context, timeoutMs) {
   return false;
 }
 
+// NTU ADFS sends Windows browsers to its Windows Integrated Authentication endpoint
+// (/adfs/ls/wia), where Microsoft never offers "Stay signed in?", so the login ends with the
+// browser. Reporting macOS during the interactive sign-in gets the ADFS forms page and that
+// prompt, as on a Mac. Password and MFA are unchanged, and only this phase is affected:
+// the restart check and every automation command keep the browser's own identity.
+const FORM_SIGN_IN_PLATFORM = '(Macintosh; Intel Mac OS X 10_15_7)';
+
+async function reportFormSignInPlatform(page) {
+  const session = await page.context().newCDPSession(page);
+  const { userAgent, hints } = await page.evaluate(async () => ({
+    userAgent: navigator.userAgent,
+    hints: await navigator.userAgentData?.getHighEntropyValues(['fullVersionList', 'uaFullVersion'])
+  }));
+  await session.send('Emulation.setUserAgentOverride', {
+    userAgent: userAgent.replace(/\([^)]*\)/, FORM_SIGN_IN_PLATFORM),
+    platform: 'MacIntel',
+    userAgentMetadata: {
+      brands: hints?.brands ?? [],
+      fullVersionList: hints?.fullVersionList ?? [],
+      fullVersion: hints?.uaFullVersion ?? '',
+      platform: 'macOS',
+      platformVersion: '15.0.0',
+      architecture: 'arm',
+      bitness: '64',
+      model: '',
+      mobile: false
+    }
+  });
+}
+
+export async function useFormSignIn(context) {
+  if (context.pages().length === 0) await context.newPage();
+  for (const page of context.pages()) await reportFormSignInPlatform(page);
+  context.on('page', page => { void reportFormSignInPlatform(page).catch(error => console.error(`Sign-in form identity not applied to a new tab: ${error.message}`)); });
+}
+
 // Verification must not succeed because somebody completed another login during it.
 export async function installNoInteractionGuard(context) {
   let interacted = false;
@@ -68,13 +104,19 @@ export async function openLamsSignIn({
   checkOnly = false,
   guard = installNoInteractionGuard,
   launch = launchLamsBrowser,
-  verify = waitForCourseMenu
+  verify = waitForCourseMenu,
+  platform = process.platform,
+  formSignIn = useFormSignIn
 } = {}) {
   const settings = suppliedSettings ?? await readLoginSettings();
   const options = { headless: false, ...(settings.channel ? { channel: settings.channel } : {}) };
   if (!checkOnly) {
     const context = await launch(settings.userDataDir, options);
     try {
+      if (platform === 'win32') {
+        await formSignIn(context);
+        console.log('Windows: using the NTU sign-in form so Microsoft offers "Stay signed in?".');
+      }
       const page = context.pages()[0] ?? await context.newPage();
       await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });
       console.log(`Opened LAMS in the automation browser: ${settings.baseUrl}`);
