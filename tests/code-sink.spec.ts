@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { assertIdentifier, assertLessonCode, resolveSinkEndpoint, sendCodeToSheet } from '../src/sheets/code-sink.js';
+import { assertIdentifier, assertLessonCode, parseSinkBody, resolveSinkEndpoint, sendCodeToSheet } from '../src/sheets/code-sink.js';
 
 const endpoint = { url: 'https://script.example/exec', secret: 'test-secret' };
 
@@ -85,4 +85,39 @@ test('the sheet endpoint is only considered configured when both variables are s
     url: 'https://example.test/exec',
     secret: 's'
   });
+});
+
+test('reads the answer out of the HTML interstitial the redirect sometimes serves', async () => {
+  // The googleusercontent hop occasionally wraps the script's JSON in a page; the real
+  // message has to survive that rather than being reported as a sign-in page.
+  const wrapped = [
+    '<!DOCTYPE html><html><head><script nonce="x">window[\'ppConfig\'] = {productName: \'abc\'};</script></head>',
+    '<body><pre>{&quot;status&quot;:&quot;error&quot;,&quot;message&quot;:&quot;Identifier not found: A [B] C&quot;}</pre></body></html>'
+  ].join('');
+
+  expect(parseSinkBody(wrapped)).toEqual({ status: 'error', message: 'Identifier not found: A [B] C' });
+  expect(parseSinkBody('{"status":"ok","row":305}')).toEqual({ status: 'ok', row: 305 });
+  expect(parseSinkBody('<html><body>Sign in to continue</body></html>')).toBeUndefined();
+
+  await expect(
+    sendCodeToSheet('12345', 'A [B] C', {
+      ...endpoint,
+      attempts: 3,
+      fetchImpl: (async () => new Response(wrapped, { headers: { 'Content-Type': 'text/html' } })) as unknown as typeof fetch
+    })
+  ).rejects.toThrow(/Identifier not found: A \[B\] C/);
+});
+
+test('does not replay a request the script already answered', async () => {
+  // A rejected status is the sheet's own verdict, so retrying only risks a second write.
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return jsonResponse({ status: 'error', message: 'Identifier not found: A' });
+  }) as unknown as typeof fetch;
+
+  await expect(sendCodeToSheet('12345', 'A', { ...endpoint, fetchImpl, attempts: 3 })).rejects.toThrow(
+    /Identifier not found: A/
+  );
+  expect(calls).toBe(1);
 });

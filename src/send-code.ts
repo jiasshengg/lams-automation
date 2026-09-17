@@ -33,9 +33,24 @@ async function main(): Promise<void> {
   console.log(`Sent code ${code} for "${identifier}" to the Kanban sheet.`);
 }
 
+/**
+ * Reads `--name value`, joining every token up to the next `--flag`.
+ *
+ * `npm run send:code -- --identifier "[Claude-Test-2] [Jss] TEST LESSON A 280826"` loses
+ * the quotes on the way through npm on Windows, so taking only argv[index + 1] silently
+ * sent "[Claude-Test-2]" as the identifier and the sheet lookup failed for the wrong
+ * reason. The identifier has to match column G exactly, so the whole run is kept.
+ */
 function readArgument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
-  return index >= 0 ? process.argv[index + 1] : undefined;
+  if (index < 0) return undefined;
+  const parts: string[] = [];
+  for (let next = index + 1; next < process.argv.length; next += 1) {
+    const value = process.argv[next]!;
+    if (value.startsWith('--')) break;
+    parts.push(value);
+  }
+  return parts.length > 0 ? parts.join(' ') : undefined;
 }
 
 main().catch((error: unknown) => {

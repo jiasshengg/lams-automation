@@ -53,10 +53,94 @@ export function resolveSinkEndpoint(options: CodeSinkOptions = {}): { url: strin
 }
 
 /**
+ * Reads the Apps Script answer out of a response body.
+ *
+ * The usual body is bare JSON, but the googleusercontent redirect the Web App bounces
+ * through sometimes serves an HTML interstitial carrying the same JSON inside it, and a
+ * straight `JSON.parse` turned that into a misleading "check the Web App access setting"
+ * error that hid the script's real message. So parse directly when we can, and otherwise
+ * pull the first `{...}` carrying a `status` out of the markup.
+ *
+ * Returns undefined when the body holds no answer at all, which is the genuine sign-in
+ * page / wrong-access case the caller still reports.
+ */
+export function parseSinkBody(body: string): CodeSinkResult | undefined {
+  const direct = tryParse(body);
+  if (direct) return direct;
+
+  const withoutScripts = body
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const text = decodeEntities(withoutScripts.replace(/<[^>]+>/g, ' '));
+  for (const candidate of jsonCandidates(text)) {
+    const parsed = tryParse(candidate);
+    if (parsed) return parsed;
+  }
+  return undefined;
+}
+
+function tryParse(text: string): CodeSinkResult | undefined {
+  try {
+    const value: unknown = JSON.parse(text.trim());
+    if (value && typeof value === 'object' && typeof (value as CodeSinkResult).status === 'string') {
+      return value as CodeSinkResult;
+    }
+  } catch {
+    // Not JSON on its own; the caller falls back to scanning the markup.
+  }
+  return undefined;
+}
+
+/** Yields each brace-balanced `{...}` run that mentions a status, in document order. */
+function* jsonCandidates(text: string): Generator<string> {
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const character = text[index]!;
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === '{') depth += 1;
+      else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = text.slice(start, index + 1);
+          if (candidate.includes('"status"')) yield candidate;
+          break;
+        }
+      }
+    }
+  }
+}
+
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+/** A definitive answer from the script itself: retrying would not change it. */
+class SheetRejection extends Error {}
+
+/**
  * POSTs `{ code, identifier, secret }` and fails loudly unless the Apps Script answers
  * `{"status":"ok"}`. Apps Script answers 302 to its own googleusercontent host on success,
- * which the global fetch follows by default; a non-2xx or non-JSON body is treated as a
+ * which the global fetch follows by default; a non-2xx or unreadable body is treated as a
  * failure rather than silently accepted.
+ *
+ * Only transport-level trouble is retried. A status the script itself rejected (an
+ * identifier that is not in column G, say) is raised on the first attempt, so a request
+ * the sheet may already have acted on is never replayed.
  */
 export async function sendCodeToSheet(
   code: string,
@@ -85,19 +169,18 @@ export async function sendCodeToSheet(
         throw new Error(`Sheet endpoint returned HTTP ${response.status}: ${body.slice(0, 200)}`);
       }
 
-      let result: CodeSinkResult;
-      try {
-        result = JSON.parse(body) as CodeSinkResult;
-      } catch {
-        // A login page instead of JSON means the Web App is not deployed as
-        // "Anyone" / the NTU domain, which is the failure worth naming here.
+      const result = parseSinkBody(body);
+      if (!result) {
+        // No answer anywhere in the body means a sign-in page rather than the script,
+        // i.e. the Web App is not deployed as "Anyone" / the NTU domain.
         throw new Error(`Sheet endpoint did not return JSON (check the Web App access setting): ${body.slice(0, 200)}`);
       }
       if (result.status !== 'ok') {
-        throw new Error(`Failed to send code: ${result.message ?? JSON.stringify(result)}`);
+        throw new SheetRejection(`Failed to send code: ${result.message ?? JSON.stringify(result)}`);
       }
       return result;
     } catch (error) {
+      if (error instanceof SheetRejection) throw error;
       lastError = error instanceof Error ? error : new Error(String(error));
       if (attempt < attempts) await delay(attempt * 1_000);
     }
