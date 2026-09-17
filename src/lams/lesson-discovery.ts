@@ -48,7 +48,7 @@ async function readTree(dialog: Locator): Promise<TreeRow[]> {
   const rows = await dialog.getByRole('treeitem').evaluateAll(elements => elements.map(element => ({
     text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
     level: element.querySelectorAll(':scope > .indent').length,
-    folder: element.classList.contains('tree-parent'),
+    folder: element.classList.contains('tree-parent') || element.querySelector('.node-icon.treeview-empty') !== null,
     expanded: element.getAttribute('aria-expanded'),
     // Recorded in the discovery diagnostics: empty folders keep aria-expanded=false.
     empty: element.querySelector('.node-icon.treeview-empty') !== null
@@ -99,7 +99,7 @@ async function discoverWithFolderApi(
   const limit = options.maxExpansions ?? 1000;
   let requests = 0;
 
-  async function getFolder(folderID: number | null): Promise<FolderContentsResponse | undefined> {
+  async function getFolder(folderID: number | null, retry = true): Promise<FolderContentsResponse | undefined> {
     if (++requests > limit) {
       throw new Error('Discovery expansion budget exhausted; results are incomplete. Narrow --roots or increase --max-expansions.');
     }
@@ -112,6 +112,8 @@ async function discoverWithFolderApi(
       try {
         const result = await fetch(requestUrl, { credentials: 'same-origin', signal: controller.signal });
         return {
+          location: new URL(result.url).origin + new URL(result.url).pathname,
+          redirected: result.redirected,
           ok: result.ok,
           status: result.status,
           contentType: result.headers.get('content-type') ?? '',
@@ -121,12 +123,24 @@ async function discoverWithFolderApi(
         clearTimeout(timeout);
       }
     }, { requestUrl: url.toString(), timeoutMs: options.timeoutMs });
-    if (!response.ok) throw new Error(`LAMS discovery request failed (${response.status}).`);
-    if (!response.contentType.toLocaleLowerCase().includes('json')) return undefined;
+    if (!response.ok || !response.contentType.toLocaleLowerCase().includes('json')) {
+      const detail = `Folder ${folderID ?? 'root'}: HTTP ${response.status}, type ${response.contentType || 'missing'}, final URL ${response.location}, redirected=${response.redirected}`;
+      options.onProgress?.(detail);
+      if (response.redirected && /login|signin|saml|authorize/i.test(response.location)) {
+        throw new Error(`Discovery reached authentication instead of folder data. ${detail}. Run npm run login:check with the same profile; no complete results were returned.`);
+      }
+      if (retry && (response.ok || response.status === 429 || response.status >= 500)) {
+        await page.waitForTimeout(500);
+        return getFolder(folderID, false);
+      }
+      if (!response.ok) throw new Error(`LAMS discovery request failed. ${detail}`);
+      return undefined;
+    }
     let body: FolderContentsResponse;
     try {
       body = JSON.parse(response.text) as FolderContentsResponse;
     } catch {
+      options.onProgress?.(`Folder ${folderID ?? 'root'} returned invalid JSON at ${response.location}.`);
       return undefined;
     }
     if ((body.folders !== undefined && !Array.isArray(body.folders)) ||
@@ -204,8 +218,16 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
     const fresh = await readTree(dialog);
     if (JSON.stringify(fresh) !== JSON.stringify(rows)) throw new Error('Authoring tree changed before expansion; retry discovery.');
     const target = dialog.getByRole('treeitem').nth(index);
-    await target.click();
-    await expect.poll(async () => isVisiblyExpanded(await readTree(dialog), index), {
+    // Captured bootstrap-treeview DOM exposes .expand-icon on expandable folders.
+    // A row click can select without expanding; prefer the observed expansion control.
+    const icon = target.locator('.expand-icon');
+    if (await icon.isVisible()) await icon.click();
+    else await target.click();
+    await expect.poll(async () => {
+      const current = await readTree(dialog);
+      const currentIndex = current.findIndex(candidate => JSON.stringify(candidate.path) === JSON.stringify(row.path));
+      return currentIndex >= 0 && (current[currentIndex]!.empty || isVisiblyExpanded(current, currentIndex));
+    }, {
       timeout: options.timeoutMs
     }).toBe(true);
     // The existing treeview populates children during expansion. Wait for its DOM to settle.
@@ -225,6 +247,10 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   if (courses.length !== 1) throw new Error(`Expected one top-level Courses folder; found ${courses.length}.`);
   if (!courses[0]!.row.empty && !isVisiblyExpanded(rows, courses[0]!.index)) await expand(courses[0]!.index, rows);
   rows = await readTree(dialog);
+  const loadedCourses = rows.find(row => row.level === 0 && row.text === 'Courses');
+  if (loadedCourses?.empty) {
+    throw new Error('Courses rendered as empty after the folder API failed. Discovery is incomplete; verify access/session with login:check and retry. No complete results were returned.');
+  }
   for (const root of options.roots ?? []) {
     const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && row.text === root);
     if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);

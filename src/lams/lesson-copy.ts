@@ -403,7 +403,9 @@ export async function traverseFolderPath(
     const target = await waitForVisibleTarget(folder, page, config, `folder: ${folderName}`, false);
     const expanded = await target.getAttribute('aria-expanded');
     if (expanded !== 'true') await target.click();
-    await target.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+    // Loading an empty folder removes .tree-parent. Re-resolve by its exact label
+    // instead of waiting on a class that described its previous state.
+    await exactTreeItem(dialog, folderName).first().waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
     console.log(`Verified folder: ${folderName}`);
   }
 }

@@ -163,3 +163,41 @@ test('does not hide expansion failures for folders without empty-folder evidence
   await page.setContent('<button id="openButton">Open</button><div role="dialog" aria-label="Open design"><div role="treeitem" class="tree-parent" aria-expanded="false">Courses</div></div>');
   await expect(discoverLessons(page, { timeoutMs: 300 })).rejects.toThrow();
 });
+
+test('recognizes folders that become empty after expansion without timing out or returning them as lessons', async ({ page }) => {
+  await page.setContent(`<button id="openButton">Open</button><div role="dialog" aria-label="Open design">
+    <div role="treeitem" class="tree-parent" aria-expanded="true">Courses</div>
+    <div id="empty" role="treeitem" class="tree-parent" aria-expanded="false"><span class="indent"></span>Empty</div>
+    </div><script>document.querySelector('#empty').onclick=function(){this.className='';this.insertAdjacentHTML('beforeend','<span class="node-icon treeview-empty"></span>');};</script>`);
+  expect(await discoverLessons(page, { query: 'Empty', timeoutMs: 1000 })).toEqual([]);
+});
+
+test('uses the observed expansion icon instead of selecting a row', async ({ page }) => {
+  await page.setContent(`<button id="openButton">Open</button><div role="dialog" aria-label="Open design">
+    <div role="treeitem" class="tree-parent" aria-expanded="false"><span class="expand-icon" style="display:inline-block;width:20px;height:20px"></span>Courses</div>
+    </div><script>document.querySelector('.expand-icon').onclick=function(event){event.stopPropagation();this.parentElement.setAttribute('aria-expanded','true');this.parentElement.insertAdjacentHTML('afterend','<div role="treeitem"><span class="indent"></span>Lesson</div>');};</script>`);
+  expect(await discoverLessons(page, { query: 'Lesson', timeoutMs: 1000 })).toEqual([{ sourceLessonTitle: 'Lesson', sourceFolderPath: ['Courses'] }]);
+});
+
+test('reports a depleted Courses tree as incomplete after API fallback', async ({ page }) => {
+  await page.setContent(`<button id="openButton">Open</button><div role="dialog" aria-label="Open design">
+    <div role="treeitem" aria-expanded="false"><span class="node-icon treeview-empty"></span>Courses</div>
+  </div>`);
+  await expect(discoverLessons(page, { timeoutMs: 500 })).rejects.toThrow('Discovery is incomplete');
+});
+
+test('reports sanitized response evidence and retries one transient API response', async ({ page }) => {
+  const messages: string[] = [];
+  let calls = 0;
+  await page.route('https://lams.test/authoring', route => route.fulfill({ contentType: 'text/html', body: '<button id="openButton">Open</button><div role="dialog" aria-label="Open design">Open design</div><script>window.LAMS_URL="https://lams.test/lams/"</script>' }));
+  await page.route('https://lams.test/lams/home/getFolderContents.do*', route => {
+    calls++;
+    if (calls === 1) return route.fulfill({ contentType: 'text/html', body: 'temporary' });
+    const top = new URL(route.request().url()).searchParams.get('folderID') === '';
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ folders: top ? [{name:'Courses',folderID:1}] : [], learningDesigns: [] }) });
+  });
+  await page.goto('https://lams.test/authoring');
+  expect(await discoverLessons(page, { timeoutMs: 1000, onProgress: m => messages.push(m) })).toEqual([]);
+  expect(calls).toBe(3);
+  expect(messages.join('\n')).toContain('HTTP 200, type text/html, final URL https://lams.test/lams/home/getFolderContents.do');
+});

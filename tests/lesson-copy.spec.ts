@@ -432,3 +432,11 @@ test('waits for the authoring loading overlay to clear before using the toolbar'
   await openSourceLesson(page, config);
   await expect(page.getByRole('heading', { name: config.sourceLessonTitle })).toBeVisible();
 });
+
+test('folder traversal survives a lazy folder losing tree-parent when it is empty', async ({ page }) => {
+  const { traverseFolderPath } = await import('../src/lams/lesson-copy.js');
+  await page.setContent(`<div role="dialog" aria-label="Save design">
+    <div role="treeitem" class="tree-parent" aria-expanded="false">Empty folder</div>
+    </div><script>document.querySelector('[role=treeitem]').onclick = function() { this.className=''; this.insertAdjacentHTML('beforeend', '<span class="node-icon treeview-empty"></span>'); };</script>`);
+  await traverseFolderPath(page.getByRole('dialog'), ['Empty folder'], page, { browser: { actionTimeoutMs: 500 } } as LamsConfig);
+});
