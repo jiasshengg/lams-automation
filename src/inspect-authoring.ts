@@ -18,7 +18,8 @@ async function main(): Promise<void> {
     await openLams(page, config);
     await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
-    await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
+    const source = process.argv.includes('--source');
+    await openLessonFromLibrary(activePage, source ? config.sourceFolderPath : config.destinationFolderPath, source ? config.sourceLessonTitle : config.lessonTitle, config);
     const graph = await inspectAuthoringGraph(activePage);
 
     console.log('\nLAMS Authoring Inspection');

@@ -1,3 +1,7 @@
+import { preflightTBL } from './lams/tbl-preflight.js';
+import { parsePlaceholderRepair, repairAEPlaceholders } from './lams/ae-placeholder.js';
+import { inspectAuthoringGraph } from './lams/authoring.js';
+import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { loadEnvFile } from './load-env.js';
@@ -19,10 +23,13 @@ import { reconcileAndWriteAEGraph } from './lams/ae-graph.js';
 loadEnvFile();
 
 async function main(): Promise<void> {
-  const commit = !process.argv.includes('--dry-run');
+  const preflightOnly = process.argv.includes('--preflight-only');
+  const commit = !process.argv.includes('--dry-run') && !preflightOnly;
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { defaultDestinationToSource: true });
   const irat = await resolveIratRequest(config);
+  const repairJson = readArgument('--repair-json');
+  const repair = repairJson ? parsePlaceholderRepair(JSON.parse(await readFile(await resolveInputFile(repairJson, '.json'), 'utf8'))) : undefined;
   const aeJson = readArgument('--ae-json');
   const aePlan = aeJson
     ? buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown)
@@ -50,11 +57,15 @@ async function main(): Promise<void> {
     await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openSourceLesson(activePage, config);
+    const preflight = await preflightTBL(activePage, config, irat, aePlan, repair);
+    if (!preflight.ready) throw new Error('Source preflight requires decisions; no copy or content changes were made. See all issues above.');
+    if (preflightOnly) return;
     const copy = await copyLesson(activePage, config, { commit });
     if (!commit) {
       console.log('Copy dry run complete; iRAT changes were not applied.');
       return;
     }
+    if (repair) await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
     const questionImages = await resolveIratQuestionImages(irat);
     const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs, questionImages);
     const result = await executeIratAutomation(editor, irat, { commit });
@@ -68,6 +79,11 @@ async function main(): Promise<void> {
           config.browser.actionTimeoutMs
         )
       : undefined;
+    if (preflight.expectations) {
+      const report = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...preflight.expectations });
+      console.log(formatValidationReport(report));
+      if (!report.passed) throw new Error('Completed authoring does not match the preflight expectations. Inspect saved state before publishing.');
+    }
     // Step 81 closes the Author screen once the design is saved. Publishing (steps 82-92)
     // is deliberately NOT done here: AGENTS.md requires a learner-facing lesson to be an
     // explicitly requested operation, so it lives in its own `lesson:index` entry point

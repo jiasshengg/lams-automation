@@ -36,7 +36,9 @@
     "login:lams": "node scripts/setup/login.mjs",
     "doctor": "node scripts/setup/doctor.mjs",
     "test:setup": "node --test scripts/setup/setup.test.mjs",
-    "login:check": "node scripts/setup/login.mjs --check-only"
+    "login:check": "node scripts/setup/login.mjs --check-only",
+    "preflight:tbl": "tsx src/run-tbl-irat.ts --preflight-only",
+    "repair:ae-placeholder": "tsx src/repair-ae-placeholder.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

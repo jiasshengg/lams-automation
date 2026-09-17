@@ -1,3 +1,6 @@
+import { expectedTBLGraph } from './lams/tbl-preflight.js';
+import { parsePlaceholderRepair, repairAEPlaceholders } from './lams/ae-placeholder.js';
+import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { readFile } from 'node:fs/promises';
 import { buildAEPlan } from './ae/plan.js';
@@ -14,6 +17,8 @@ import { openLessonFromLibrary } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
+  const repairJson = readArgument('--repair-json');
+  const repair = repairJson ? parsePlaceholderRepair(JSON.parse(await readFile(await resolveInputFile(repairJson, '.json'), 'utf8'))) : undefined;
   const aeJson = readArgument('--ae-json');
   if (!aeJson) throw new Error('Usage: npm run apply:ae -- --config <path> --ae-json <path> --request-json <json> [--team-setup <title>] [--dry-run] [--skip-sot-check]');
   const commit = !process.argv.includes('--dry-run');
@@ -35,6 +40,9 @@ async function main(): Promise<void> {
     await selectWorkspaceCourse(page, config);
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
+    if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle differs from the requested lesson.');
+    const expectations = expectedTBLGraph(await inspectAuthoringGraph(activePage), config, plan, repair);
+    console.log(`Reviewed full-lesson expectations: ${JSON.stringify(expectations)}`);
     if (!commit) {
       const graphPlan = planAEGraphReconciliation(await inspectAuthoringGraph(activePage), plan);
       console.log(`AE write preview: ${plan.nodes.length} node(s), ${plan.nodes.flatMap((node) => node.questions).length} question(s); no changes applied.`);
@@ -46,9 +54,13 @@ async function main(): Promise<void> {
       if (graphPlan.invalidGates.length > 0) throw new Error(`AE graph has unsupported gate conflicts: ${graphPlan.invalidGates.join('; ')}`);
       return;
     }
+    if (repair) await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
     const images = await resolveAEQuestionImages(plan);
     const editor = new LamsAEEditor(activePage, plan, config.browser.actionTimeoutMs, images);
     const result = await reconcileAndWriteAEGraph(activePage, plan, editor, teamSetup, config.browser.actionTimeoutMs);
+    const validation = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...expectations });
+    console.log(formatValidationReport(validation));
+    if (!validation.passed) throw new Error('AE saved but full-lesson validation failed. Inspect saved state before publishing.');
     console.log('\nAE application: COMPLETE');
     console.log(`Lesson: ${config.lessonTitle}`);
     console.log(`Nodes written: ${result.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);

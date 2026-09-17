@@ -266,7 +266,7 @@ export async function resolveIratRequest(config: LamsConfig): Promise<IratReques
   return request;
 }
 
-function validateObservedState(observed: IratObservedState, request: IratRequest): IratReadinessReport {
+export function validateObservedState(observed: IratObservedState, request: IratRequest): IratReadinessReport {
   const checks: IratReadinessCheck[] = [
     exactCheck('iRAT Gate', request.gate.name, observed.gate.name),
     exactCheck('iRAT activity', request.activityName, observed.activityName),

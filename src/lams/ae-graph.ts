@@ -542,6 +542,17 @@ export async function removeAuthoringNode(page: Page, node: GraphNode, timeoutMs
   );
 }
 
+/** Connect exact live nodes; verify identities before touching the canvas. */
+export async function connectAuthoringNodes(page: Page, from: GraphNode, to: GraphNode, timeoutMs: number): Promise<void> {
+  const graph = await inspectAuthoringGraph(page);
+  for (const node of [from, to]) {
+    if (uniqueByName(graph, node.name).uiid !== node.uiid) throw new Error(`Stale graph node "${node.name}".`);
+  }
+  if (from.uiid === to.uiid) throw new Error('Cannot connect a node to itself.');
+  if (hasTransition(graph, from.uiid, to.uiid)) return;
+  await withViewportShowingWholeCanvas(page, () => createTransition(page, from, to, timeoutMs));
+}
+
 /**
  * LAMS picks transition endpoints with Snap.getElementByPoint(event.pageX, event.pageY), and Snap
  * forwards those to document.elementFromPoint, which expects viewport coordinates. Page and
@@ -570,13 +581,13 @@ async function withViewportShowingWholeCanvas<T>(page: Page, run: () => Promise<
   console.log(
     `Transition viewport: ${original.width}x${height} (document ${documentHeight} -> ${applied.scroll}, innerHeight ${applied.inner})`
   );
-  if (applied.scroll > applied.inner) {
-    throw new Error(
-      `Canvas needs ${applied.scroll}px but the viewport only reaches ${applied.inner}px. LAMS hit-tests ` +
-        'transition clicks with page coordinates, so the design cannot be scrolled to connect it.'
-    );
-  }
   try {
+    if (applied.scroll > applied.inner) {
+      throw new Error(
+        `Canvas needs ${applied.scroll}px but the viewport only reaches ${applied.inner}px. LAMS hit-tests ` +
+          'transition clicks with page coordinates, so the design cannot be scrolled to connect it.'
+      );
+    }
     return await run();
   } finally {
     await page.setViewportSize(original);

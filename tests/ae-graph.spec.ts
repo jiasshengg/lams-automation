@@ -207,3 +207,24 @@ test('removes one exact authoring node through the verified LAMS runtime API', a
   await removeAuthoringNode(page, node(2, 'AE Gate 2', 'gate'), 2_000);
   expect(await page.locator('#canvas g.svg-activity').count()).toBe(0);
 });
+
+test('connection helper creates and verifies one edge, skips duplicates, and refuses stale nodes', async ({ page }) => {
+  const { connectAuthoringNodes } = await import('../src/lams/ae-graph.js');
+  const { inspectAuthoringGraph } = await import('../src/lams/authoring.js');
+  await page.setContent(`<button id="transitionButton">Transition</button><div id="canvas" style="height:400px"><svg height="400" width="600">
+    <g class="svg-activity svg-activity-tool" uiid="1" data-x="10" data-y="10" data-width="100" data-height="40"><rect x="10" y="10" width="100" height="40"/></g>
+    <g class="svg-activity svg-activity-tool" uiid="2" data-x="10" data-y="100" data-width="100" data-height="40"><rect x="10" y="100" width="100" height="40"/></g>
+    </svg></div><script>
+    const a={uiid:1,title:'AE 1',toolID:19,transitions:{from:[],to:[]}};
+    const b={uiid:2,title:'AE 2',toolID:19,transitions:{from:[],to:[]}};
+    window.layout={activities:[a,b]};
+    document.querySelector('g[uiid="2"]').onclick=()=>{ const edge={uiid:10,fromActivity:a,toActivity:b};a.transitions.from.push(edge);b.transitions.to.push(edge); };
+    </script>`);
+  const [from,to] = (await inspectAuthoringGraph(page)).nodes;
+  const viewport = page.viewportSize();
+  await connectAuthoringNodes(page,from!,to!,1000);
+  await connectAuthoringNodes(page,from!,to!,1000);
+  expect((await inspectAuthoringGraph(page)).transitions).toHaveLength(1);
+  expect(page.viewportSize()).toEqual(viewport);
+  await expect(connectAuthoringNodes(page,{...from!,uiid:99},to!,1000)).rejects.toThrow('Stale');
+});
