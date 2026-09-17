@@ -12,8 +12,8 @@ Resolve the source lesson and folder, requested new title, and copy destination 
 If the exact lesson title or folder is unknown, use read-only discovery. Users may supply module, TBL number, and academic year rather than exact internal fields:
 
 ```bash
-npm run discover:lessons -- --config configs/local.json --query 'FOM TBL06 2025'
-npm run discover:lessons -- --config configs/local.json --exact-title '[Jss-Demo-Test]'
+node scripts/run.mjs discover:lessons --config configs/local.json --query 'FOM TBL06 2025'
+node scripts/run.mjs discover:lessons --config configs/local.json --exact-title '[Jss-Demo-Test]'
 ```
 
 This opens the global Authoring library directly and searches all accessible folders under `Courses`; selecting a workspace course would not scope that library. Every whitespace-separated lesson-query term must occur somewhere in the combined title and folder path, case-insensitively. Use `--exact-title '<TITLE>'` instead of `--query` when title equality is required. Do not invent a calendar year for an ambiguous “last year”; resolve it from context or ask. Omit both search options to list all lessons. Optional `--roots '<ROOT_A>|<ROOT_B>'` limits traversal to exact direct child folders under `Courses`; these folder names need not equal the course name. Discovery reads the observed lazy-folder endpoint sequentially because burst traffic has produced non-JSON responses. A non-JSON response falls back to verified DOM traversal: `treeview-empty` proves an unexpandable folder is empty, and rendered descendants prove a folder is open when `aria-expanded` remains false; other expansion failures still stop discovery. `--max-expansions` defaults to 1000 folder reads or expansions; hitting the limit fails rather than presenting partial results as complete.
@@ -23,14 +23,14 @@ The output lists every matching candidate with `sourceLessonTitle` and `sourceFo
 The older exact-title locator remains available when the title and candidate roots are already known:
 
 ```bash
-npm run find:lesson -- --config configs/local.json --title '<EXACT_TITLE>' --roots '<ROOT_A>|<ROOT_B>'
+node scripts/run.mjs find:lesson --config configs/local.json --title '<EXACT_TITLE>' --roots '<ROOT_A>|<ROOT_B>'
 ```
 
 Unlike `discover:lessons`, `find:lesson` uses only the course in local configuration and returns the first exact title found. It does not prove uniqueness across the library.
 
 ```bash
-npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
-npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs copy:lesson --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs rename:lesson --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 Choose one command for the requested operation. Both save by default; append `--dry-run` for a requested preview. `milestone1` is a copy preview alias. No mandatory preview or additional approval turn is needed for an already requested operation.

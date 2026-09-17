@@ -24,7 +24,9 @@ Read the relevant focused instructions directly; routing does not require a new 
 
 1. Resolve source documents, source lesson, intended new title/destination, and requested content changes. Use available context and read-only discovery before asking for missing information. File names and partial file names are accepted. If no copy destination is stated, use the source lesson folder without asking for confirmation.
 2. If an iRAT or AE SoT is supplied, extract its embedded media and review question associations. AE structural extraction remains evidence for reviewed AE JSON; browser mutation uses that reviewed JSON.
-3. For copy-only work, use lesson management. For an existing lesson, skip copying and use the relevant focused skill.
+3. Before combined copy/content writes, run `node scripts/run.mjs preflight:tbl --request-json '<REQUEST_FILE>' --ae-json '<AE_FILE>'` (omit AE when absent). This inspects the source lesson without saving, lists iRAT inventory decisions and unplanned AE activities together, and derives full-lesson expectations from the reviewed template prefix plus SoT. The combined command repeats this check before copying. Use [template preflight and exact repairs](references/template-repair.md) for authorized placeholder removal. Resolve required decisions together; do not copy first and discover them during later writes.
+
+   For copy-only work, use lesson management. For an existing lesson, skip copying and use the relevant focused skill.
 4. For a requested new copy plus iRAT configuration, resolve the complete structured `irat` request following the iRAT skill, then run the combined workflow once:
 
    ```bash
@@ -45,12 +47,12 @@ Read the relevant focused instructions directly; routing does not require a new 
    update a lesson. It is a separate entry point run **after** the AE stage has completed and
    been verified - the authoring commands contain no publishing code.
 
-   Before running it, **ask the user for anything they have not stated**, in one turn, and
-   put the answers in the per-run `--request-json` rather than in `configs/local.json`:
+   Collect missing publishing information once alongside other required decisions. Continue authorized authoring while the date is pending; do not repeat the question on each progress update. Before publishing, put
+   the answers in the per-run `--request-json` rather than in `configs/local.json`:
 
    | Ask for | Field | If not stated |
    |---|---|---|
-   | The date the lesson should close | `lessonIndex.endDate` (`YYYY-MM-DD`) | **Always ask.** Never reuse a date from a config, an example, or a previous run - a wrong one publishes a lesson that closes on the wrong day. |
+   | The date the lesson should close | `lessonIndex.endDate` (`YYYY-MM-DD`) | **Ask once if missing.** Never reuse a date from a config, an example, or a previous run - a wrong one publishes a lesson that closes on the wrong day. |
    | The closing time, if not end of day | `lessonIndex.endTime` (`HH:MM`) | Defaults to `23:59`; confirm only if they want something else. |
    | Which student group | `lessonIndex.courseGrouping` | Only ask when the course offers more than one preset - the run names the available ones and stops. |
 
@@ -75,7 +77,9 @@ Read the relevant focused instructions directly; routing does not require a new 
    Report the 5-digit code and repeat the end date back when reporting the result, so the
    user can catch a wrong date before learners see it.
 
-7. Inspect or validate the resulting authoring graph when required for the requested outcome, using expectations from the source/request rather than inventing values to match the observed graph.
+7. Validate the resulting authoring graph before publishing, using the full-lesson expectations emitted by preflight. SoT gate counts describe the gates between AE activities; include each reviewed, retained template entrance gate separately. Never set expectations merely to equal observed counts.
 8. Report completed stages, verified results, remaining mismatches, and any partial saved state.
 
 The supported overall flow is authoring, not automatic completion of every TBL activity. AE writing and targeted verified graph repair are implemented. Arbitrary node deletion or rewiring outside the reviewed AE plan is not. Learner publishing is the final stage of the full flow, run after AE through `lesson:index`; it needs the user's end date and is never appended to a request that only asks for authoring. See [operation details](references/operations.md) when needed.
+
+Use documented defaults without another approval turn: missing AE marks are 4 and correct multiple-answer options split 100% equally. Resolve `_review` notes through source evidence and those defaults; ask only about genuine content ambiguity or missing authorization. Never offer publishing with a known unresolved placeholder as a substitute for completing the requested authoring.

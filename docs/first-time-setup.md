@@ -48,3 +48,18 @@ A successful `npm run build` alone is insufficient: it does not execute esbuild/
 To move the source folder to another computer, leave out `.tools`, `node_modules`, `.playwright`, `.env`, and `configs/local.json`. Each user should run setup on their own computer so native packages and login data are never copied between users.
 
 References: [Node.js release archive](https://nodejs.org/en/download/archive/v24), [esbuild platform-specific installation](https://esbuild.github.io/getting-started/#simultaneous-platforms), [npm clean installation](https://docs.npmjs.com/cli/v11/commands/npm-ci/), [Playwright browser installation](https://playwright.dev/docs/browsers).
+
+## Checking an existing login without signing in again
+
+Run `node scripts/run.mjs login:check` from the project folder, using the same browser
+cache environment as setup. Do not interact with its browser: manual input invalidates
+the check. If it fails, run `npm run login:lams` and handle sign-in yourself. Record the
+printed configuration/profile/browser and the sanitized failure URL. A pass on one
+computer does not diagnose another computer, and a restart pass does not guarantee
+weeks without MFA. Do not reset or copy profiles as an initial diagnostic step.
+
+If another automation owns the profile, wait for it to finish. The lock error names the
+owner PID. Only after verifying that both the owning process and browser have exited
+may a stale `.automation-lock` directory be removed; do not remove Chromium lock files
+or login data. Prefer `node scripts/run.mjs <operation> --log-file run.log` over piped
+commands so failures keep their real exit status, including in PowerShell.

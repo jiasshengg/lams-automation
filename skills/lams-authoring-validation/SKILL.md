@@ -8,8 +8,8 @@ description: Inspect or validate a LAMS lesson authoring graph, node counts, lin
 Read [shared operating rules](../lams-tbl-authoring/references/shared.md). Resolve the existing lesson using `destinationFolderPath` and `lessonTitle`.
 
 ```bash
-npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
-npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs inspect:authoring --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs validate:authoring --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 Inspection lists observed nodes and transitions. Validation compares those observations against the reviewed fields in [configuration](../lams-tbl-authoring/references/configuration.md). Both are read-only. If the expected graph is unknown, inspect and describe what is present; do not populate expectations from observations just to produce PASS.

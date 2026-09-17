@@ -40,8 +40,8 @@ The shared LAMS URL defaults to `https://ilams.lamsinternational.com/lams/index.
 Use read-only discovery with partial details:
 
 ```bash
-npm run discover:lessons -- --config configs/local.json --query 'FOM TBL06 2025'
-npm run discover:lessons -- --config configs/local.json --exact-title '[Jss-Demo-Test]'
+node scripts/run.mjs discover:lessons --config configs/local.json --query 'FOM TBL06 2025'
+node scripts/run.mjs discover:lessons --config configs/local.json --exact-title '[Jss-Demo-Test]'
 ```
 
 The command opens the global Authoring library directly and searches under `Courses`. Every search term must occur in the lesson title or its folder path (case-insensitive); `--exact-title` checks title equality instead. Omit both search options to list all lessons, or use `--roots 'Exact folder A|Exact folder B'` to restrict the search to direct child folders under `Courses`. There is no hardcoded playground folder.
@@ -51,7 +51,7 @@ Results contain the exact `sourceLessonTitle` and `sourceFolderPath` needed by l
 For individual operations, pass changing lesson values without editing the file:
 
 ```bash
-npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
+node scripts/run.mjs milestone1 --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
 ```
 
 The skill constructs this per-run JSON automatically from the user's prompt. The command opens and verifies the source lesson, Save As dialog, and requested destination, but does not save.
@@ -59,7 +59,7 @@ The skill constructs this per-run JSON automatically from the user's prompt. The
 Copy, rename, gate-fix, and iRAT commands save by default. Add `--dry-run` for an optional preview; `--commit` is accepted for compatibility. `milestone1` always previews. To save a copy:
 
 ```bash
-npm run copy:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs copy:lesson --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 Saving is refused when the new title matches the source or still contains a placeholder such as `REPLACE`.
@@ -75,8 +75,8 @@ design; the committed run changes only that select, verifies nothing else about 
 moved, saves, and reopens the lesson to confirm the value persisted:
 
 ```bash
-npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>' --dry-run
-npm run fix:gate -- --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>'
+node scripts/run.mjs fix:gate --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>' --dry-run
+node scripts/run.mjs fix:gate --config configs/local.json --gate "iRAT Gate" --rotation-seconds 10 --request-json '<REQUEST_JSON>'
 ```
 
 It refuses a gate that is not an exact unique match or is not a dynamic-password gate, and
@@ -86,13 +86,13 @@ automation edits a gate, and only when explicitly asked; validation itself stays
 Dry-run an in-place rename of an already-duplicated lesson:
 
 ```bash
-npm run rename:lesson -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","DL Playground 2026/2027 [internal]","FOM"],"sourceLessonTitle":"FOM TBL06 old title","lessonTitle":"FOM TBL06 new title"}' --dry-run
+node scripts/run.mjs rename:lesson --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","DL Playground 2026/2027 [internal]","FOM"],"sourceLessonTitle":"FOM TBL06 old title","lessonTitle":"FOM TBL06 new title"}' --dry-run
 ```
 
 The optional dry run opens and cancels the inline title editor without changing the lesson. Omit `--dry-run` to save the requested rename:
 
 ```bash
-npm run rename:lesson -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs rename:lesson --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 The committed rename saves in the same folder, then verifies the new exact title exists and the old one is absent. It does not move, publish, start, or restructure the lesson.
@@ -100,7 +100,7 @@ The committed rename saves in the same folder, then verifies the new exact title
 Inspect the copied lesson's SVG graph without changing it:
 
 ```bash
-npm run inspect:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs inspect:authoring --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 This prints each activity's UIID, name, type, Team Setup grouping association, and every transition endpoint available from the LAMS runtime model.
@@ -108,13 +108,13 @@ This prints each activity's UIID, name, type, Team Setup grouping association, a
 Validate the copied lesson against the exact manually configured reference flow:
 
 ```bash
-npm run validate:authoring -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs validate:authoring --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 Prepare the iRAT work as a read-only preflight:
 
 ```bash
-npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs prepare:irat --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 The request supplies a changing `irat` object with the exact gate, Team Setup, question content, answer correctness/weights, formatting, and advanced-setting expectations. The preflight opens the exact copied lesson, verifies one iRAT Gate and one iRAT node, proves the gate-to-iRAT transition and Team Setup association, and prints every planned change without writing to LAMS. Correct-answer weights must total 100 for each question; incorrect answers must have zero weight.
@@ -122,7 +122,7 @@ The request supplies a changing `irat` object with the exact gate, Team Setup, q
 Run the full copy → iRAT workflow only with exact per-run values and the requested structured iRAT data:
 
 ```bash
-npm run run:tbl-irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs run:tbl-irat --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 The live adapter uses the observed authoring-canvas controls and the stable Assessment authoring IDs from the official LAMS v4.8 source. It updates the password gate, Team Setup association, existing multiple-choice questions as new versions, missing questions through Create question → Multiple choice → Save, answer weights, mandatory state, advanced settings, Print View verification, the iRAT tool, and finally the design. It accepts empty question lists, verifies each resulting reference row and the saved question inventory, and reports created and updated questions separately. Complete requests must include all existing questions; duplicate titles and type mismatches stop before mutation. Optional per-question `feedback` imports supplied rationales and `prefixAnswersWithLetters` controls answer labels. Basic inline sub/superscript and emphasis markup is preserved. Missing questions append; existing questions are not reordered. It deliberately refuses non-multiple-choice questions and non-`all questions` distribution settings until an exact configuration model exists for those alternatives.
@@ -130,13 +130,13 @@ The live adapter uses the observed authoring-canvas controls and the stable Asse
 iRAT question titles default to `Question N`, no font or size is ever written (the editor is verified to be at the LAMS default after each write), and when `irat.sourceDocx` is set the SoT document's italic/bold/underline/sub/superscript formatting is applied to the request text before writing. To import embedded iRAT images, set `irat.sourceDocx` and optionally override a question's one-based source position with `sourceQuestionNumber`. Extract and review the media mapping independently with:
 
 ```bash
-npm run extract:sot-media -- --sot-docx "iRAT SOT.docx"
+node scripts/run.mjs extract:sot-media --sot-docx "iRAT SOT.docx"
 ```
 
 For one continuous copy → iRAT → AE run, include reviewed AE JSON:
 
 ```bash
-npm run run:tbl -- --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
+node scripts/run.mjs run:tbl --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
 ```
 
 Authoring stops after the design is saved and the Author screen is closed. Publishing the
@@ -158,19 +158,18 @@ npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST
 | `--dry-run` | Stop after the copy preview; nothing is authored. |
 | `--slow-mo <ms>` | Pause before every action and force a visible browser, to watch a run. |
 
-### `npm run` drops flags in PowerShell
+### Reliable arguments and exit codes in PowerShell
 
-npm's PowerShell shim strips `--flag` names from `npm run <script> -- --flag value`, leaving
-only the values, so the script silently falls back to its defaults. Verified with npm 10.9.2
-on Windows; Git Bash and cmd are unaffected. Either run the entry point directly, which
-always works:
+This project has documented npm/PowerShell runs where flag names were lost. Use the
+direct runner to bypass that forwarding layer and reject stray positional values:
 
 ```bash
-npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs run:tbl --config configs/local.json --request-json request.json --log-file authoring.log
 ```
 
-or run the `npm run` form from Git Bash rather than PowerShell. If a run reports missing
-configuration you are sure you passed, check the echoed command line for dropped flags.
+The runner preserves the actual operation's exit code while saving its output. A failed
+run must not be treated as successful because a following `echo`, `tee`, or `tail` exited
+successfully. The same command works on macOS; `npx tsx src/<entry>.ts` remains available.
 
 Gate settings can also be validated without opening or changing the gate property dialogs. Add exact expectations to the per-run request JSON:
 
@@ -200,9 +199,9 @@ Each property is optional, so different lessons can validate only the settings t
 First extract the structural evidence from the supplied SoT DOCX:
 
 ```bash
-npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx"
-npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx" --out /tmp/ae-sot-analysis.json --json
-npm run extract:ae-sot -- --sot-docx "/absolute/path/AE SOT.docx" --draft /tmp/ae-plan-draft.json
+node scripts/run.mjs extract:ae-sot --sot-docx "/absolute/path/AE SOT.docx"
+node scripts/run.mjs extract:ae-sot --sot-docx "/absolute/path/AE SOT.docx" --out /tmp/ae-sot-analysis.json --json
+node scripts/run.mjs extract:ae-sot --sot-docx "/absolute/path/AE SOT.docx" --draft /tmp/ae-plan-draft.json
 ```
 
 The extractor treats only a standalone literal `--- BREAK ---` paragraph as an AE boundary. It derives `expectedAENodes = breaks + 1`, `expectedAEGates = breaks`, inventories the question ranges, explicit marks, selectable/open-response types, detected answer keys, and embedded-image counts, and stops at a standalone `END`. Page boundaries and `Case` headings never create nodes.
@@ -224,7 +223,7 @@ The draft follows the document's layout, while the paragraph format and font sta
 Extract the embedded images and inspect their question assignments:
 
 ```bash
-npm run extract:sot-media -- --sot-docx "AE SOT.docx"
+node scripts/run.mjs extract:sot-media --sot-docx "AE SOT.docx"
 ```
 
 Each image records the question it belongs to, the caption line printed under it, and whether the document printed it above or below the stem. A figure under a new `Case` heading illustrates the question that follows it, not the previous one; cover art before the first section stays unassigned.
@@ -232,7 +231,7 @@ Each image records the question it belongs to, the caption line printed under it
 Review the extraction warnings, then confirm the draft against [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, links, and question content must be confirmed before browser use. Set root-level `sourceDocx` to import embedded images by question number, or add explicit local `images` (each accepting `placement` and `caption`) to individual questions. Preflight the reviewed JSON locally:
 
 ```bash
-npm run plan:ae -- --ae-json configs/ae-example.json
+node scripts/run.mjs plan:ae --ae-json configs/ae-example.json
 ```
 
 The preflight refuses invalid data and derives a deterministic plan that:
@@ -252,7 +251,7 @@ The preflight refuses invalid data and derives a deterministic plan that:
 To inspect one exact AE activity in the configured course without saving, first add an evidence-backed `selectors.aeOpenActivity` to ignored `configs/local.json`. Then run:
 
 ```bash
-npm run inspect:ae -- --config configs/local.json --ae-json <AE_JSON> --node "<EXACT_AE_NODE_TITLE>" --request-json '<REQUEST_JSON>'
+node scripts/run.mjs inspect:ae --config configs/local.json --ae-json <AE_JSON> --node "<EXACT_AE_NODE_TITLE>" --request-json '<REQUEST_JSON>'
 ```
 
 The command verifies the configured course heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
@@ -260,16 +259,14 @@ The command verifies the configured course heading, destination lesson, complete
 Write the reviewed AE plan to an existing lesson, creating missing Assessment nodes, permission gates, questions, and linear transitions when required:
 
 ```bash
-npm run apply:ae -- --config configs/local.json --ae-json <AE_JSON> --request-json '<REQUEST_JSON>'
+node scripts/run.mjs apply:ae --config configs/local.json --ae-json <AE_JSON> --request-json '<REQUEST_JSON>'
 ```
 
 Add `--dry-run` to report missing nodes, gates, connections, and gate-bypass edges without mutation. A committed run updates existing questions as new versions, creates missing MCQ/essay questions, imports images and their captions on the side of the stem the Source-of-Truth printed them, applies canonical AE settings, associates Team Setup, saves the design, and verifies the resulting graph. Print View verification fails when an imported image or its caption is missing. It stops rather than deleting extra questions/nodes or removing a direct transition that would bypass a planned gate.
 
 ## Lesson index and monitoring
 
-Run these with `npx tsx` directly, not `npm run -- --flag`: npm strips the flag *names*
-from forwarded arguments on Windows, so `--config X` arrives as a bare `X` and the run
-falls back to `configs/example.json`.
+Use `node scripts/run.mjs lesson:index` (or `npx tsx` directly) to avoid npm/PowerShell argument forwarding. Operational defaults use `configs/local.json`, and the direct runner rejects stray values instead of silently using defaults.
 
 This is the stage that runs **after** AE, as its own command, and only when publishing has
 been explicitly requested: `AGENTS.md` forbids making a copied lesson learner-facing
@@ -415,8 +412,8 @@ The final block is only a schema example. Replace it with evidence from the DOM 
 `--sot-docx`, `--ae-json`, and `--config` accept paths, filenames, or case-insensitive parts of filenames:
 
 ```bash
-npm run extract:ae-sot -- --sot-docx 'FOM TBL01'
-npm run plan:ae -- --ae-json 'ae-example'
+node scripts/run.mjs extract:ae-sot --sot-docx 'FOM TBL01'
+node scripts/run.mjs plan:ae --ae-json 'ae-example'
 ```
 
 Lookup searches the current project, Documents, Downloads, and Desktop recursively. Hidden and generated directories and symlink entries are skipped. Exact filenames take priority; multiple remaining matches are listed for selection. In conversation, choose a candidate by number or distinguishing name and the agent passes its resolved path. Outputs such as `--out` still use literal paths.
@@ -424,3 +421,42 @@ Lookup searches the current project, Documents, Downloads, and Desktop recursive
 The course is configurable through `workspaceCourse` in `--request-json`; there is no playground allowlist. An exact course match wins, otherwise navigation accepts one unique case-insensitive partial match and stops on ambiguity. The global Authoring library may expose folders outside the selected course. The shared navigation helper uses the first visible matching control in DOM order for non-course navigation. Content-specific lesson and graph checks remain. Learner-facing `lesson:index` retains its separate `--commit` requirement.
 
 Copies default to the source lesson folder when `destinationFolderPath` is omitted from the per-run request, even if local configuration has another destination. Supply `destinationFolderPath` only to save elsewhere. Existing-lesson edits and renames save in place.
+
+## Reliable runs and preflight
+
+All operational entry points default to `configs/local.json`; `configs/example.json`
+is only a template. Configuration and resolved browser/profile paths are printed at
+startup. Explicit `--config` remains supported.
+
+Use the direct runner on macOS or Windows (including PowerShell). It avoids npm's
+argument-forwarding layer and returns the actual operation's failure status. Use JSON
+files rather than embedding JSON in shell commands. Its built-in logger avoids pipelines
+that accidentally replace a failing exit code with a successful `tee`/`tail` result:
+
+```bash
+node scripts/run.mjs login:check
+node scripts/run.mjs preflight:tbl --request-json request.json --ae-json ae-plan.json --log-file preflight.log
+node scripts/run.mjs run:tbl --request-json request.json --ae-json ae-plan.json --repair-json repair.json --log-file authoring.log
+```
+
+Omit `--repair-json` when no exact placeholder removal is authorized. Read
+[template preflight and repair](skills/lams-tbl-authoring/references/template-repair.md)
+for the repair schema and existing-lesson command. Preflight inspects source questions
+and AE placeholders before copying, reports decisions together, and emits full-lesson
+validation expectations including retained entrance gates. It does not save anything.
+Authoring still cannot infer deletion of unexpected content or publish without an end date.
+
+`login:check` opens the existing profile without an interactive sign-in phase; manual
+input invalidates the result. Use `login:lams` separately when reauthentication is
+needed. No successful check guarantees a future session lifetime. Test the affected
+computer after a later browser restart/day as well as immediately after login.
+
+Browser launches hold an atomic `<profile>.automation-lock` with the owner PID. Wait
+for that process to close before starting another run. Never delete browser session files
+to resolve contention. After a crash, remove only a stale automation-lock directory after
+confirming that no process/browser still uses that profile. Lock cleanup also runs when
+the browser closes normally. Background execution is supported; await completion.
+
+The default profile remains repository-local for compatibility and isolated clean-install
+tests. An absolute `browser.userDataDir` can select a stable per-machine location across
+project upgrades. Do not silently migrate, reset, or share profiles across machines.

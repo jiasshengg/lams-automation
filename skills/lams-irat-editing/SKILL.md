@@ -10,7 +10,7 @@ Read [shared operating rules](../lams-tbl-authoring/references/shared.md) and th
 Use `destinationFolderPath` and `lessonTitle` for the existing lesson. Resolve the exact activity, Team Setup, gate, and question titles. Inspect existing question rows when needed:
 
 ```bash
-npm run inspect:irat-questions -- --config configs/local.json --node '<IRAT_NODE>' --request-json '<REQUEST_JSON>'
+node scripts/run.mjs inspect:irat-questions --config configs/local.json --node '<IRAT_NODE>' --request-json '<REQUEST_JSON>'
 ```
 
 `--source` inspects the configured source lesson instead. `--dump-question '<EXACT_QUESTION_TITLE>'` provides additional read-only question-editor evidence. Do not infer a correct answer from an existing answer key when the user says that key is wrong; use supplied corrected content or reviewed source evidence.
@@ -28,8 +28,8 @@ Question titles default to `Question N` (from `sourceQuestionNumber` or position
 Only multiple-choice questions and `displayAllQuestions=true` are supported by the live adapter. Correct answer weights must total 100; incorrect answers have zero weight. Preflight can reject an incorrect Team Setup association before the association-writing step, so this is not a general repair path for missing grouping or broken graph structure.
 
 ```bash
-npm run prepare:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
-npm run apply:irat -- --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs prepare:irat --config configs/local.json --request-json '<REQUEST_JSON>'
+node scripts/run.mjs apply:irat --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
 `prepare:irat` is an optional read-only graph preflight. `apply:irat` saves by default and has its own preflight; append `--dry-run` for an inspection-only preview. Do not run the combined copy workflow for an existing lesson.

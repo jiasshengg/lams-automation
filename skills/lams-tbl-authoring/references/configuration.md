@@ -7,14 +7,14 @@ Use `configs/local.json` only for stable local environment values and fallback d
 Pass a compact JSON object as one shell-quoted argument:
 
 ```bash
-npm run milestone1 -- --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
+node scripts/run.mjs milestone1 --config configs/local.json --request-json '{"sourceFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"sourceLessonTitle":"[Jss] TEST LESSON A 280826","destinationFolderPath":["Courses","! My Courses","! Sample & Orientation Lessons"],"lessonTitle":"[Jss-Skill] TEST LESSON B 280826"}'
 ```
 
 The scripts merge these permitted request values in memory and derive `destinationFolder` from `destinationFolderPath` when omitted. They reject attempts to override stable `baseUrl`, browser settings, or selectors.
 
 ## Resolving lesson identity
 
-Users need not supply an exact source title or folder if they can be resolved from library evidence. `npm run discover:lessons -- --config configs/local.json --query 'FOM TBL06 2025'` searches title and folder-path terms across accessible folders under `Courses`. The command opens the global Authoring library directly because selecting a workspace course does not restrict that library. Use `--exact-title '<TITLE>'` when title equality is required. Discovery reads the lazy-folder endpoint sequentially, falls back to rendered-tree traversal when that endpoint is not JSON, and reports progress; it still completes the full requested scope before marking results complete. Optional `--roots 'Folder A|Folder B'` narrows the search to exact direct child folders under `Courses`. Use the returned candidate's exact title/path in the mutation request; ask for a choice when ambiguous. No automatic first-match selection occurs.
+Users need not supply an exact source title or folder if they can be resolved from library evidence. `node scripts/run.mjs discover:lessons --config configs/local.json --query 'FOM TBL06 2025'` searches title and folder-path terms across accessible folders under `Courses`. The command opens the global Authoring library directly because selecting a workspace course does not restrict that library. Use `--exact-title '<TITLE>'` when title equality is required. Discovery reads the lazy-folder endpoint sequentially, falls back to rendered-tree traversal when that endpoint is not JSON, and reports progress; it still completes the full requested scope before marking results complete. Optional `--roots 'Folder A|Folder B'` narrows the search to exact direct child folders under `Courses`. Use the returned candidate's exact title/path in the mutation request; ask for a choice when ambiguous. No automatic first-match selection occurs.
 
 ## Copy fields
 
@@ -46,7 +46,7 @@ Use `sourceFolderPath` for the exact folder containing the existing lesson, `sou
 
 `expectedFlow` contains the exact node names in their expected linear order. Do not populate it from the observed graph merely to make validation pass.
 
-`expectedAENodes` and `expectedAEGates` are reviewed expectations. When an AE SOT DOCX is available, derive the initial values with `npm run extract:ae-sot -- --sot-docx '<PATH>'`; the command returns them under `requestVariables`. Confirm the break markers before browser use.
+`expectedAENodes` and `expectedAEGates` are reviewed expectations. When an AE SOT DOCX is available, derive the initial values with `node scripts/run.mjs extract:ae-sot --sot-docx '<PATH>'`; the command returns them under `requestVariables`. Confirm the break markers before browser use. These extracted counts cover the SoT AE chain only. Use preflight:tbl to combine that chain with the reviewed template prefix; retained AE entrance gates increase the whole-lesson gate expectation. Do not copy SoT gate counts blindly into whole-lesson validation.
 
 Use `expectedGateProperties` for exact gate requirements:
 
@@ -99,7 +99,7 @@ For read-only AE inspection, `selectors.aeOpenActivity` is a stable local-enviro
 
 ## AE SOT structural extraction
 
-Run `npm run extract:ae-sot -- --sot-docx '<PATH>' [--out '<JSON_PATH>'] [--draft '<JSON_PATH>'] [--json]`. The read-only extractor:
+Run `node scripts/run.mjs extract:ae-sot --sot-docx '<PATH>' [--out '<JSON_PATH>'] [--draft '<JSON_PATH>'] [--json]`. The read-only extractor:
 
 - treats standalone `--- BREAK ---` paragraphs as the only node separators;
 - stops at standalone `END` and ignores version tracking after it;

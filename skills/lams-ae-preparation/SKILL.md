@@ -10,11 +10,11 @@ Read [shared operating rules](../lams-tbl-authoring/references/shared.md). DOCX 
 Choose the requested operation:
 
 ```bash
-npm run extract:ae-sot -- --sot-docx '<DOCX_NAME_OR_PATH>' [--out '<OUTPUT_PATH>'] [--draft '<PLAN_PATH>'] [--json]
-npm run plan:ae -- --ae-json '<JSON_NAME_OR_PATH>' [--json]
-npm run inspect:ae -- --config configs/local.json --ae-json '<JSON_NAME_OR_PATH>' --node '<EXACT_AE_NODE>' --request-json '<REQUEST_JSON>'
-npm run extract:sot-media -- --sot-docx '<DOCX_NAME_OR_PATH>' [--out-dir '<DIRECTORY>']
-npm run apply:ae -- --config configs/local.json --ae-json '<JSON_NAME_OR_PATH>' --request-json '<REQUEST_JSON>' [--team-setup '<EXACT_TITLE>']
+node scripts/run.mjs extract:ae-sot --sot-docx '<DOCX_NAME_OR_PATH>' [--out '<OUTPUT_PATH>'] [--draft '<PLAN_PATH>'] [--json]
+node scripts/run.mjs plan:ae --ae-json '<JSON_NAME_OR_PATH>' [--json]
+node scripts/run.mjs inspect:ae --config configs/local.json --ae-json '<JSON_NAME_OR_PATH>' --node '<EXACT_AE_NODE>' --request-json '<REQUEST_JSON>'
+node scripts/run.mjs extract:sot-media --sot-docx '<DOCX_NAME_OR_PATH>' [--out-dir '<DIRECTORY>']
+node scripts/run.mjs apply:ae --config configs/local.json --ae-json '<JSON_NAME_OR_PATH>' --request-json '<REQUEST_JSON>' [--team-setup '<EXACT_TITLE>']
 ```
 
 Extraction and preflight run locally without LAMS. Structural extraction uses standalone `--- BREAK ---` markers and stops at `END`; page breaks and Case headings are not AE boundaries. Case headings do name the nodes: `AE Case 3 Q3-6` within one case, `AE Case 1 Q1 to Case 2 Q2` across two. Extraction preserves the bold, italic, underline, superscript, and subscript of each stem and option. Media extraction reads embedded DOCX images, dimensions, hashes, alt text, captions, and whether the document printed each figure above or below its question. Review unassigned images and all structural warnings. Suggested node titles are not exact LAMS titles.
@@ -28,3 +28,5 @@ Inspection requires `destinationFolderPath`, `lessonTitle`, and an exact AE node
 `apply:ae` saves by default; `--dry-run` reports missing AE nodes, gates, transitions, gate-bypass edges, and planned gates requiring replacement without mutation. A committed run writes every reviewed AE question, including single- and multiple-answer MCQs with validated weights, creates missing questions, imports images and their captions into CKEditor on the side of the stem the Source-of-Truth printed them, applies canonical settings, associates Team Setup, creates missing Assessment/gate nodes, removes exact gate-bypass transitions, replaces exact misconfigured planned gates, adds the reviewed linear connections, saves, and verifies. It still refuses extra questions requiring deletion and ambiguous/non-gate title conflicts.
 
 Report exact nodes/questions/images written, graph additions, verified results, and diagnostics. Route independent topology checks to [authoring validation](../lams-authoring-validation/SKILL.md).
+
+For existing template placeholders, use the [exact repair workflow](../lams-tbl-authoring/references/template-repair.md). `apply:ae` checks the complete template/AE inventory before writes, accepts an authorized `--repair-json`, and validates full-lesson counts including retained entrance gates. Unknown AE activities require an exact disposition; never infer deletion.
