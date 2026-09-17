@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
-import { selectWorkspaceCourse } from '../src/lams/navigation.js';
+import { openCoursePage, selectWorkspaceCourse } from '../src/lams/navigation.js';
 
 const workspaceCourse = 'User-selected course';
 
@@ -126,4 +126,29 @@ test('uses the first visible navigation match and skips hidden matches', async (
   await page.setContent('<button hidden>Open</button><button id="first">Open</button><button>Open</button>');
   const target = await waitForVisibleTarget(page.getByRole('button', { name: 'Open', includeHidden: true }), page, config(), 'open', false);
   await expect(target).toHaveAttribute('id', 'first');
+});
+
+/**
+ * Regression: publishing created the lesson, then returned to the base URL only, which
+ * lands on whatever course LAMS treats as current. The lesson-row lookup that follows then
+ * read a different course's rows and reported the new lesson as missing, so its 5-digit
+ * code could not be read. Returning to the course page has to reselect the course.
+ */
+test('openCoursePage reselects the configured course after navigating away', async ({ page }) => {
+  const courseHome = `data:text/html,${encodeURIComponent(`
+    <button aria-label="Toggle course menu" onclick="document.querySelector('[role=dialog]').hidden = false">Menu</button>
+    <div role="dialog" hidden>
+      <input type="search" aria-label="Search for courses">
+      <button onclick="this.closest('[role=dialog]').hidden = true; document.querySelector('h2').hidden = false">
+        ${workspaceCourse}
+      </button>
+    </div>
+    <h2 hidden>${workspaceCourse}</h2>
+  `)}`;
+
+  // Stand where the Add Lesson wizard leaves the browser: away from the course page.
+  await page.setContent('<h2>Add Lesson</h2>');
+
+  await openCoursePage(page, { ...config(), baseUrl: courseHome } as LamsConfig);
+  await expect(page.getByRole('heading', { name: workspaceCourse })).toBeVisible();
 });

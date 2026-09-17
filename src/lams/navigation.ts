@@ -72,6 +72,19 @@ export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Pro
   console.log(`Opened configured course: ${selectedCourseName}`);
 }
 
+/**
+ * Returns the browser to the configured course page.
+ *
+ * `openLams` alone only loads the base URL, which lands on whatever course LAMS treats as
+ * current - not necessarily the one this run selected. Any step that navigates away (the
+ * Add Lesson wizard, authoring) must come back through here, or a later lookup reads a
+ * different course's lesson rows.
+ */
+export async function openCoursePage(page: Page, config: LamsConfig): Promise<void> {
+  await openLams(page, config);
+  await selectWorkspaceCourse(page, config);
+}
+
 export async function navigateToPreviousCohort(page: Page, config: LamsConfig): Promise<void> {
   await clickConfigured(page, config, 'previousCohort', config.selectors.previousCohort, true);
   await assertNextTarget(page, config, 'tbl', config.selectors.tbl);

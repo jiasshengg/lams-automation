@@ -7,7 +7,7 @@ import { saveDiagnostics } from './lams/diagnostics.js';
 import { createLessonFromMostRecentDesign, openAddLesson } from './lams/lesson-index.js';
 import { openMonitoring } from './lams/monitoring.js';
 import { sendCodeToSheet } from './sheets/code-sink.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
+import { openCoursePage } from './lams/navigation.js';
 
 loadEnvFile();
 
@@ -30,8 +30,7 @@ async function main(): Promise<void> {
   const page = context.pages()[0] ?? (await context.newPage());
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
+    await openCoursePage(page, config);
 
     if (monitorOnly) {
       const monitoring = await openMonitoring(page, config.lessonTitle, config);
@@ -61,7 +60,10 @@ async function main(): Promise<void> {
       return;
     }
 
-    await openLams(page, config);
+    // The Add Lesson wizard navigated away from the course page, so the course has to be
+    // reselected before the lesson rows can be read; the base URL alone lands on whatever
+    // course LAMS treats as current.
+    await openCoursePage(page, config);
     const monitoring = await openMonitoring(page, result.lessonTitle, config);
     console.log('\nMonitoring workflow: OK');
     console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
