@@ -44,45 +44,75 @@ async function waitForCourseMenu(context, timeoutMs) {
   return false;
 }
 
+// Verification must not succeed because somebody completed another login during it.
+export async function installNoInteractionGuard(context) {
+  let interacted = false;
+  await context.exposeBinding('__lamsVerificationInput', () => { interacted = true; });
+  await context.addInitScript(() => {
+    for (const event of ['pointerdown', 'keydown', 'submit']) {
+      document.addEventListener(event, (e) => {
+        if (!e.isTrusted) return;
+        void window.__lamsVerificationInput();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, true);
+    }
+  });
+  return () => {
+    if (interacted) throw new Error('Automatic login verification was interrupted by manual input. Rerun npm run login:check without interacting with the browser.');
+  };
+}
+
 export async function openLamsSignIn({
   settings: suppliedSettings,
+  checkOnly = false,
+  guard = installNoInteractionGuard,
   launch = launchLamsBrowser,
   verify = waitForCourseMenu
 } = {}) {
   const settings = suppliedSettings ?? await readLoginSettings();
   const options = { headless: false, ...(settings.channel ? { channel: settings.channel } : {}) };
-  const context = await launch(settings.userDataDir, options);
-  try {
-    const page = context.pages()[0] ?? await context.newPage();
-    await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });
-    console.log(`Opened LAMS in the automation browser: ${settings.baseUrl}`);
-    console.log(`Sign in in the browser window. Setup will wait up to ${Math.round(settings.timeoutMs / 60_000)} minutes.`);
-    console.log('If Microsoft asks "Stay signed in?", choose Yes if organisational policy permits.');
-    if (!await verify(context, settings.timeoutMs)) {
-      throw new Error('LAMS sign-in was not verified before the setup timeout. Run npm run login:lams to try again.');
+  if (!checkOnly) {
+    const context = await launch(settings.userDataDir, options);
+    try {
+      const page = context.pages()[0] ?? await context.newPage();
+      await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });
+      console.log(`Opened LAMS in the automation browser: ${settings.baseUrl}`);
+      console.log(`Sign in in the browser window. Setup will wait up to ${Math.round(settings.timeoutMs / 60_000)} minutes.`);
+      console.log('If Microsoft asks "Stay signed in?", choose Yes if organisational policy permits.');
+      if (!await verify(context, settings.timeoutMs)) {
+        throw new Error('LAMS sign-in was not verified before the setup timeout. Run npm run login:lams to try again.');
+      }
+      console.log('PASS LAMS sign-in verified for the current session.');
+    } finally {
+      await context.close();
     }
-    console.log('PASS LAMS sign-in verified for the current session.');
-  } finally {
-    await context.close();
-  }
 
-  console.log('Checking authentication after browser restart. Please do not sign in during this automatic check.');
+  }
+  console.log('Checking saved authentication without manual input. Please do not interact with this browser.');
   const restarted = await launch(settings.userDataDir, options);
   try {
+    const assertNoInteraction = await guard(restarted);
     const page = restarted.pages()[0] ?? await restarted.newPage();
     await page.goto(settings.baseUrl, { waitUntil: 'domcontentloaded' });
-    if (!await verify(restarted, 60_000)) {
+    const authenticated = await verify(restarted, 60_000);
+    assertNoInteraction();
+    if (!authenticated) {
+      const locations = restarted.pages().map(tab => { const url = new URL(tab.url()); return url.origin + url.pathname; });
+      console.error(`Authentication check locations (query strings omitted): ${locations.join(', ')}`);
       throw new Error(`Authentication was not verified after browser restart. Profile: ${settings.userDataDir}. Run npm run login:lams with the same profile to retry. Microsoft or organisational session policy may require reauthentication.`);
     }
   } finally {
     await restarted.close();
   }
-  console.log('PASS Authentication persisted across browser restart. Future sign-in or MFA may still be required by organisational policy.');
+  console.log(checkOnly
+    ? 'PASS Saved authentication verified without manual input. Future sign-in or MFA may still be required by organisational policy.'
+    : 'PASS Authentication persisted across browser restart without manual input. Future sign-in or MFA may still be required by organisational policy.');
   return true;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  openLamsSignIn().catch((error) => {
+  openLamsSignIn({ checkOnly: process.argv.includes('--check-only') }).catch((error) => {
     console.error(`Login setup stopped: ${error.message}`);
     process.exitCode = 1;
   });

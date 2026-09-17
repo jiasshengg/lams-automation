@@ -35,7 +35,8 @@
     "setup": "node scripts/setup/setup.mjs",
     "login:lams": "node scripts/setup/login.mjs",
     "doctor": "node scripts/setup/doctor.mjs",
-    "test:setup": "node --test scripts/setup/setup.test.mjs"
+    "test:setup": "node --test scripts/setup/setup.test.mjs",
+    "login:check": "node scripts/setup/login.mjs --check-only"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

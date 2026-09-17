@@ -228,6 +228,7 @@ export async function loadConfig(
 ): Promise<LamsConfig> {
   const absolutePath = await resolveInputFile(configPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
+  console.log(`Configuration: ${absolutePath}`);
 
   if (!isRecord(parsed)) throw new Error('Configuration must be a JSON object.');
   const merged: Record<string, unknown> = { baseUrl: DEFAULT_LAMS_BASE_URL, ...parsed, ...overrides };

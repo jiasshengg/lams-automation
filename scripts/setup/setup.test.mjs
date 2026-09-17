@@ -126,6 +126,7 @@ function loginFixture(results, closeFails = false) {
     events,
     options: {
       settings,
+      guard: async () => () => {},
       launch: async (profile, options) => {
         const id = ++launches;
         assert.equal(profile, settings.userDataDir);
@@ -133,7 +134,7 @@ function loginFixture(results, closeFails = false) {
         events.push(`launch ${id}`);
         return {
           id,
-          pages: () => [{ goto: async (url) => { assert.equal(url, settings.baseUrl); events.push(`navigate ${id}`); } }],
+          pages: () => [{ url: () => settings.baseUrl, goto: async (url) => { assert.equal(url, settings.baseUrl); events.push(`navigate ${id}`); } }],
           close: async () => { events.push(`close ${id}`); if (closeFails) throw new Error('close failed'); }
         };
       },
@@ -162,4 +163,29 @@ test('failed initial login or profile flush never starts the restart check', asy
     await assert.rejects(openLamsSignIn(fixture.options));
     assert.deepEqual(fixture.events, ['launch 1', 'navigate 1', 'verify 1', 'close 1']);
   }
+});
+
+test('profile lock refuses concurrent ownership and can be reacquired after awaited release', async () => {
+  const { acquireProfileLock } = await import('./profile-lock.mjs');
+  const profile = mkdtempSync(path.join(os.tmpdir(), 'lams-profile-lock-'));
+  try {
+    const release = await acquireProfileLock(profile);
+    await assert.rejects(acquireProfileLock(profile), /already reserved/);
+    await Promise.all([release(), release()]);
+    await (await acquireProfileLock(profile))();
+  } finally { rmSync(profile, { recursive: true, force: true }); }
+});
+
+test('unattended login check never enters the interactive initial login phase', async () => {
+  const { openLamsSignIn } = await import('./login.mjs');
+  const fixture = loginFixture([true]);
+  assert.equal(await openLamsSignIn({ ...fixture.options, checkOnly: true }), true);
+  assert.deepEqual(fixture.events, ['launch 1', 'navigate 1', 'verify 1', 'close 1']);
+});
+
+test('manual input cannot produce a successful unattended verification', async () => {
+  const { openLamsSignIn } = await import('./login.mjs');
+  const fixture = loginFixture([true]);
+  await assert.rejects(openLamsSignIn({ ...fixture.options, checkOnly: true, guard: async () => () => { throw new Error('manual input'); } }), /manual input/);
+  assert.equal(fixture.events.at(-1), 'close 1');
 });
