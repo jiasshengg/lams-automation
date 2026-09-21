@@ -66,6 +66,30 @@ export function stripOptionPrefixHtml(value: string): string {
 }
 
 /**
+ * Makes every http(s) address in already-sanitized HTML a clickable link, so a Source-of-Truth
+ * reference reaches learners as a link rather than dead text. Trailing sentence punctuation stays
+ * outside the link. Only the http and https schemes are ever linked.
+ */
+export function linkifyUrls(sanitizedHtml: string): string {
+  return sanitizedHtml.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
+    const url = match.replace(/[.,;:!?)\]]+$/, '');
+    return `<a href="${url}">${url}</a>${match.slice(url.length)}`;
+  });
+}
+
+/**
+ * Drops a "1." style question number from a formatted stem without losing emphasis, or
+ * returns null when the stem does not open with exactly that number.
+ */
+export function stripQuestionNumberHtml(value: string, number: number): string | null {
+  const text = inlineHtmlToText(value);
+  const match = /^\s*(\d+)\s*[.)]\s+/.exec(text);
+  if (!match || Number(match[1]) !== number) return null;
+  const prefix = match[0].length;
+  return sliceInlineHtml(value, prefix + leadingSpace(text, prefix), text.trimEnd().length);
+}
+
+/**
  * Removes a tag that covers the whole value, leaving partial emphasis untouched.
  *
  * Word marks an answer key by emboldening an entire option, so copying that bold

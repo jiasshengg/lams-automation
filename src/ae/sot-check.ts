@@ -86,7 +86,8 @@ function expectedPlan(analysis: AESOTAnalysis): AEPlan {
     if (question.options && !question.options.some((option) => option.correct)) question.options[0]!.correct = true;
   }
   try {
-    return buildAEPlan(draft);
+    // Credit is not compared, so either multiple-answer choice builds the same prompts and options.
+    return buildAEPlan({ ...draft, multipleAnswerCredit: 'split' });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`The AE Source-of-Truth could not be transcribed for comparison: ${reason}. Rerun with ${SKIP_SOT_CHECK_FLAG} after checking the JSON by hand.`);

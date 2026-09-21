@@ -48,7 +48,7 @@ test('transcribes node titles, case context, and answer keys into a reviewable d
   expect(draft.nodes[1]!.questions[0]).toMatchObject({ type: 'essay' });
   expect(draft.gates).toEqual([
     {
-      title: 'AE Gate before Q2',
+      title: 'AE Gate AE Case 2 Q2',
       afterNodeTitle: 'AE Case 1 Q1',
       beforeNodeTitle: 'AE Case 2 Q2',
       beforeQuestionNumber: 2

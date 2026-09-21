@@ -183,7 +183,7 @@ test('writes blank lines as empty Normal blocks and never doubles the gap after 
     gates: []
   };
   expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toBe(
-    '<div><strong><u>Case 6</u></strong></div><div><br></div><div>A patient.</div><!--sot-image--><div><br></div><div><br></div><div>1. Why?</div>'
+    '<div><strong><u>Case 6</u></strong></div><div><br></div><div>A patient.</div><!--sot-image--><div><br></div><div><br></div><div>QUESTION 1</div><div><br></div><div>Why?</div>'
   );
 });
 

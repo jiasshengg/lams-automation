@@ -21,6 +21,7 @@ export interface AEGraphReconciliationResult {
   createdGates: string[];
   createdTransitions: Array<{ from: string; to: string }>;
   replacedGates: string[];
+  renamedGates: Array<{ from: string; to: string }>;
   removedTransitions: Array<{ from: string; to: string }>;
 }
 
@@ -231,18 +232,22 @@ export async function reconcileAndWriteAEGraph(
     }
   });
 
-  await arrangeAEActivities(page, flow, plannedUiids, timeoutMs);
+  await arrangeAEActivities(page, timeoutMs);
 
   // Now each node sits in the flow, so its team-based settings are enabled.
   for (const [index, nodePlan] of plan.nodes.entries()) {
     writtenNodes.push(await editor.writeNode(nodeRefs[index]!, nodePlan));
   }
+  // Renaming the gate only changes the canvas model, and saving an activity reloads that model from
+  // the server, which drops a rename made before it. It therefore runs last, against the design the
+  // save is about to write.
+  const renamedGates = await renameLeadingAEGate(page, plan, nodeRefs[0]!.uiid, timeoutMs);
   await editor.saveDesign();
   const finalPlan = planAEGraphReconciliation(await inspectAuthoringGraph(page), plan);
   if (!finalPlan.ready || finalPlan.missingTransitions.length > 0 || finalPlan.missingNodeTitles.length > 0 || finalPlan.missingGateTitles.length > 0) {
     throw new Error('Post-save AE graph verification reports invalid gates, bypasses, or missing nodes, gates, or transitions.');
   }
-  return { plan: finalPlan, writtenNodes, createdNodes, createdGates, createdTransitions, replacedGates, removedTransitions };
+  return { plan: finalPlan, writtenNodes, createdNodes, createdGates, createdTransitions, replacedGates, renamedGates, removedTransitions };
 }
 
 export function buildDesiredAEFlow(plan: AEPlan): string[] {
@@ -344,73 +349,38 @@ export const TEMPLATE_LIBRARY_TITLES = { Assessment: 'Assessment', Gate: 'gate' 
 
 /**
  * The reference design reads as one column of activities with the gates in a narrow column to
- * their right, each gate level with the gap it bridges. Activities are dropped wherever the canvas
- * had room while they were being created - gates end up in a block below everything, because they
- * are made after all the nodes - so they are arranged here, once the flow is known.
+ * their right, each gate level with the gap it bridges. LAMS produces exactly that from its own
+ * Arrange button, which recognises a TBL sequence, breaks the row after every gate, redraws each
+ * transition and autosaves. Pressing it is what an author does, so the automation presses it too
+ * rather than placing each activity by hand and drifting from the layout LAMS would have made.
  */
-const AE_LAYOUT = { activityX: 40, gateX: 360, row: 110, gateDrop: 55 };
+const ARRANGE_GRID = { columnWidth: 240, rowHeight: 120, activityX: 40, activityY: 40, gateX: 120, gateY: 60 };
 
-/** LAMS snaps a moved activity onto its own grid, so an exact match is not something to wait for. */
-const AE_SNAP_TOLERANCE = 30;
+export async function arrangeAEActivities(page: Page, timeoutMs: number): Promise<void> {
+  await page.locator('#arrangeButton').click();
+  // Arrange only asks before discarding annotation positions, which a TBL sequence has none of.
+  // It is answered rather than assumed absent, because cancelling leaves the canvas untouched.
+  const confirmation = page.locator('#confirmationDialogConfirmButton');
+  if (await confirmation.isVisible().catch(() => false)) await confirmation.click();
 
-async function arrangeAEActivities(
-  page: Page,
-  flow: Array<{ node: GraphNode; title: string }>,
-  plannedUiids: ReadonlySet<number>,
-  timeoutMs: number
-): Promise<void> {
-  const graph = await inspectAuthoringGraph(page);
-  // Start below whatever the lesson already had, so the existing chain is never disturbed.
-  let top = 0;
-  for (const node of graph.nodes) {
-    if (plannedUiids.has(node.uiid)) continue;
-    top = Math.max(top, (node.y ?? 0) + 80);
-  }
-  const placements: Array<{ uiid: number; x: number; y: number }> = [];
-  let activityIndex = 0;
-  for (const step of flow) {
-    if (!plannedUiids.has(step.node.uiid)) continue;
-    const gate = step.node.type === 'gate';
-    // A gate bridges the activity above it, so it shares that activity's row rather than the next.
-    const row = gate ? activityIndex - 1 : activityIndex;
-    placements.push({
-      uiid: step.node.uiid,
-      x: gate ? AE_LAYOUT.gateX : AE_LAYOUT.activityX,
-      y: top + 40 + row * AE_LAYOUT.row + (gate ? AE_LAYOUT.gateDrop : 0)
-    });
-    if (!gate) activityIndex += 1;
-  }
-  if (placements.length === 0) return;
-
-  await page.evaluate((moves) => {
-    const runtime = window as typeof window & {
-      layout?: { activities?: Array<{ uiid?: number; draw?: (x: number, y: number) => void }> };
-      ActivityLib?: { redrawTransitions?: (activity: unknown) => void };
-    };
-    for (const move of moves) {
-      const activity = (runtime.layout?.activities ?? []).find((candidate) => candidate.uiid === move.uiid);
-      if (!activity || typeof activity.draw !== 'function') continue;
-      activity.draw(move.x, move.y);
-      runtime.ActivityLib?.redrawTransitions?.(activity);
-    }
-  }, placements);
-
-  // Confirm the design actually moved; a silently ignored draw would leave the canvas looking wrong.
-  // LAMS snaps a dropped activity to its own grid, so this checks the neighbourhood, not the pixel.
-  // Nothing from this module's scope exists in the page, so the tolerance travels with the moves.
+  // Arrange lays every activity on a fixed grid, so a silently ignored click shows up as soon as
+  // one activity is still off it. Gates sit half a row below the activity whose gap they bridge.
   await page.waitForFunction(
-    (check) =>
-      check.moves.every((move) => {
-        const activity = document.querySelector(`#canvas > svg > g.svg-activity[uiid="${move.uiid}"]`);
-        if (activity === null) return false;
+    (grid) =>
+      Array.from(document.querySelectorAll('#canvas > svg > g.svg-activity')).every((activity) => {
         const x = Number(activity.getAttribute('data-x') ?? NaN);
         const y = Number(activity.getAttribute('data-y') ?? NaN);
-        return Math.abs(x - move.x) <= check.tolerance && Math.abs(y - move.y) <= check.tolerance;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+        const gate = activity.classList.contains('svg-activity-gate');
+        return (
+          x % grid.columnWidth === (gate ? grid.gateX : grid.activityX) &&
+          y % grid.rowHeight === (gate ? grid.gateY : grid.activityY)
+        );
       }),
-    { moves: placements, tolerance: AE_SNAP_TOLERANCE },
+    ARRANGE_GRID,
     { timeout: timeoutMs }
   );
-  console.log(`Arranged ${placements.length} AE activities into the reference layout.`);
+  console.log('Arranged the design with LAMS Arrange.');
 }
 
 async function createTemplateNode(
@@ -483,6 +453,35 @@ async function configurePermissionGate(page: Page, gate: GraphNode, title: strin
     title,
     { timeout: timeoutMs }
   );
+}
+
+/**
+ * Every AE gate is named after the node it stands in front of. The gate before the first AE node
+ * is supplied by the template, so it arrives under the template's own title and is renamed here
+ * once the chain is wired and its predecessor is known. Only that one gate is touched, and only
+ * when it really is the permission gate leading into the AE chain.
+ */
+export async function renameLeadingAEGate(
+  page: Page,
+  plan: AEPlan,
+  firstNodeUiid: number,
+  timeoutMs: number
+): Promise<Array<{ from: string; to: string }>> {
+  const graph = await inspectAuthoringGraph(page);
+  const incoming = graph.transitions.filter((transition) => transition.toUiid === firstNodeUiid);
+  if (incoming.length !== 1) return [];
+  const lead = graph.nodes.find((node) => node.uiid === incoming[0]!.fromUiid);
+  // The chain can also extend straight from an activity, which is not a gate and is not renamed.
+  if (!lead || lead.type !== 'gate' || lead.name === plan.leadingGateTitle) return [];
+  if (lead.gateType !== 'permission') {
+    throw new Error(
+      `The gate before "${plan.nodes[0]!.title}" is a ${lead.gateType ?? 'unreadable'} gate, not the permission gate ` +
+        `the reviewed AE flow expects; inspect "${lead.name}" before renaming it.`
+    );
+  }
+  await configurePermissionGate(page, lead, plan.leadingGateTitle, timeoutMs);
+  console.log(`Renamed the leading AE gate "${lead.name}" to "${plan.leadingGateTitle}".`);
+  return [{ from: lead.name, to: plan.leadingGateTitle }];
 }
 
 export async function removeAuthoringTransition(

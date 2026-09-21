@@ -67,6 +67,7 @@ async function main(): Promise<void> {
     console.log(`Nodes created: ${result.createdNodes.join(', ') || 'none'}`);
     console.log(`Gates created: ${result.createdGates.join(', ') || 'none'}`);
     console.log(`Gates replaced: ${result.replacedGates.join(', ') || 'none'}`);
+    console.log(`Gates renamed: ${result.renamedGates.map((gate) => `${gate.from} -> ${gate.to}`).join(', ') || 'none'}`);
     console.log(`Transitions removed: ${result.removedTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
     console.log(`Transitions created: ${result.createdTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
     console.log(`Questions created/updated: ${result.writtenNodes.reduce((sum, node) => sum + node.createdQuestions.length + node.updatedQuestions.length, 0)}`);

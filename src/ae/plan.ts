@@ -1,5 +1,12 @@
 import type { QuestionImageRequest } from '../config.js';
-import { escapeHtmlText, inlineHtmlToText, sanitizeInlineHtml, stripOptionPrefixHtml } from './inline-html.js';
+import {
+  escapeHtmlText,
+  inlineHtmlToText,
+  linkifyUrls,
+  sanitizeInlineHtml,
+  stripOptionPrefixHtml,
+  stripQuestionNumberHtml
+} from './inline-html.js';
 import { IMAGE_SLOT_HTML, IMAGE_SLOT_LINE } from './prompt-lines.js';
 
 export { IMAGE_SLOT_HTML, IMAGE_SLOT_LINE };
@@ -38,8 +45,16 @@ export interface AEGateInput {
   beforeQuestionNumber: number;
 }
 
+/**
+ * How a question with several correct answers credits them: `split` shares 100% between them
+ * (two answers get 50% each), `full` gives every correct answer 100%. The user chooses; it is
+ * never defaulted.
+ */
+export type AEMultipleAnswerCredit = 'split' | 'full';
+
 export interface AEPlanInput {
   sourceLabel: string;
+  multipleAnswerCredit?: AEMultipleAnswerCredit;
   sourceDocx?: string;
   breakMarkerCount: number;
   expectedTotalMarks?: number;
@@ -104,6 +119,12 @@ export interface AEPlan {
   breakMarkerCount: number;
   requiredAENodes: number;
   requiredAEGates: number;
+  /**
+   * Every AE gate is named after the node it stands in front of, including the one the template
+   * already supplies before the AE chain. That gate is not one of the reviewed `gates` - those are
+   * the ones the breaks create - so its reviewed title is derived here and renamed in place.
+   */
+  leadingGateTitle: string;
   totalMarks: number;
   nodes: AENodePlan[];
   gates: AEGateInput[];
@@ -158,7 +179,7 @@ export function buildAEPlan(value: unknown): AEPlan {
         );
       }
       expectedQuestionNumber += 1;
-      return buildQuestion(question);
+      return buildQuestion(question, input.multipleAnswerCredit);
     })
   }));
   validateGateAdjacency(input);
@@ -177,6 +198,7 @@ export function buildAEPlan(value: unknown): AEPlan {
     breakMarkerCount: input.breakMarkerCount,
     requiredAENodes,
     requiredAEGates,
+    leadingGateTitle: aeGateTitle(nodes[0]!.title),
     totalMarks,
     nodes,
     gates: input.gates,
@@ -210,7 +232,12 @@ export function formatAEPlanSummary(plan: AEPlan): string {
   return lines.join('\n');
 }
 
-function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
+/** Every AE gate carries the title of the node that follows it, prefixed with "AE Gate". */
+export function aeGateTitle(followingNodeTitle: string): string {
+  return `AE Gate ${followingNodeTitle}`;
+}
+
+function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMultipleAnswerCredit): AEQuestionPlan {
   const marks = question.marks ?? 4;
   if (!Number.isInteger(marks) || marks <= 0) {
     throw new Error(`Question ${question.number} marks must be a positive integer; found ${marks}`);
@@ -223,7 +250,7 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
       number: question.number,
       title: question.title ?? `Question ${question.number}`,
       type: question.type,
-      promptHtml: normalizePrompt(question.prompt, question.number),
+      promptHtml: normalizePrompt(question.prompt, question.number, question.sourceQuestionNumber ?? question.number),
       marks,
       answerRequired: true,
       prefixSequentialLetters: false,
@@ -261,12 +288,18 @@ function buildQuestion(question: AEQuestionInput): AEQuestionPlan {
       throw new Error(`Question ${question.number} correct-answer weights must total 100; found ${total}`);
     }
   }
-  const defaultCorrectWeight = 100 / correctOptions.length;
+  if (!hasExplicitWeights && correctOptions.length > 1 && multipleAnswerCredit === undefined) {
+    throw new Error(
+      `Question ${question.number} has ${correctOptions.length} correct answers. Ask the user whether to split the credit ` +
+        `between them (multipleAnswerCredit "split", e.g. 50/50) or give each correct answer 100% ("full"), and set it in the AE JSON.`
+    );
+  }
+  const defaultCorrectWeight = multipleAnswerCredit === 'full' ? 100 : 100 / correctOptions.length;
   return {
     number: question.number,
     title: question.title ?? `Question ${question.number}`,
     type: question.type,
-    promptHtml: normalizePrompt(question.prompt, question.number),
+    promptHtml: normalizePrompt(question.prompt, question.number, question.sourceQuestionNumber ?? question.number),
     marks,
     answerRequired: true,
     prefixSequentialLetters: true,
@@ -333,8 +366,41 @@ const MAX_TABLE_WIDTH_PX = 1200;
 const TABLE_STYLE = 'border-collapse:collapse;border:1px solid #000';
 const TABLE_CELL_STYLE = 'border:1px solid #000;padding:0 7px;vertical-align:top;line-height:1.15';
 
-const MARK_ANNOTATION = /\[\s*(?:\d+|x)\s+marks?\s*\]/gi;
+const MARK_ANNOTATION = /\s*(?:\[\s*(?:\d+|x)\s+marks?\s*\]|\(\s*(?:\d+|x)\s+marks?\s*\))(\s*\.)?/gi;
+
+/**
+ * Removes "[4 marks]" / "(4 marks)" annotations. A full stop printed after the annotation goes with
+ * it when the sentence already ended ("Select THREE answers. (4 marks)."), and stays otherwise.
+ */
+function withoutMarkAnnotations(line: string): string {
+  return line.replace(MARK_ANNOTATION, (_match, stop: string | undefined, offset: number) => {
+    const before = inlineHtmlToText(line.slice(0, offset)).trimEnd();
+    return stop !== undefined && !/[.?!:]$/.test(before) ? '.' : '';
+  });
+}
 const BLANK_LINE = '<div><br></div>';
+const QUESTION_HEADING = /^\s*question\s+(\d+)\s*:?\s*$/i;
+
+/**
+ * The documented AE format opens each question with an all-caps "QUESTION <n>" line, a blank
+ * line, then the stem without its "<n>." number. A heading already present is only re-cased.
+ */
+function withQuestionHeading(entries: string[], number: number): string[] {
+  const recased = entries.map((entry) => {
+    const heading = QUESTION_HEADING.exec(inlineHtmlToText(entry));
+    return heading ? `QUESTION ${heading[1]}` : entry;
+  });
+  const hasHeading = recased.some((entry) => QUESTION_HEADING.test(entry));
+  // The stem follows any case narrative, so a numbered list in that narrative never wins.
+  const stemIndex = recased.reduce(
+    (last, entry, index) => (!TABLE_LINE.test(entry) && stripQuestionNumberHtml(entry, number) !== null ? index : last),
+    -1
+  );
+  if (stemIndex < 0) return recased;
+  const stem = stripQuestionNumberHtml(recased[stemIndex]!, number)!;
+  const replacement = hasHeading ? [stem] : [`QUESTION ${number}`, BLANK_LINE, stem];
+  return [...recased.slice(0, stemIndex), ...replacement, ...recased.slice(stemIndex + 1)];
+}
 
 /**
  * Each prompt line becomes one block in the LAMS default Normal format, and each empty line a
@@ -342,7 +408,7 @@ const BLANK_LINE = '<div><br></div>';
  */
 function promptEntries(prompt: string): string[] {
   const entries = prompt.split(/\r?\n/).flatMap((raw) => {
-    const line = raw.replace(MARK_ANNOTATION, '').trim();
+    const line = withoutMarkAnnotations(raw).trim();
     if (line === IMAGE_SLOT_LINE) return [IMAGE_SLOT_HTML];
     if (inlineHtmlToText(line) !== '') return [line];
     // A line emptied only by removing its mark annotation was never a blank line in the document.
@@ -352,8 +418,8 @@ function promptEntries(prompt: string): string[] {
   return content.length === 0 ? [] : entries.slice(content[0], content.at(-1)! + 1);
 }
 
-function normalizePrompt(prompt: string, number: number): string {
-  const cleaned = promptEntries(prompt);
+function normalizePrompt(prompt: string, number: number, sourceNumber: number): string {
+  const cleaned = withQuestionHeading(promptEntries(prompt), sourceNumber);
   if (!cleaned.some((entry) => entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML)) {
     throw new Error(`Question ${number} prompt is empty after removing mark annotations`);
   }
@@ -374,7 +440,7 @@ function normalizePrompt(prompt: string, number: number): string {
       return;
     }
     const styled = caseHeading && html === escapeHtmlText(text) ? `<strong><u>${html}</u></strong>` : html;
-    paragraphs.push(`<div>${styled}</div>`);
+    paragraphs.push(`<div>${linkifyUrls(styled)}</div>`);
     // The heading's blank line is added only where the document did not already leave one.
     const next = cleaned[index + 1];
     if ((caseHeading || /^QUESTION\s+\d+\s*$/i.test(text)) && next !== undefined && next !== BLANK_LINE) {
@@ -491,6 +557,12 @@ function parseInput(value: unknown): AEPlanInput {
   });
 
   const parsed: AEPlanInput = { sourceLabel, breakMarkerCount, nodes, gates, ...(sourceDocx ? { sourceDocx } : {}) };
+  if (value.multipleAnswerCredit !== undefined) {
+    if (value.multipleAnswerCredit !== 'split' && value.multipleAnswerCredit !== 'full') {
+      throw new Error('multipleAnswerCredit must be "split" or "full"');
+    }
+    parsed.multipleAnswerCredit = value.multipleAnswerCredit;
+  }
   if (value.expectedTotalMarks !== undefined) parsed.expectedTotalMarks = nonNegativeInteger(value.expectedTotalMarks, 'expectedTotalMarks');
   if (value.attempts !== undefined) parsed.attempts = positiveInteger(value.attempts, 'attempts');
   if (value.passingMark !== undefined) {
