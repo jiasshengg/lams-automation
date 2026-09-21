@@ -1,5 +1,5 @@
 import { preflightTBL } from './lams/tbl-preflight.js';
-import { parsePlaceholderRepair, repairAEPlaceholders } from './lams/ae-placeholder.js';
+import { parsePlaceholderRepair, persistPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
 import { inspectAuthoringGraph } from './lams/authoring.js';
 import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
@@ -9,7 +9,7 @@ import { closeAuthoring, openAuthoring } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { executeIratAutomation, resolveIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
-import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
+import { copyLesson, openLessonFromLibrary, openSourceLesson } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { resolveIratQuestionImages } from './docx/question-images.js';
 import { resolveAEQuestionImages } from './docx/question-images.js';
@@ -65,7 +65,11 @@ async function main(): Promise<void> {
       console.log('Copy dry run complete; iRAT changes were not applied.');
       return;
     }
-    if (repair) await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
+    if (repair) {
+      const repaired = await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
+      await persistPlaceholderRepairs(activePage, repaired, () =>
+        openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config));
+    }
     const questionImages = await resolveIratQuestionImages(irat);
     const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs, questionImages);
     const result = await executeIratAutomation(editor, irat, { commit });

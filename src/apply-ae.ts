@@ -1,5 +1,5 @@
 import { expectedTBLGraph } from './lams/tbl-preflight.js';
-import { parsePlaceholderRepair, repairAEPlaceholders } from './lams/ae-placeholder.js';
+import { parsePlaceholderRepair, persistPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
 import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { readFile } from 'node:fs/promises';
@@ -54,7 +54,11 @@ async function main(): Promise<void> {
       if (graphPlan.invalidGates.length > 0) throw new Error(`AE graph has unsupported gate conflicts: ${graphPlan.invalidGates.join('; ')}`);
       return;
     }
-    if (repair) await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
+    if (repair) {
+      const repaired = await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
+      await persistPlaceholderRepairs(activePage, repaired, () =>
+        openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config));
+    }
     const images = await resolveAEQuestionImages(plan);
     const editor = new LamsAEEditor(activePage, plan, config.browser.actionTimeoutMs, images);
     const result = await reconcileAndWriteAEGraph(activePage, plan, editor, teamSetup, config.browser.actionTimeoutMs);

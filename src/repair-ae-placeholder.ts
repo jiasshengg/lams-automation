@@ -3,7 +3,7 @@ import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { resolveInputFile } from './input-file.js';
 import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
-import { parsePlaceholderRepair, projectPlaceholderRepairs, repairAEPlaceholders, verifyRepairResult } from './lams/ae-placeholder.js';
+import { parsePlaceholderRepair, persistPlaceholderRepairs, projectPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
 import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
@@ -31,10 +31,8 @@ async function main() {
     const expected = projectPlaceholderRepairs(await inspectAuthoringGraph(active), plan);
     if (process.argv.includes('--dry-run')) { console.log('Exact placeholder topology verified; no changes made.'); return; }
     await repairAEPlaceholders(active, plan, config.browser.actionTimeoutMs);
-    await active.locator('#saveButton').click();
-    await active.waitForTimeout(500);
-    await openLessonFromLibrary(active, config.destinationFolderPath, config.lessonTitle, config);
-    verifyRepairResult(await inspectAuthoringGraph(active), expected);
+    await persistPlaceholderRepairs(active, expected, () =>
+      openLessonFromLibrary(active, config.destinationFolderPath, config.lessonTitle, config));
     console.log('Placeholder repair saved and verified after reopening the exact lesson.');
   } catch (error) {
     const dir = await saveDiagnostics(active, 'ae-placeholder-repair-failure').catch(() => undefined);
