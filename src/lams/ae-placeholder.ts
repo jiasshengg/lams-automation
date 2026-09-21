@@ -66,6 +66,26 @@ export function verifyRepairResult(actual: AuthoringGraph, expected: AuthoringGr
   if (!actual.modelAvailable || signature(actual) !== signature(expected)) throw new Error('Placeholder repair changed unexpected nodes/connections or did not persist.');
 }
 
+/**
+ * A repair edits the live canvas only. LAMS redraws that canvas from the design when the next
+ * activity is dropped, which brings an unsaved removal back; the node creation that follows then
+ * sees the restored placeholder alongside the activity it just added and refuses to continue.
+ * Saving and reopening the exact lesson is what makes the removal durable, so every caller that
+ * keeps authoring afterwards persists it here before the next canvas mutation. Reopening is the
+ * caller's because only it knows the lesson's folder, and verifying after the reload is what
+ * proves the removal survived rather than assuming the click landed.
+ */
+export async function persistPlaceholderRepairs(
+  page: Page,
+  expected: AuthoringGraph,
+  reopenLesson: () => Promise<void>
+): Promise<void> {
+  await page.locator('#saveButton').click();
+  await page.waitForTimeout(500);
+  await reopenLesson();
+  verifyRepairResult(await inspectAuthoringGraph(page), expected);
+}
+
 export async function repairAEPlaceholders(page: Page, plan: PlaceholderRepairPlan, timeoutMs: number): Promise<AuthoringGraph> {
   const graph = await inspectAuthoringGraph(page);
   const expected = projectPlaceholderRepairs(graph, plan);

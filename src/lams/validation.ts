@@ -186,7 +186,12 @@ export function validateAEPlanGraph(graph: AuthoringGraph, plan: AEPlan): Valida
   const aeNodes = graph.nodes.filter((node) => node.type === 'tool' && /^AE\b/i.test(node.name));
   const aeGates = graph.nodes.filter((node) => node.type === 'gate' && /^AE Gate\b/i.test(node.name));
   checks.push(countCheck('AE plan node count', plan.requiredAENodes, aeNodes.length));
-  checks.push(countCheck('AE plan gate count', plan.requiredAEGates, aeGates.length));
+  // The entrance gate the template supplies is renamed after the first AE node, so it matches
+  // /^AE Gate/ alongside the planned gates without being one of them. expectedTBLGraph counts it
+  // the same way; leaving it out here fails every lesson apply:ae writes. Counting it only once
+  // keeps a duplicated leading gate a failure rather than hiding it.
+  const hasLeadingGate = (nodesByName.get(plan.leadingGateTitle) ?? []).some((candidate) => candidate.type === 'gate');
+  checks.push(countCheck('AE plan gate count', plan.requiredAEGates + (hasLeadingGate ? 1 : 0), aeGates.length));
 
   const expectedChain: string[] = [];
   plan.nodes.forEach((node, index) => {

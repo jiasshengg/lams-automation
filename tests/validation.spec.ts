@@ -250,3 +250,92 @@ test('reports a tool activity whose gradebook output is not the expected one', (
   expect(check?.passed).toBe(false);
   expect(check?.detail).toContain('AE Case 3 Q3-6');
 });
+
+test('counts the renamed leading AE gate that apply:ae always produces', () => {
+  const plan = buildAEPlan({
+    sourceLabel: 'Fixture',
+    breakMarkerCount: 1,
+    nodes: [
+      {
+        title: 'AE Case 1',
+        questions: [
+          {
+            number: 1,
+            type: 'mcq',
+            prompt: 'QUESTION 1\nChoose.',
+            options: [{ text: 'A) Yes', correct: true }, { text: 'B) No' }]
+          }
+        ]
+      },
+      {
+        title: 'AE Case 2',
+        questions: [{ number: 2, type: 'essay', prompt: 'QUESTION 2\nExplain.' }]
+      }
+    ],
+    gates: [
+      {
+        title: 'AE Gate AE Case 2',
+        afterNodeTitle: 'AE Case 1',
+        beforeNodeTitle: 'AE Case 2',
+        beforeQuestionNumber: 2
+      }
+    ]
+  });
+  // apply:ae renames the template's entrance gate to the first AE node's title, so the saved
+  // lesson always carries one more "AE Gate ..." than plan.gates describes.
+  expect(plan.leadingGateTitle).toBe('AE Gate AE Case 1');
+  const graph: AuthoringGraph = {
+    rendering: 'svg',
+    modelAvailable: true,
+    nodes: [
+      graphNode(1, 'AE Gate AE Case 1', 'gate'),
+      graphNode(2, 'AE Case 1', 'tool'),
+      graphNode(3, 'AE Gate AE Case 2', 'gate'),
+      graphNode(4, 'AE Case 2', 'tool')
+    ],
+    transitions: [
+      { uiid: 10, fromUiid: 1, toUiid: 2 },
+      { uiid: 11, fromUiid: 2, toUiid: 3 },
+      { uiid: 12, fromUiid: 3, toUiid: 4 }
+    ]
+  };
+
+  const report = validateAEPlanGraph(graph, plan);
+  expect(report.checks.find((check) => check.label === 'AE plan gate count')?.detail).toBe('Expected: 2; Found: 2');
+  expect(report.passed).toBe(true);
+});
+
+test('still fails the AE gate count when the leading gate is duplicated', () => {
+  const plan = buildAEPlan({
+    sourceLabel: 'Fixture',
+    breakMarkerCount: 0,
+    nodes: [
+      {
+        title: 'AE Case 1',
+        questions: [
+          {
+            number: 1,
+            type: 'mcq',
+            prompt: 'QUESTION 1\nChoose.',
+            options: [{ text: 'A) Yes', correct: true }, { text: 'B) No' }]
+          }
+        ]
+      }
+    ],
+    gates: []
+  });
+  const graph: AuthoringGraph = {
+    rendering: 'svg',
+    modelAvailable: true,
+    nodes: [
+      graphNode(1, 'AE Gate AE Case 1', 'gate'),
+      graphNode(2, 'AE Gate AE Case 1', 'gate'),
+      graphNode(3, 'AE Case 1', 'tool')
+    ],
+    transitions: [{ uiid: 10, fromUiid: 1, toUiid: 3 }]
+  };
+
+  const report = validateAEPlanGraph(graph, plan);
+  expect(report.checks.find((check) => check.label === 'AE plan gate count')?.detail).toBe('Expected: 1; Found: 2');
+  expect(report.passed).toBe(false);
+});

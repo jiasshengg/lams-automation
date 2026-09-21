@@ -58,3 +58,55 @@ test('counts the approved entrance gate in addition to the SoT gates and rejects
   // The configured name is superseded, so nothing still expects a gate under the template's title.
   expect(rerun.expectedGateProperties.map(g => g.name)).toEqual(['AE Gate AE 1','AE Gate 2']);
 });
+
+test('persists a removal by saving, reopening and verifying the reloaded graph', async ({ page }) => {
+  const { persistPlaceholderRepairs } = await import('../src/lams/ae-placeholder.js');
+  // The canvas starts showing only the repaired graph, as it does right after removeActivity.
+  await page.setContent(`
+    <button id="saveButton">Save</button>
+    <div id="canvas"><svg>
+      <g class="svg-activity svg-activity-gate" uiid="1"></g>
+      <g class="svg-activity svg-activity-tool" uiid="3"></g>
+    </svg></div>
+    <script>
+      const gate = { uiid: 1, title: 'AE Gate Entry', gateType: 'permission', transitions: { from: [] } };
+      const kept = { uiid: 3, title: 'AE 1', toolID: 19, transitions: { from: [] } };
+      gate.transitions.from.push({ uiid: 4, fromActivity: gate, toActivity: kept });
+      window.layout = { activities: [gate, kept] };
+      window.saved = false;
+      document.getElementById('saveButton').onclick = () => { window.saved = true; };
+    </script>
+  `);
+  const expected = projectPlaceholderRepairs(graph, repair);
+
+  let reopened = 0;
+  await persistPlaceholderRepairs(page, expected, async () => { reopened += 1; });
+
+  expect(await page.evaluate(() => (window as typeof window & { saved: boolean }).saved)).toBe(true);
+  expect(reopened).toBe(1);
+});
+
+test('fails when the reopened lesson still shows the placeholder', async ({ page }) => {
+  const { persistPlaceholderRepairs } = await import('../src/lams/ae-placeholder.js');
+  // A save that did not land: reopening redraws the placeholder LAMS still has in the design.
+  await page.setContent(`
+    <button id="saveButton">Save</button>
+    <div id="canvas"><svg>
+      <g class="svg-activity svg-activity-gate" uiid="1"></g>
+      <g class="svg-activity svg-activity-tool" uiid="2"></g>
+      <g class="svg-activity svg-activity-tool" uiid="3"></g>
+    </svg></div>
+    <script>
+      const gate = { uiid: 1, title: 'AE Gate Entry', gateType: 'permission', transitions: { from: [] } };
+      const placeholder = { uiid: 2, title: 'AE Placeholder', toolID: 19, transitions: { from: [] } };
+      const kept = { uiid: 3, title: 'AE 1', toolID: 19, transitions: { from: [] } };
+      gate.transitions.from.push({ uiid: 4, fromActivity: gate, toActivity: placeholder });
+      placeholder.transitions.from.push({ uiid: 5, fromActivity: placeholder, toActivity: kept });
+      window.layout = { activities: [gate, placeholder, kept] };
+      document.getElementById('saveButton').onclick = () => {};
+    </script>
+  `);
+  const expected = projectPlaceholderRepairs(graph, repair);
+
+  await expect(persistPlaceholderRepairs(page, expected, async () => {})).rejects.toThrow('did not persist');
+});
