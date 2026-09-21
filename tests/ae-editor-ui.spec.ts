@@ -160,3 +160,15 @@ test('a figure printed above the stem sits below the case narrative that introdu
     '<div>11. What syndrome does the patient have?</div>'
   );
 });
+
+test('a figure printed above the stem sits above its QUESTION heading', () => {
+  const karyotype = { url: 'https://example.test/karyotype.png', caption: '', altText: '', widthPx: null, placement: 'before' as const, source: 'sot' };
+  const prompt =
+    '<div>The resulting karyotype is below:</div>' +
+    '<div>QUESTION 11</div><div><br></div><div>What syndrome does the patient have?</div>';
+  expect(questionDescriptionHtml(prompt, [karyotype])).toBe(
+    '<div>The resulting karyotype is below:</div>' +
+    '<div><img src="https://example.test/karyotype.png" alt=""></div>' +
+    '<div>QUESTION 11</div><div><br></div><div>What syndrome does the patient have?</div>'
+  );
+});

@@ -118,7 +118,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
     const xml = paragraph.xml;
     const text = paragraph.text;
     if (text !== '' && paragraph.imageCount === 0) {
-      const caption = isCaption(text, xml) ? paragraph.html : '';
+      const caption = isCaption(text, xml) ? withHyperlinkTargets(paragraph.html, text, xml, relationships) : '';
       for (const pending of awaitingCaption.splice(0)) pending.caption = caption;
     }
     const question = text.match(QUESTION_START);
@@ -199,7 +199,25 @@ export function isCaption(text: string, paragraphXml = ''): boolean {
   // the image and inside the answer list.
   const captionStyle = /<w:pStyle\b[^>]*w:val=["']Caption["']/i.test(paragraphXml);
   const captionPrefix = /^(?:fig(?:ure)?|table|chart|diagram|image|illustration)\s*(?:\d+|[A-Z])?\s*[.:-]?\s+/i.test(text);
-  return captionStyle || captionPrefix;
+  // A source link printed under a figure is part of it, so it travels with the image.
+  const sourceLink = /<w:hyperlink\b/.test(paragraphXml) || /^https?:\/\/\S+$/i.test(text.trim());
+  return captionStyle || captionPrefix || sourceLink;
+}
+
+/**
+ * A Word hyperlink can show text other than its address. The address is what the reader needs, so
+ * any hyperlink target the visible text does not already show is appended after it.
+ */
+function withHyperlinkTargets(
+  html: string,
+  text: string,
+  paragraphXml: string,
+  relationships: Map<string, { value: string; external: boolean }>
+): string {
+  const targets = [...paragraphXml.matchAll(/<w:hyperlink\b[^>]*\br:id=["']([^"']+)["']/g)]
+    .map((match) => relationships.get(match[1]!)?.value)
+    .filter((target): target is string => target !== undefined && /^https?:\/\//i.test(target) && !text.includes(target));
+  return [html, ...new Set(targets)].join(' ');
 }
 
 /** `a:srcRect` edges are thousandths of a percent of the original, and default to zero. */

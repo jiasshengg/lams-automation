@@ -1,5 +1,5 @@
 import type { Frame } from '@playwright/test';
-import { sanitizeInlineHtml } from '../ae/inline-html.js';
+import { linkifyUrls, sanitizeInlineHtml } from '../ae/inline-html.js';
 import type { ImagePlacement } from '../docx/media.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 
@@ -148,7 +148,7 @@ export function parseCkEditorUploadResponse(body: string): string {
 export function imageHtml(images: UploadedImage[], placement?: ImagePlacement): string {
   return images.filter((image) => placement === undefined || image.placement === placement).map((image) => {
     const width = image.widthPx ? ` width="${Math.min(Math.round(image.widthPx), 1200)}"` : '';
-    const caption = image.caption === '' ? '' : `<div>${sanitizeInlineHtml(image.caption)}</div>`;
+    const caption = image.caption === '' ? '' : `<div>${linkifyUrls(sanitizeInlineHtml(image.caption))}</div>`;
     return `<div><img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.altText)}"${width}></div>${caption}`;
   }).join('');
 }

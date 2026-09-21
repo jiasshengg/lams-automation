@@ -47,5 +47,14 @@ test('counts the approved entrance gate in addition to the SoT gates and rejects
   const config = {expectedFlow:['AE Gate Entry','AE Placeholder']} as LamsConfig;
   expect(() => expectedTBLGraph(source,config,plan)).toThrow('exact disposition');
   const terminal = parsePlaceholderRepair({lessonTitle:'Copy',removals:[{title:'AE Placeholder',predecessor:'AE Gate Entry',successor:null}]});
-  expect(expectedTBLGraph(source,config,plan,terminal)).toMatchObject({expectedAENodes:2,expectedAEGates:2,expectedFlow:['AE Gate Entry','AE 1','AE Gate 2','AE 2']});
+  // The gate leading into the AE chain takes the name of the node after it, like every AE gate.
+  expect(expectedTBLGraph(source,config,plan,terminal)).toMatchObject({expectedAENodes:2,expectedAEGates:2,expectedFlow:['AE Gate AE 1','AE 1','AE Gate 2','AE 2']});
+  expect(expectedTBLGraph(source,config,plan,terminal).expectedGateProperties).toContainEqual({name:'AE Gate AE 1',type:'permission',description:'AE Gate AE 1',stopAtPrecedingActivity:true});
+  // A re-run finds that gate under its reviewed name, so a stale configured name still resolves.
+  const renamed = {...source, nodes: [node(1,'AE Gate AE 1','gate')], transitions: []};
+  const staleConfig = {expectedFlow:['AE Gate Entry'],expectedGateProperties:[{name:'AE Gate Entry',type:'permission' as const,description:'AE Gate Entry',stopAtPrecedingActivity:true}]} as LamsConfig;
+  const rerun = expectedTBLGraph(renamed,staleConfig,plan);
+  expect(rerun.expectedFlow).toEqual(['AE Gate AE 1','AE 1','AE Gate 2','AE 2']);
+  // The configured name is superseded, so nothing still expects a gate under the template's title.
+  expect(rerun.expectedGateProperties.map(g => g.name)).toEqual(['AE Gate AE 1','AE Gate 2']);
 });

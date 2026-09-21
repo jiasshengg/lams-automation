@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { buildAEPlan } from '../src/ae/plan.js';
 import {
+  arrangeAEActivities,
   buildDesiredAEFlow,
   planAEGraphReconciliation,
+  renameLeadingAEGate,
   removeAuthoringNode,
   removeAuthoringTransition
 } from '../src/lams/ae-graph.js';
@@ -227,4 +229,131 @@ test('connection helper creates and verifies one edge, skips duplicates, and ref
   expect((await inspectAuthoringGraph(page)).transitions).toHaveLength(1);
   expect(page.viewportSize()).toEqual(viewport);
   await expect(connectAuthoringNodes(page,{...from!,uiid:99},to!,1000)).rejects.toThrow('Stale');
+});
+
+// Reproduces authoringGeneral.js: #arrangeButton calls GeneralLib.arrangeActivities(), which lays
+// every activity on the 240x120 grid and, in a TBL sequence, breaks the row after each gate so the
+// gate sits in the next column half a row down. The observed coordinates are the ones LAMS writes.
+function canvasMarkup(options: { arranges: boolean; confirms?: boolean }): string {
+  const placed = [
+    { uiid: 1, gate: false, x: 40, y: 420 },
+    { uiid: 2, gate: true, x: 360, y: 480 },
+    { uiid: 3, gate: false, x: 40, y: 520 }
+  ];
+  const arranged = [
+    { uiid: 1, x: 40, y: 400 },
+    { uiid: 2, x: 360, y: 420 },
+    { uiid: 3, x: 40, y: 520 }
+  ];
+  return `
+    <button id="arrangeButton" onclick="arrangeActivities()">Arrange</button>
+    <button id="confirmationDialogConfirmButton" style="display:${options.confirms ? 'block' : 'none'}"
+            onclick="this.style.display='none'; doArrange()">OK</button>
+    <div id="canvas"><svg>${placed
+      .map(
+        (activity) =>
+          `<g class="svg-activity ${activity.gate ? 'svg-activity-gate' : 'svg-activity-tool'}" ` +
+          `uiid="${activity.uiid}" data-x="${activity.x}" data-y="${activity.y}"></g>`
+      )
+      .join('')}</svg></div>
+    <script>
+      function doArrange() {
+        ${options.arranges ? JSON.stringify(arranged) : '[]'}.forEach(function (move) {
+          var activity = document.querySelector('g.svg-activity[uiid="' + move.uiid + '"]');
+          activity.setAttribute('data-x', move.x);
+          activity.setAttribute('data-y', move.y);
+        });
+      }
+      function arrangeActivities() {
+        if (document.getElementById('confirmationDialogConfirmButton').style.display === 'none') doArrange();
+      }
+    </script>`;
+}
+
+test('presses LAMS Arrange and confirms every activity landed on the arrange grid', async ({ page }) => {
+  await page.setContent(canvasMarkup({ arranges: true }));
+
+  await arrangeAEActivities(page, 5000);
+
+  expect(await page.locator('g.svg-activity[uiid="1"]').getAttribute('data-y')).toBe('400');
+  expect(await page.locator('g.svg-activity[uiid="2"]').getAttribute('data-y')).toBe('420');
+});
+
+test('answers the annotation confirmation rather than leaving the canvas untouched', async ({ page }) => {
+  await page.setContent(canvasMarkup({ arranges: true, confirms: true }));
+
+  await arrangeAEActivities(page, 5000);
+
+  expect(await page.locator('g.svg-activity[uiid="1"]').getAttribute('data-y')).toBe('400');
+});
+
+test('reports an Arrange that left an activity off the grid', async ({ page }) => {
+  await page.setContent(canvasMarkup({ arranges: false }));
+
+  await expect(arrangeAEActivities(page, 1500)).rejects.toThrow(/Timeout/i);
+});
+
+// Reproduces the authoring surface: the SVG canvas plus the properties dialog LAMS opens for the
+// selected activity. The gate the template supplies before the AE chain arrives under its own
+// title, so the reconciler renames it after the node it leads into.
+function leadGateMarkup(gate: { uiid: number; title: string; gateType: string }): string {
+  return `
+    <div id="canvas"><svg>
+      <g class="svg-activity svg-activity-gate" uiid="${gate.uiid}" data-x="40" data-y="40"></g>
+      <g class="svg-activity svg-activity-tool" uiid="20" data-x="40" data-y="160"></g>
+    </svg></div>
+    <div id="propertiesDialog" style="display: block">
+      <input class="propertiesContentFieldTitle" value="${gate.title}">
+      <textarea class="propertiesContentFieldDescription"></textarea>
+      <select class="propertiesContentFieldGateType"><option value="permission">Permission</option></select>
+      <input type="checkbox" class="propertiesContentFieldStopAtPrecedingActivity">
+    </div>
+    <script>
+      window.layout = { activities: [
+        { uiid: ${gate.uiid}, title: ${JSON.stringify(gate.title)}, gateType: ${JSON.stringify(gate.gateType)},
+          gateStopAtPrecedingActivity: true,
+          transitions: { from: [{ uiid: 30, fromActivity: { uiid: ${gate.uiid} }, toActivity: { uiid: 20 } }] } },
+        { uiid: 20, title: 'AE 1', transitions: { from: [] } }
+      ] };
+      document.querySelector('.propertiesContentFieldTitle').addEventListener('input', function (event) {
+        window.layout.activities[0].title = event.target.value;
+      });
+    </script>`;
+}
+
+const leadPlan = buildAEPlan({
+  sourceLabel: 'Test',
+  breakMarkerCount: 0,
+  nodes: [{ title: 'AE 1', questions: [{ number: 1, type: 'essay', prompt: 'Question 1' }] }],
+  gates: []
+});
+
+test('derives the leading gate title from the node it leads into', () => {
+  expect(leadPlan.leadingGateTitle).toBe('AE Gate AE 1');
+  expect(plan.leadingGateTitle).toBe('AE Gate AE 1');
+});
+
+test('renames the template gate in front of the AE chain after that node', async ({ page }) => {
+  await page.setContent(leadGateMarkup({ uiid: 7, title: 'AE Gate Application Exercise 1', gateType: 'permission' }));
+
+  expect(await renameLeadingAEGate(page, leadPlan, 20, 5000)).toEqual([
+    { from: 'AE Gate Application Exercise 1', to: 'AE Gate AE 1' }
+  ]);
+  await expect(page.locator('.propertiesContentFieldTitle')).toHaveValue('AE Gate AE 1');
+  await expect(page.locator('.propertiesContentFieldDescription')).toHaveValue('AE Gate AE 1');
+  await expect(page.locator('.propertiesContentFieldStopAtPrecedingActivity')).toBeChecked();
+});
+
+test('leaves the leading gate alone when it already carries its reviewed title', async ({ page }) => {
+  await page.setContent(leadGateMarkup({ uiid: 7, title: 'AE Gate AE 1', gateType: 'permission' }));
+
+  expect(await renameLeadingAEGate(page, leadPlan, 20, 5000)).toEqual([]);
+});
+
+test('refuses to rename a gate in front of the AE chain that is not a permission gate', async ({ page }) => {
+  await page.setContent(leadGateMarkup({ uiid: 7, title: 'iRAT Gate', gateType: 'password' }));
+
+  await expect(renameLeadingAEGate(page, leadPlan, 20, 5000)).rejects.toThrow(
+    /is a password gate, not the permission gate/
+  );
 });

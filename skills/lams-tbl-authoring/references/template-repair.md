@@ -11,8 +11,10 @@ node scripts/run.mjs preflight:tbl --request-json request.json --ae-json ae-plan
 ```
 
 Ask for each unexpected iRAT reference's disposition, as required by the shared rules.
-Put authorized exact deletions in `irat.deleteQuestionTitles`. Missing marks (4) and
-equal correct-option weighting are documented defaults and need no extra approval.
+Put authorized exact deletions in `irat.deleteQuestionTitles`. Missing marks (4) are a
+documented default and need no extra approval. For an AE question with more than one correct
+answer, ask the user whether to split the credit or give each correct answer 100% and set
+`multipleAnswerCredit` (see [configuration](configuration.md)).
 
 For an AE activity verified to be a template placeholder, obtain an exact removal
 instruction and record a per-run repair JSON. Do not infer placeholder status from its

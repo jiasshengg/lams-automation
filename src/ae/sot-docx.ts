@@ -214,7 +214,7 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
     afterNodeIndex: index + 1,
     beforeNodeIndex: index + 2,
     beforeQuestionNumber: node.firstQuestionNumber,
-    suggestedTitle: `AE Gate before Q${node.firstQuestionNumber}`
+    suggestedTitle: `AE Gate ${node.suggestedTitle}`
   }));
   return {
     sourceLabel,
@@ -236,7 +236,7 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
       'Confirm exact AE node titles; suggested titles follow the "AE Case <n> Q<range>" convention but are not authority for existing LAMS nodes.',
       'Confirm exact AE gate titles and build the linear expectedFlow from the approved naming convention.',
       ...(multipleSelectQuestions.length > 0
-        ? [`Confirm correct answers and scoring for multiple-select questions ${formatNumberList(multipleSelectQuestions)}; correct weights default to an equal split unless explicitly supplied.`]
+        ? [`Confirm correct answers and scoring for multiple-select questions ${formatNumberList(multipleSelectQuestions)}; ask the user whether to split the credit between correct answers or give each 100% (multipleAnswerCredit).`]
         : []),
       'Review question text, answers, marks, tables, images, and links before creating AE plan JSON.'
     ],

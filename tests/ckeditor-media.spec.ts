@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { imageHtml, parseCkEditorUploadResponse, withUploadCallback } from '../src/lams/ckeditor-media.js';
+import { isCaption } from '../src/docx/media.js';
 
 test('parses modern and legacy CKEditor upload responses', () => {
   expect(parseCkEditorUploadResponse('{"uploaded":1,"url":"/content/image.png"}')).toBe('/content/image.png');
@@ -40,4 +41,17 @@ test('reads the legacy response LAMS returns for an image upload', () => {
 test('an empty upload response is reported as a failure, not a stored image', () => {
   // LAMS answers 200 with an empty body when CKEditorFuncNum is missing.
   expect(() => parseCkEditorUploadResponse('')).toThrow(/empty upload response/);
+});
+
+test('a source link under a figure is its caption and stays clickable', () => {
+  expect(isCaption('https://pubmed.ncbi.nlm.nih.gov/26941407/')).toBe(true);
+  expect(isCaption('Visit the source', '<w:hyperlink r:id="rId5"><w:r><w:t>Visit the source</w:t></w:r></w:hyperlink>')).toBe(true);
+  expect(isCaption('A plain first option')).toBe(false);
+  expect(imageHtml([{
+    url: 'https://example.test/a.png', altText: '', widthPx: null, placement: 'after' as const,
+    caption: '<u>https://pubmed.ncbi.nlm.nih.gov/26941407/</u>', source: 'sot'
+  }])).toBe(
+    '<div><img src="https://example.test/a.png" alt=""></div>' +
+    '<div><u><a href="https://pubmed.ncbi.nlm.nih.gov/26941407/">https://pubmed.ncbi.nlm.nih.gov/26941407/</a></u></div>'
+  );
 });

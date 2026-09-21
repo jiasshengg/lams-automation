@@ -83,7 +83,7 @@ Set `sourceDocx` in reviewed iRAT or AE input to import all images assigned to e
 - adds missing transitions in the reviewed linear AE flow;
 - saves and verifies the resulting graph.
 
-The reconciler removes an exact direct transition that bypasses a planned gate, replaces an exact planned gate whose verified type/settings are wrong, and then creates the reviewed linear transitions. It does not delete extra questions, infer that unrelated nodes are extra, or resolve ambiguous/non-gate title conflicts destructively.
+The reconciler removes an exact direct transition that bypasses a planned gate, replaces an exact planned gate whose verified type/settings are wrong, and then creates the reviewed linear transitions. It renames the one gate in front of the AE chain after the first AE node, so every AE gate carries the title of the node it leads into; it refuses to rename that gate if it is not a permission gate. It finishes by pressing LAMS's own Arrange button, so the saved canvas reads as the reference sequence does - one column of activities with each gate beside the gap it bridges - rather than wherever each node was dropped. It does not delete extra questions, infer that unrelated nodes are extra, or resolve ambiguous/non-gate title conflicts destructively.
 
 ## iRAT preflight
 

@@ -75,6 +75,11 @@ export function buildAEDraft(
     beforeQuestionNumber: gate.beforeQuestionNumber
   }));
 
+  const multipleAnswer = nodes
+    .flatMap((node) => node.questions)
+    .filter((question) => (question.options ?? []).filter((option) => option.correct).length > 1)
+    .map((question) => `Q${question.number}`);
+
   return {
     sourceLabel: analysis.sourceLabel,
     ...(options.sourceDocx ? { sourceDocx: options.sourceDocx } : {}),
@@ -83,6 +88,12 @@ export function buildAEDraft(
       'DRAFT transcribed from the DOCX. Not authority for LAMS; confirm every title, answer key, and mark.',
       'Node titles follow the "AE Case <n> Q<range>" convention derived from the Case headings in the document.',
       ...(options.images ? [imageSummary(options.images)] : []),
+      ...(multipleAnswer.length > 0
+        ? [
+            `Questions with more than one correct answer: ${multipleAnswer.join(', ')}. Ask the user whether to split the credit ` +
+              '(multipleAnswerCredit "split", e.g. 50/50) or give each correct answer 100% ("full"), then set multipleAnswerCredit.'
+          ]
+        : []),
       ...analysis.warnings,
       ...analysis.reviewRequired
     ],

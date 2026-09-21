@@ -136,8 +136,8 @@ test('rejects an MCQ without a correct answer', () => {
   expect(() => buildAEPlan(input)).toThrow('Question 1 must have at least one correct answer');
 });
 
-test('supports multiple correct answers with equal default weights', () => {
-  const input = validInput();
+test('supports multiple correct answers with split credit', () => {
+  const input = { ...validInput(), multipleAnswerCredit: 'split' };
   input.nodes[0]!.questions[0]!.options![0]!.correct = true;
 
   const question = buildAEPlan(input).nodes[0]!.questions[0]!;
@@ -147,6 +147,40 @@ test('supports multiple correct answers with equal default weights', () => {
     { text: 'Correct option', html: 'Correct option', creditPercent: 50 },
     { text: 'Third option', html: 'Third option', creditPercent: 0 }
   ]);
+});
+
+test('gives every correct answer 100% with full credit', () => {
+  const input = { ...validInput(), multipleAnswerCredit: 'full' };
+  input.nodes[0]!.questions[0]!.options![0]!.correct = true;
+
+  const question = buildAEPlan(input).nodes[0]!.questions[0]!;
+  expect(question.multipleAnswersAllowed).toBe(true);
+  expect(question.options.map((option) => option.creditPercent)).toEqual([100, 100, 0]);
+});
+
+test('refuses multiple correct answers until the user chooses how to credit them', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.options![0]!.correct = true;
+
+  expect(() => buildAEPlan(input)).toThrow('Question 1 has 2 correct answers. Ask the user whether to split the credit');
+  expect(() => buildAEPlan({ ...input, multipleAnswerCredit: 'half' })).toThrow('multipleAnswerCredit must be "split" or "full"');
+});
+
+test('opens the stem with an all-caps QUESTION heading and drops parenthesised marks', () => {
+  const input = validInput();
+  const questions = input.nodes[0]!.questions;
+  questions[0]!.prompt = 'Case 1\nA patient reports:\n1. Swelling\n1. Which action is best? ( 2 marks )';
+  questions[1]!.prompt = 'Question 2:\n2. Explain your reasoning. (2 mark)';
+
+  const plan = buildAEPlan(input);
+  // The narrative's own "1." list item precedes the stem, so only the stem is renumbered.
+  expect(plan.nodes[0]!.questions[0]!.promptHtml).toBe(
+    '<div><strong><u>Case 1</u></strong></div><div><br></div><div>A patient reports:</div><div>1. Swelling</div>' +
+      '<div>QUESTION 1</div><div><br></div><div>Which action is best?</div>'
+  );
+  expect(plan.nodes[0]!.questions[1]!.promptHtml).toBe(
+    '<div>QUESTION 2</div><div><br></div><div>Explain your reasoning.</div>'
+  );
 });
 
 test('supports explicit multiple-answer weights and rejects invalid totals', () => {
@@ -242,7 +276,7 @@ test('carries Source-of-Truth emphasis into the prompt and options and escapes a
   expect(question.promptHtml).toBe(
     // The Source-of-Truth already styled this heading, so it keeps its own emphasis.
     '<div>Case 1: <u>Changing exposure</u></div><div><br></div>' +
-    '<div>1. A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>? &lt;script&gt;x&lt;/script&gt;</div>'
+    '<div>QUESTION 1</div><div><br></div><div>A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>? &lt;script&gt;x&lt;/script&gt;</div>'
   );
   expect(question.options).toEqual([
     { text: '600 mg', html: '<strong>600</strong> mg', creditPercent: 100 },
@@ -327,4 +361,24 @@ test('a reviewed table cannot smuggle styling through its cell attributes', () =
   expect(html).toContain(`<td width="34%" style="${CELL}">Parameter</td>`);
   expect(html).not.toContain('color:red');
   expect(html).not.toContain('onclick');
+});
+
+test('drops a full stop printed after a mark annotation only when the sentence already ended', () => {
+  const input = validInput();
+  const questions = input.nodes[0]!.questions;
+  questions[0]!.prompt = 'QUESTION 1\nWhich THREE changes are expected? Select THREE answers. (4 marks).';
+  questions[1]!.prompt = 'QUESTION 2\nExplain your reasoning (4 marks).';
+
+  const plan = buildAEPlan(input);
+  expect(plan.nodes[0]!.questions[0]!.promptHtml).toContain('<div>Which THREE changes are expected? Select THREE answers.</div>');
+  expect(plan.nodes[0]!.questions[1]!.promptHtml).toContain('<div>Explain your reasoning.</div>');
+});
+
+test('writes a web address in the prompt as a clickable link', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[1]!.prompt = 'QUESTION 2\nRead https://example.test/paper?a=1&b=2. Then explain.';
+
+  expect(buildAEPlan(input).nodes[0]!.questions[1]!.promptHtml).toContain(
+    '<div>Read <a href="https://example.test/paper?a=1&amp;b=2">https://example.test/paper?a=1&amp;b=2</a>. Then explain.</div>'
+  );
 });

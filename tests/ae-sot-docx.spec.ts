@@ -51,14 +51,14 @@ test('derives variable AE node and gate counts from literal break markers', () =
       afterNodeIndex: 1,
       beforeNodeIndex: 2,
       beforeQuestionNumber: 2,
-      suggestedTitle: 'AE Gate before Q2'
+      suggestedTitle: 'AE Gate AE Case 1 Q2'
     },
     {
       index: 2,
       afterNodeIndex: 2,
       beforeNodeIndex: 3,
       beforeQuestionNumber: 3,
-      suggestedTitle: 'AE Gate before Q3'
+      suggestedTitle: 'AE Gate AE Case 1 Q3'
     }
   ]);
   expect(analysis.questions.map((question) => question.type)).toEqual([

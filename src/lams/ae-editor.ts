@@ -320,9 +320,9 @@ export function questionDescriptionHtml(promptHtml: string, images: UploadedImag
   }
   if (before === '') return `${promptHtml}${after}`;
   // A figure printed above the stem still belongs below the case narrative that introduces it
-  // ("...the karyotype below:"), so it goes immediately before the numbered stem rather than above
-  // the case heading. With no numbered stem to find, it leads the prompt as it reads in the source.
-  const stem = /<div>(?=(?:<[^>]+>)*\s*\d+\s*[.)])/i.exec(promptHtml);
+  // ("...the karyotype below:"), so it goes immediately before the QUESTION heading or numbered stem
+  // rather than above the case heading. With neither to find, it leads the prompt as in the source.
+  const stem = /<div>(?=(?:<[^>]+>)*\s*(?:QUESTION\s+\d+\s*<|\d+\s*[.)]))/.exec(promptHtml);
   const at = stem?.index ?? 0;
   return `${promptHtml.slice(0, at)}${before}${promptHtml.slice(at)}${after}`;
 }

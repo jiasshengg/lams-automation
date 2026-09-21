@@ -47,8 +47,10 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Extract embedded DOCX images with question associations, captions, and above/below placement, and import them through the observed CKEditor upload endpoint.
 - Preserve the bold, italic, underline, superscript, and subscript of the Source-of-Truth in AE prompts and options; escape every other tag.
 - Name AE nodes from their Case headings and question range (`AE Case 3 Q3-6`, `AE Case 1 Q1 to Case 2 Q2`) and leave AE activity descriptions empty.
+- Name every AE gate `AE Gate ` plus the title of the node after it, including the gate the template supplies before the AE chain, which is renamed in place.
 - Write reviewed AE MCQ/essay questions and canonical activity settings.
 - Reconcile missing AE Assessment nodes, permission gates, Team Setup associations, and reviewed linear transitions; remove exact gate-bypass transitions and replace exact misconfigured planned AE gates when verified.
+- Lay the saved canvas out with LAMS's own Arrange button rather than positioning activities by hand.
 - Extend the vendor-neutral skill only with behavior already supported by the reusable automation.
 
 ## Browser automation rules
