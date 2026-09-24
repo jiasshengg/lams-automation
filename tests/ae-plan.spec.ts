@@ -286,9 +286,10 @@ test('carries Source-of-Truth emphasis into the prompt and options and escapes a
 
 test('still applies the house bold-underline to an unformatted Case heading', () => {
   const input = validInput();
+  // A stem the document prints without a number still opens with its LAMS heading.
   input.nodes[0]!.questions[0]!.prompt = 'Case 1\nWhich action is best?';
   expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toBe(
-    '<div><strong><u>Case 1</u></strong></div><div><br></div><div>Which action is best?</div>'
+    '<div><strong><u>Case 1</u></strong></div><div><br></div><div>QUESTION 1</div><div><br></div><div>Which action is best?</div>'
   );
 });
 
@@ -381,4 +382,140 @@ test('writes a web address in the prompt as a clickable link', () => {
   expect(buildAEPlan(input).nodes[0]!.questions[1]!.promptHtml).toContain(
     '<div>Read <a href="https://example.test/paper?a=1&amp;b=2">https://example.test/paper?a=1&amp;b=2</a>. Then explain.</div>'
   );
+});
+
+test('every question opens with its LAMS QUESTION heading, however the document numbered it', () => {
+  // The document's own numbering is inconsistent: a missing full stop, a "Q" prefix, columns of a
+  // table that carry no number, and a run of questions the document numbers from 6 again. LAMS
+  // numbers them 1..N, and every prompt has to say which question it is.
+  const prompts = [
+    { number: 1, prompt: 'Case 1\n1. Microcytosis' },
+    { number: 2, prompt: '2 Increased LDH, undetectable haptoglobin' },
+    { number: 3, prompt: 'Next, match the full blood count features\nWhich PBF? (Q3)' },
+    { number: 4, prompt: 'Case 2\n6. A 68 year old man was investigated for anaemia.' },
+    { number: 5, prompt: 'Case 7\nQ16. Based on the diagram, which ECG applies?' }
+  ];
+  const plan = buildAEPlan({
+    sourceLabel: 'Numbering', breakMarkerCount: 0,
+    nodes: [{ title: 'AE Case 1 Q1-5', questions: prompts.map((entry) => ({ ...entry, type: 'essay' as const })) }],
+    gates: []
+  });
+
+  const written = plan.nodes[0]!.questions.map((question) => question.promptHtml);
+  expect(written[0]).toContain('<div>QUESTION 1</div><div><br></div><div>Microcytosis</div>');
+  expect(written[1]).toContain('<div>QUESTION 2</div><div><br></div><div>Increased LDH, undetectable haptoglobin</div>');
+  expect(written[2]).toContain('<div>QUESTION 3</div><div><br></div><div>Which PBF? (Q3)</div>');
+  // The number the document prints is replaced by the number LAMS gives the question.
+  expect(written[3]).toContain('<div>QUESTION 4</div><div><br></div><div>A 68 year old man was investigated for anaemia.</div>');
+  expect(written[3]).not.toContain('6.');
+  expect(written[4]).toContain('<div>QUESTION 5</div><div><br></div><div>Based on the diagram, which ECG applies?</div>');
+  expect(written[4]).not.toContain('Q16.');
+});
+
+test('collapses the empty paragraphs a floating figure reserves, so what follows stays readable', () => {
+  // Word leaves a run of empty paragraphs to make room for a figure that floats over them. In
+  // LAMS the figure is inline, so those become a wall of blank lines that pushes the next line
+  // ("Note: …") out of sight. One blank line is a gap the reader sees; thirteen is page layout.
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.prompt = ['Case 3', 'The tracings below:', '{{image}}', ...Array(13).fill(''), 'Note:', 'CSFA: control', '1. Which tracing fits?'].join('\n');
+
+  const html = buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml;
+  expect(html).toContain('Note:');
+  expect(/(<div><br><\/div>){3,}/.test(html)).toBe(false);
+  // A gap the document really typed is still a gap.
+  input.nodes[0]!.questions[0]!.prompt = 'Case 3\nThe tracings below:\n\n1. Which tracing fits?';
+  expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toContain('<div>The tracings below:</div><div><br></div>');
+});
+
+test('a reviewed replacement figure takes the place of a collage the document cannot hand over', () => {
+  // Case 1's films are floating pictures with their letters in separate floating boxes: the
+  // document's own arrangement cannot be reconstructed, so a reviewer supplies one picture of the
+  // printed page. The figure's pieces and the stray labels between them then make way for it.
+  const input = validInput() as Record<string, unknown>;
+  const question = ((input.nodes as Array<Record<string, unknown>>)[0]!.questions as Array<Record<string, unknown>>)[0]!;
+  question.prompt = ['Case 1', 'Refer to the following blood films A to H.', '{{image}}', 'B A', '{{image}}', '2000X C', '{{image}}', 'Match the features below.', '1. Microcytosis'].join('\n');
+  question.replaceSourceFigures = true;
+  question.images = [{ path: 'films-page-1.png' }, { path: 'films-page-2.png' }];
+
+  const html = buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml;
+  expect(html.match(/<!--sot-image-->/g)).toHaveLength(1);
+  expect(html).toContain('Refer to the following blood films A to H.');
+  expect(html).toContain('Match the features below.');
+  expect(html).toContain('QUESTION 1');
+  // The labels belonged to the figure that is being replaced.
+  expect(html).not.toContain('B A');
+  expect(html).not.toContain('2000X C');
+  // Labels leading and trailing the figure go with it; the prose around them stays.
+  expect(html).not.toContain('Normal');
+  expect(html).not.toContain('From ASH Image Bank');
+});
+
+test('collapsing reserved space never swallows a line that sits between two blank lines', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.prompt = ['Case 1', '', 'Refer to the films below.', '', 'Normal', '1. Microcytosis'].join('\n');
+
+  const html = buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml;
+  expect(html).toContain('Refer to the films below.');
+  expect(html).toContain('Normal');
+});
+
+test('a line that introduces what follows is not swallowed with the figure', () => {
+  const input = validInput() as Record<string, unknown>;
+  const question = ((input.nodes as Array<Record<string, unknown>>)[0]!.questions as Array<Record<string, unknown>>)[0]!;
+  question.prompt = ['Case 3', 'The tracings below:', '{{image}}', '{{image}}', 'Note:', 'CSFA: control for haemoglobins C, S, F, A.', '1. Which tracing fits?'].join('\n');
+  question.replaceSourceFigures = true;
+  question.images = [{ path: 'tracings.png' }];
+
+  const html = buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml;
+  expect(html).toContain('Note:');
+  expect(html).toContain('CSFA: control for haemoglobins');
+  expect(html.match(/<!--sot-image-->/g)).toHaveLength(1);
+});
+
+test('exactly one blank line separates the case text from the QUESTION heading', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[0]!.prompt = ['Case 4', '', 'Her ferritin was normal.', '', '', '1. Which investigation helps?'].join('\n');
+
+  const html = buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml;
+  expect(html).toContain('<div>Her ferritin was normal.</div><div><br></div><div>QUESTION 1</div>');
+});
+
+test('a tab-laid-out block is written as a table with no rules, unlike a Word table', () => {
+  const input = validInput() as Record<string, unknown>;
+  const question = ((input.nodes as Array<Record<string, unknown>>)[0]!.questions as Array<Record<string, unknown>>)[0]!;
+  question.prompt = [
+    'His results are as listed:',
+    '<table data-layout="tabs"><tr><td></td><td>Reference Range</td></tr><tr><td>Hb</td><td>13.6 – 16.6 g/dL</td></tr></table>',
+    '1. Which applies?'
+  ].join('\n');
+
+  const html = buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml;
+  expect(html).toContain('Reference Range');
+  expect(html).toContain('Hb');
+  // The document rules no lines around a tabbed block, so the cells carry no borders.
+  expect(html).toMatch(/<table[^>]*border="0"/);
+  expect(html).not.toMatch(/<td[^>]*border:1px solid/);
+  // A real Word table still gets Word's ruled grid.
+  question.prompt = 'His results:\n<table><tr><td>Hb</td><td>13.6</td></tr></table>\n1. Which applies?';
+  expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toMatch(/<td[^>]*border:1px solid/);
+});
+
+test('a hedged answer is not scored until the reviewer says how it should be', () => {
+  const input = validInput() as Record<string, unknown>;
+  const question = ((input.nodes as Array<Record<string, unknown>>)[0]!.questions as Array<Record<string, unknown>>)[0]!;
+  question.options = [
+    { text: 'A) Film A', correct: true },
+    { text: 'B) Film B', correct: false },
+    { text: 'C) Film C', hedged: true }
+  ];
+
+  // The document will not commit to C, so neither does the plan: it asks.
+  expect(() => buildAEPlan(input)).toThrow(/hedged/i);
+
+  const included = buildAEPlan({ ...input, hedgedAnswers: 'include', multipleAnswerCredit: 'full' });
+  expect(included.nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([100, 0, 100]);
+
+  const excluded = buildAEPlan({ ...input, hedgedAnswers: 'exclude' });
+  expect(excluded.nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([100, 0, 0]);
+  expect(excluded.nodes[0]!.questions[0]!.multipleAnswersAllowed).toBe(false);
 });

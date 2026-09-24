@@ -81,10 +81,19 @@ export function linkifyUrls(sanitizedHtml: string): string {
  * Drops a "1." style question number from a formatted stem without losing emphasis, or
  * returns null when the stem does not open with exactly that number.
  */
-export function stripQuestionNumberHtml(value: string, number: number): string | null {
+/**
+ * Removes the question number a stem is printed with, so LAMS's own numbering is the only one a
+ * learner sees. A punctuated number is the document's numbering whatever its value ("6.", "Q16."),
+ * because Source-of-Truth documents renumber and repeat themselves. A number with no punctuation
+ * is only a question number when it is one this question is known by: "2 weeks later…" is prose.
+ */
+export function stripQuestionNumberHtml(value: string, numbers: number | readonly number[]): string | null {
+  const known = typeof numbers === 'number' ? [numbers] : numbers;
   const text = inlineHtmlToText(value);
-  const match = /^\s*(\d+)\s*[.)]\s+/.exec(text);
-  if (!match || Number(match[1]) !== number) return null;
+  const punctuated = /^\s*(?:Q\s?)?(\d+)\s*[.):]\s+/i.exec(text);
+  const bare = /^\s*(\d+)\s+/.exec(text);
+  const match = punctuated ?? (bare && known.includes(Number(bare[1])) ? bare : null);
+  if (!match) return null;
   const prefix = match[0].length;
   return sliceInlineHtml(value, prefix + leadingSpace(text, prefix), text.trimEnd().length);
 }

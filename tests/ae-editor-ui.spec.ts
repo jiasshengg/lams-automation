@@ -2,8 +2,11 @@ import { expect, test } from '@playwright/test';
 import type { Frame, Page } from '@playwright/test';
 import {
   applyAEAnswerScoring,
+  clickRowControl,
+  exactQuestionRow,
   expandAuthoringSections,
   questionDescriptionHtml,
+  verifyAEPrintContent,
   resizeOptions
 } from '../src/lams/ae-editor.js';
 
@@ -171,4 +174,134 @@ test('a figure printed above the stem sits above its QUESTION heading', () => {
     '<div><img src="https://example.test/karyotype.png" alt=""></div>' +
     '<div>QUESTION 11</div><div><br></div><div>What syndrome does the patient have?</div>'
   );
+});
+
+test('waits for the activity dialog to render its question rows before matching one', async ({ page }) => {
+  // LAMS fills #referencesTable after the activity frame loads. Counting rows straight away sees
+  // an empty table and reports the question as missing, which is how a rerun on an already
+  // written lesson failed.
+  await page.setContent(`
+    <table id="referencesTable"><tbody></tbody></table>
+    <script>
+      setTimeout(() => {
+        document.querySelector('#referencesTable tbody').innerHTML =
+          '<tr><td><span class="fw-semibold">Question 5</span></td></tr>' +
+          '<tr><td><span class="fw-semibold">Question 6</span></td></tr>';
+      }, 1200);
+    </script>
+  `);
+
+  const row = await exactQuestionRow(page.mainFrame(), 'Question 6', 5000);
+  await expect(row.locator('.fw-semibold')).toHaveText('Question 6');
+});
+
+test('still reports a question the activity does not hold', async ({ page }) => {
+  await page.setContent('<table id="referencesTable"><tbody><tr><td><span class="fw-semibold">Question 5</span></td></tr></tbody></table>');
+
+  await expect(exactQuestionRow(page.mainFrame(), 'Question 6', 1000)).rejects.toThrow('found 0');
+});
+
+test('opens a question row that LAMS\'s sticky footer is covering', async ({ page }) => {
+  // The authoring footer is fixed to the bottom of the activity dialog, and a Bootstrap tooltip
+  // follows the pointer, so a row scrolled to the bottom edge cannot be clicked where it lands.
+  await page.setContent(`
+    <style>
+      body { margin: 0; height: 2000px; }
+      #referencesTable { margin-top: 1400px; }
+      .lams-authoring-footer { position: fixed; bottom: 0; left: 0; right: 0; height: 140px; background: #eee; }
+      .tooltip { position: fixed; bottom: 150px; left: 0; right: 0; height: 60px; background: #333; }
+    </style>
+    <table id="referencesTable"><tbody>
+      <tr><td><a class="edit-reference-link" href="#" onclick="window.edited = true; return false;">Edit</a></td></tr>
+    </tbody></table>
+    <div class="lams-authoring-footer"><div id="saveCancelButtons">Save</div></div>
+    <div role="tooltip" class="tooltip show"><div class="tooltip-inner">Answer required</div></div>
+  `);
+
+  await clickRowControl(page.mainFrame().locator('#referencesTable tbody tr').first().locator('.edit-reference-link'), 3000);
+
+  expect(await page.evaluate(() => (window as unknown as { edited?: boolean }).edited)).toBe(true);
+});
+
+test('waits for a question row to carry its title, not just to exist', async ({ page }) => {
+  // The dialog draws its rows first and fills the titles a moment later, so a row can be present
+  // while every title is still empty.
+  await page.setContent(`
+    <table id="referencesTable"><tbody>
+      <tr><td><span class="fw-semibold"></span></td></tr>
+      <tr><td><span class="fw-semibold"></span></td></tr>
+    </tbody></table>
+    <script>
+      setTimeout(() => {
+        const titles = document.querySelectorAll('#referencesTable .fw-semibold');
+        titles[0].textContent = 'Question 1';
+        titles[1].textContent = 'Question 2';
+      }, 1200);
+    </script>
+  `);
+
+  const row = await exactQuestionRow(page.mainFrame(), 'Question 2', 5000);
+  await expect(row.locator('.fw-semibold')).toHaveText('Question 2');
+});
+
+test('every figure goes where the document printed it, above or below the stem', async () => {
+  // A slot marks exactly where a figure was printed. Filling only the figures printed above the
+  // stem left the ones printed below to pile up at the very end — under every label meant to sit
+  // beneath them, and under the credit line that closes the prompt.
+  const prompt =
+    '<div>This is the coronary anatomy diagram:</div><!--sot-image-->' +
+    '<div>QUESTION 16</div><div>Which ECG applies?</div>' +
+    '<!--sot-image--><div>ECG A.</div><!--sot-image--><div>ECG B.</div>' +
+    '<div>Credit for above diagrams: http://example.test/source</div>';
+  const image = (id: string, placement: 'before' | 'after') => ({ url: `https://lams.test/${id}.png`, placement, caption: '', widthPx: null, altText: '', source: id });
+
+  const html = questionDescriptionHtml(prompt, [image('coronary', 'before'), image('ecg-a', 'after'), image('ecg-b', 'after')]);
+
+  // Each figure sits in its own slot, so each label follows the figure it names.
+  expect(html.indexOf('coronary.png')).toBeLessThan(html.indexOf('QUESTION 16'));
+  expect(html.indexOf('ecg-a.png')).toBeLessThan(html.indexOf('ECG A.'));
+  expect(html.indexOf('ECG A.')).toBeLessThan(html.indexOf('ecg-b.png'));
+  expect(html.indexOf('ecg-b.png')).toBeLessThan(html.indexOf('ECG B.'));
+  // The credit closes the prompt, below the figures it credits.
+  expect(html.indexOf('ECG B.')).toBeLessThan(html.indexOf('Credit for above diagrams'));
+});
+
+test('a Print View check names the line that is missing, not the whole prompt', async ({ page }) => {
+  await page.setContent('<body>Question 1 QUESTION 1 The tracings below: Which tracing fits?</body>');
+  const node = {
+    title: 'AE Case 3 Q1',
+    description: '',
+    questions: [{
+      number: 1, title: 'Question 1', type: 'essay' as const,
+      promptHtml: '<div>QUESTION 1</div><div>The tracings below:</div><div>Note: CSFA is the control lane.</div><div>Which tracing fits?</div>',
+      marks: 4, answerRequired: true as const, prefixSequentialLetters: false, multipleAnswersAllowed: false,
+      saveAsNewVersion: true as const, selectLatestVersion: true as const, options: [], sourceQuestionNumber: 1,
+      images: [], replaceSourceFigures: false, promptReplacements: []
+    }]
+  };
+
+  // The one line the Print View lacks is what the failure names — not the whole prompt.
+  await expect(verifyAEPrintContent(page, node, [])).rejects.toThrow(
+    /omitted expected text: "Note: CSFA is the control lane."/
+  );
+});
+
+test('a Print View check accepts figure captions between the prompt lines, but not lines out of order', async ({ page }) => {
+  const node = (promptHtml: string) => ({
+    title: 'AE Case 6 Q15', description: '',
+    questions: [{
+      number: 15, title: 'Question 15', type: 'essay' as const, promptHtml,
+      marks: 4, answerRequired: true as const, prefixSequentialLetters: false, multipleAnswersAllowed: false,
+      saveAsNewVersion: true as const, selectLatestVersion: true as const, options: [], sourceQuestionNumber: 15,
+      images: [], replaceSourceFigures: false, promptReplacements: []
+    }]
+  });
+  const prompt = '<div>Mr Kong fell in his kitchen.</div><div>QUESTION 15</div><div>Which diagram applies?</div>';
+
+  // LAMS prints each figure's caption between the lines, so the prompt is not one unbroken run.
+  await page.setContent('<body>Question 15 Mr Kong fell in his kitchen. Diagram A Diagram B QUESTION 15 Which diagram applies?</body>');
+  await verifyAEPrintContent(page, node(prompt), []);
+
+  await page.setContent('<body>Question 15 Which diagram applies? Mr Kong fell in his kitchen. QUESTION 15</body>');
+  await expect(verifyAEPrintContent(page, node(prompt), [])).rejects.toThrow(/out of order/);
 });

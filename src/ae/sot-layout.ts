@@ -23,6 +23,11 @@ export interface ParagraphLayout {
   pageBreakBefore: boolean;
   /** A page break follows the paragraph's last visible character. */
   pageBreakAfter: boolean;
+  /**
+   * How far the paragraph is indented from the left margin, in twips. A line the document pushes
+   * across the page this way is standing over a column of the block below it.
+   */
+  indentTwips: number;
 }
 
 /** 6pt. Smaller gaps (such as 2pt between answer options) read as ordinary line spacing. */
@@ -90,7 +95,8 @@ export class SOTLayoutReader {
       contextualSpacing: spacing.contextualSpacing ?? false,
       listLabel: this.listLabel(properties),
       pageBreakBefore: /<w:pageBreakBefore(?:\s[^>]*)?\/>/.test(properties) || (firstText >= 0 && breaks.some((at) => at < firstText)),
-      pageBreakAfter: breaks.some((at) => firstText < 0 || at > firstText)
+      pageBreakAfter: breaks.some((at) => firstText < 0 || at > firstText),
+      indentTwips: Number(/<w:ind\b[^>]*\bw:left="(\d+)"/.exec(properties)?.[1] ?? 0)
     };
   }
 

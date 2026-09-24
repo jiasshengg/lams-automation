@@ -37,16 +37,25 @@ export async function resolveAEQuestionImages(plan: AEPlan): Promise<Map<number,
   const result = new Map<number, QuestionImageAsset[]>();
   const sourceImages = plan.sourceDocx ? await imagesFromDocx(plan.sourceDocx) : [];
   for (const question of plan.nodes.flatMap((node) => node.questions)) {
-    const automatic = sourceImages.filter((image) => image.questionNumber === question.sourceQuestionNumber).map(toAsset);
+    // A replaced figure means the reviewed images stand in for the document's own, which could
+    // not be handed over; importing both would show the broken arrangement alongside the fix.
+    const automatic = question.replaceSourceFigures
+      ? []
+      : sourceImages.filter((image) => image.questionNumber === question.sourceQuestionNumber).map(toAsset);
     const explicit = await resolveExplicitImages(question.images);
     result.set(question.number, deduplicate([...automatic, ...explicit]));
   }
   return result;
 }
 
+/**
+ * The figures a question may import: everything the document prints for it except the ones under
+ * its own answer key, which belong to the rationale. An excluded figure can still be imported by
+ * naming its file in the question's own `images`.
+ */
 async function imagesFromDocx(query: string) {
   const filename = await resolveInputFile(query, '.docx');
-  return inspectDocxImages(await readFile(filename));
+  return inspectDocxImages(await readFile(filename)).filter((image) => !image.afterAnswerKey);
 }
 
 async function resolveExplicitImages(images: QuestionImageRequest[]): Promise<QuestionImageAsset[]> {

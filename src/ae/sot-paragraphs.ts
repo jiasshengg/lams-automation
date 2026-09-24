@@ -1,6 +1,33 @@
 import { readZipEntries, requireZipEntry } from '../docx/archive.js';
 import { renderInlineSegments, type InlineSegment, type InlineTag } from './inline-html.js';
 import { SOTLayoutReader, spacingBlankLines, type ParagraphLayout, type SOTLayoutParts } from './sot-layout.js';
+import {
+  paragraphBlocks,
+  topLevelBlocks,
+  withoutCompatibilityFallback,
+  withoutTextBoxes
+} from '../docx/blocks.js';
+
+/** The gap a tab leaves: four non-breaking spaces, because HTML collapses ordinary ones. */
+const TAB_GAP = '    ';
+
+/**
+ * The figures in a paragraph: one per embedded picture, so a grouped drawing holding several
+ * pictures counts each, and a shape with no picture (a text box, an arrow) counts none. This is
+ * the same set the image extractor uploads, so every image slot has its picture.
+ */
+function pictureCount(xml: string): number {
+  const drawings = [...xml.matchAll(/<w:drawing\b[\s\S]*?<\/w:drawing>/g)].reduce((sum, drawing) => {
+    const wrapped = [...drawing[0].matchAll(/<pic:pic\b/g)].length;
+    return sum + (wrapped > 0 ? wrapped : [...drawing[0].matchAll(/<a:blip\b[^>]*\br:embed=/g)].length);
+  }, 0);
+  // A legacy VML picture with no DrawingML version; the fallback copy was already removed.
+  const legacy = [...xml.matchAll(/<w:pict\b[\s\S]*?<\/w:pict>/g)].reduce(
+    (sum, pict) => sum + [...pict[0].matchAll(/<v:imagedata\b[^>]*\br:id=/g)].length,
+    0
+  );
+  return drawings + legacy;
+}
 
 export type { SOTLayoutParts };
 
@@ -18,6 +45,10 @@ export interface SOTParagraph {
   blankLinesBefore: number;
   /** The paragraph starts a new page. */
   pageBreakBefore: boolean;
+  /** For a table block, its cell text row by row. Absent for an ordinary paragraph. */
+  cells?: string[][];
+  /** How far the document indents the line from the left margin, in twips. */
+  indentTwips?: number;
 }
 
 export function readDocumentXmlFromDocx(buffer: Buffer): string {
@@ -37,22 +68,48 @@ export function readSOTDocxParts(buffer: Buffer): SOTLayoutParts & { documentXml
 }
 
 /**
+ * Every paragraph in reading order (body paragraphs, then each table cell's paragraphs where the
+ * table sits) with the list label Word prints ahead of it. Question numbering reads these, so an
+ * option list Word numbers automatically ("A.") is recognised just as a typed one is. Lists are
+ * counted across body paragraphs only, exactly as `extractSOTParagraphs` counts them.
+ */
+export function readParagraphsWithListLabels(
+  documentXml: string,
+  parts: SOTLayoutParts = {}
+): { xml: string; content: SOTParagraph; structureText: string }[] {
+  const reader = new SOTLayoutReader(parts);
+  return topLevelBlocks(documentXml).flatMap((block) => {
+    if (block.kind === 'p') {
+      const content = paragraphContent(block.inner, reader.read(block.inner).listLabel);
+      return [{ xml: block.inner, content, structureText: content.text }];
+    }
+    // A table reads as one block of structure, as `extractSOTParagraphs` reads it: an option list
+    // laid out in cells ("A | Complete heart block") is only recognisable from the whole table.
+    const tableText = tableContent(block.inner).text;
+    return paragraphBlocks(block.inner).map((xml, index) => ({
+      xml,
+      content: paragraphContent(xml),
+      structureText: index === 0 ? tableText : ''
+    }));
+  });
+}
+
+/**
  * Reads the document as an ordered run of blocks. Tables are matched before paragraphs so a table
  * is read whole: its cells are `<w:p>` too, and matching those individually is what flattened a
  * table into a column of stray lines. Empty paragraphs are not blocks; they become the
  * `blankLinesBefore` of the next block that carries content.
  */
 export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts = {}): SOTParagraph[] {
-  const blocks = /<w:tbl(?:\s[^>]*)?>([\s\S]*?)<\/w:tbl>|<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g;
   const reader = new SOTLayoutReader(parts);
   const result: SOTParagraph[] = [];
   let previous: ParagraphLayout | null = null;
   let emptyParagraphs = 0;
   let pageBreak = false;
 
-  for (const match of documentXml.matchAll(blocks)) {
-    const layout = match[1] === undefined ? reader.read(match[2] ?? '') : TABLE_LAYOUT;
-    const content = match[1] === undefined ? paragraphContent(match[2] ?? '', layout.listLabel) : tableContent(match[1]);
+  for (const block of topLevelBlocks(documentXml)) {
+    const layout = block.kind === 'p' ? reader.read(block.inner) : TABLE_LAYOUT;
+    const content = block.kind === 'p' ? paragraphContent(block.inner, layout.listLabel) : tableContent(block.inner);
     pageBreak ||= layout.pageBreakBefore;
     if (content.text === '' && content.imageCount === 0) {
       // A paragraph holding only a page break moves to a new page; it is not a typed blank line.
@@ -64,13 +121,106 @@ export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts 
     result.push({
       ...content,
       blankLinesBefore: result.length === 0 ? 0 : emptyParagraphs > 0 ? emptyParagraphs : spacing,
-      pageBreakBefore: pageBreak
+      pageBreakBefore: pageBreak,
+      indentTwips: layout.indentTwips
     });
     previous = layout;
     emptyParagraphs = 0;
     pageBreak = layout.pageBreakAfter;
   }
+  return asTabTables(result);
+}
+
+/** A line the document pushes this far across the page stands over a column, not at the margin. */
+const HEADER_INDENT_TWIPS = 2880;
+/** One or more tabs in a row separate two columns; the gap they leave is four spaces each. */
+const TAB_COLUMN_BREAK = new RegExp(TAB_GAP + '+', 'g');
+
+/**
+ * Word lays a block of results out with tab stops, not a table: each line holds a label, a value
+ * and a reference range, separated by however many tabs reach the next stop. Written as text those
+ * columns drift apart, because the number of tabs differs line to line. Read as a table they line
+ * up as the document prints them, and the line the document indents over the last column - the
+ * "Reference Range" heading - joins it there.
+ */
+function asTabTables(paragraphs: SOTParagraph[]): SOTParagraph[] {
+  const result: SOTParagraph[] = [];
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    const rows: string[][] = [];
+    const first = index;
+    // A heading the document pushes across the page with an indent stands over the last column of
+    // the block below it, so it opens that block rather than sitting apart from it.
+    const header = paragraphs[index];
+    const opensWithHeader =
+      header !== undefined &&
+      (header.indentTwips ?? 0) >= HEADER_INDENT_TWIPS &&
+      tabColumns(paragraphs[index + 1]) !== null;
+    if (opensWithHeader) index += 1;
+    while (index < paragraphs.length) {
+      const columns = tabColumns(paragraphs[index]);
+      if (columns === null) break;
+      rows.push(columns);
+      index += 1;
+    }
+    if (rows.length === 0 || rows.every((row) => row.filter((cell) => cell !== '').length < 2)) {
+      result.push(paragraphs[first]!);
+      index = first;
+      continue;
+    }
+    const dataRows = rows.filter((row) => row.filter((cell) => cell !== '').length >= 2);
+    const dataWidth = Math.max(...dataRows.map((row) => row.length));
+    const padded = rows.map((row) => fitToWidth(row, dataWidth));
+    // The columns the data leaves empty are spacing, not columns — dropped before a heading is
+    // placed, so the heading stands over a column that carries something.
+    dropEmptyColumns(padded.filter((row) => row.filter((cell) => cell !== '').length >= 2));
+    const width = padded.find((row) => row.filter((cell) => cell !== '').length >= 2)!.length;
+    const fitted = padded.map((row) => fitToWidth(row.filter((cell, at) => at < width || cell !== ''), width));
+    if (opensWithHeader) fitted.unshift([...Array.from({ length: width - 1 }, () => ''), header!.html]);
+    const source = paragraphs[first]!;
+    result.push({
+      text: fitted.flat().filter((cell) => cell !== '').join(' '),
+      html: '<table data-layout="tabs">' + fitted.map((row) => '<tr>' + row.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>').join('') + '</table>',
+      bold: false,
+      imageCount: 0,
+      blankLinesBefore: source.blankLinesBefore,
+      pageBreakBefore: source.pageBreakBefore
+    });
+    index -= 1;
+  }
   return result;
+}
+
+/**
+ * The columns a tab-laid-out line holds, or null when the line is ordinary prose. A line holding
+ * one word after a run of tabs counts too: that is how the document positions a column heading.
+ */
+function tabColumns(paragraph: SOTParagraph | undefined): string[] | null {
+  if (paragraph === undefined || paragraph.imageCount > 0 || !paragraph.html.includes(TAB_GAP)) return null;
+  const columns = paragraph.html.split(TAB_COLUMN_BREAK).map((cell) => cell.trim());
+  const filled = columns.filter((cell) => cell !== '').length;
+  return filled >= 2 || (filled === 1 && columns[0] === '') ? columns : null;
+}
+
+/**
+ * Fits a row to the block's width. A heading the document positions with tabs — one word after a
+ * run of them — belongs over the column it was pushed to, so it fills from the right; a data row
+ * starts at the first column and any missing cells are at the end.
+ */
+function fitToWidth(row: string[], width: number): string[] {
+  const text = row.filter((cell) => cell !== '');
+  const positionedHeading = text.length === 1 && row[0] === '';
+  if (positionedHeading || row.length > width) {
+    return [...Array.from({ length: Math.max(width - text.length, 0) }, () => ''), ...text].slice(-width);
+  }
+  return [...row, ...Array.from({ length: width - row.length }, () => '')];
+}
+
+/** A column empty in every row is spacing the document left, not a column of its own. */
+function dropEmptyColumns(rows: string[][]): void {
+  for (let column = (rows[0]?.length ?? 0) - 1; column >= 0; column -= 1) {
+    if (rows.some((row) => row[column] !== '')) continue;
+    for (const row of rows) row.splice(column, 1);
+  }
 }
 
 /** Tables carry no paragraph spacing of their own; the paragraphs around them supply the gap. */
@@ -81,15 +231,16 @@ const TABLE_LAYOUT: ParagraphLayout = {
   contextualSpacing: false,
   listLabel: null,
   pageBreakBefore: false,
-  pageBreakAfter: false
+  pageBreakAfter: false,
+  indentTwips: 0
 };
 
 /** Reads one `<w:tbl>` as a single block whose html is the table itself. */
 export function tableContent(xml: string): SOTParagraph {
   const rows = [...xml.matchAll(/<w:tr(?:\s[^>]*)?>([\s\S]*?)<\/w:tr>/g)].map((row) =>
     [...(row[1] ?? '').matchAll(/<w:tc(?:\s[^>]*)?>([\s\S]*?)<\/w:tc>/g)].map((cell) => {
-      const paragraphs = [...(cell[1] ?? '').matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)]
-        .map((paragraph) => ({ ...paragraphContent(paragraph[1] ?? ''), align: cellAlignment(paragraph[1] ?? '') }))
+      const paragraphs = paragraphBlocks(cell[1] ?? '')
+        .map((paragraph) => ({ ...paragraphContent(paragraph), align: cellAlignment(paragraph) }))
         .filter((paragraph) => paragraph.text !== '');
       const [first] = paragraphs;
       return {
@@ -107,7 +258,8 @@ export function tableContent(xml: string): SOTParagraph {
     bold: false,
     imageCount: 0,
     blankLinesBefore: 0,
-    pageBreakBefore: false
+    pageBreakBefore: false,
+    cells: rows.map((row) => row.map((cell) => cell.text))
   };
 }
 
@@ -155,7 +307,10 @@ function renderTable(
 }
 
 /** Reads one `<w:p>` body. Shared so image captions resolve exactly as prompts do. */
-export function paragraphContent(xml: string, listLabel: string | null = null): SOTParagraph {
+export function paragraphContent(paragraphXml: string, listLabel: string | null = null): SOTParagraph {
+  // Labels typed in text boxes on a figure belong to the picture, not to the line of prose.
+  const drawings = withoutCompatibilityFallback(paragraphXml);
+  const xml = withoutTextBoxes(drawings);
   const segments = paragraphSegments(xml);
   const contentText = segments.map((segment) => segment.text).join('');
   // Word prints a list paragraph's label without storing it as text, so it is added here and
@@ -167,7 +322,7 @@ export function paragraphContent(xml: string, listLabel: string | null = null): 
     // Word marks an answer key by emboldening the whole option paragraph, so a
     // paragraph only counts as bold when no visible character is left plain.
     bold: contentText !== '' && segments.every((segment) => segment.text.trim() === '' || segment.tags.includes('strong')),
-    imageCount: [...xml.matchAll(/<w:drawing\b/g)].length,
+    imageCount: pictureCount(xml),
     blankLinesBefore: 0,
     pageBreakBefore: false
   };
@@ -191,8 +346,12 @@ function paragraphSegments(xml: string): InlineSegment[] {
       continue;
     }
     if (match[2] !== undefined || match[3] !== undefined) {
-      // A tab or line break reads as a space, matching a plain-text reading of the run.
-      for (const character of match[2] === undefined ? ' ' : decodeXml(match[2])) characters.push({ character, tags });
+      // A tab is how the document lays a line out in columns — lab results against their
+      // reference ranges. One space would run the two together, so it keeps a gap a reader sees;
+      // the spaces are non-breaking because HTML collapses ordinary ones. A line break reads as
+      // a space, matching a plain-text reading of the run.
+      const text = match[2] !== undefined ? decodeXml(match[2]) : match[3]?.startsWith('<w:tab') ? '\t' : ' ';
+      for (const character of text) characters.push({ character, tags });
       continue;
     }
     // A run boundary: formatting never leaks past the run that declared it.
@@ -237,6 +396,13 @@ function normalizeWhitespace(
   let pendingSpace = false;
   for (const entry of characters) {
     const character = entry.character === '\u00a0' ? ' ' : entry.character;
+    // A tab is a column gap, not spacing to collapse: it is what holds a lab result apart from
+    // its reference range, so it survives as a gap the reader sees.
+    if (character === '\t') {
+      for (const space of TAB_GAP) result.push({ character: space, tags: entry.tags });
+      pendingSpace = false;
+      continue;
+    }
     if (/\s/.test(character)) {
       pendingSpace = result.length > 0;
       continue;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { inspectDocxImages, parseSourceRectangle } from '../src/docx/media.js';
 import { resolveAEQuestionImages } from '../src/docx/question-images.js';
 import { buildAEPlan } from '../src/ae/plan.js';
-import { drawing, mediaDocx, paragraph } from './helpers/docx-media.js';
+import { drawing, groupedDrawing, mediaDocx, paragraph } from './helpers/docx-media.js';
 
 test('extracts embedded images and preserves question associations and dimensions', () => {
   const images = inspectDocxImages(mediaDocx(
@@ -133,4 +133,129 @@ test('reads the display crop Word applies to a picture', () => {
   expect(parseSourceRectangle('<a:srcRect l="0" t="0"/>')).toBeNull();
   // A rectangle that trims everything away is a misread, not a blank image.
   expect(() => parseSourceRectangle('<a:srcRect l="60000" r="40000"/>')).toThrow('leaves nothing');
+});
+
+test('reads every picture in a grouped figure once, with its own size and the labels drawn on it', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('1. Which lane shows HbS?') + paragraph('', groupedDrawing) + paragraph('A. Lane A')
+  ));
+  // Two pictures in the group; the legacy VML fallback repeating one of them is not read again.
+  expect(images).toHaveLength(2);
+  expect(images.map((image) => image.questionNumber)).toEqual([1, 1]);
+  // Each picture is half of a group drawn 4,000,000 EMU (420 px) wide.
+  expect(images.map((image) => image.widthPx)).toEqual([210, 210]);
+  expect(images[0]?.overlayText).toBe('A | B');
+});
+
+test('numbers unnumbered iRAT questions that follow numbered ones, so their figures stay with them', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('1. A numbered question?') +
+    paragraph('A. One') + paragraph('B. Two') +
+    paragraph('Explanation - A is correct.') +
+    paragraph('Red cell disorders') +
+    paragraph('What part of the neuron triggers an action potential?') +
+    paragraph('', drawing) +
+    paragraph('A. A') + paragraph('B. B') +
+    paragraph('The electrical synapse is important for:') +
+    paragraph('I. Synchronization of activity') + paragraph('II. Re-uptake of neurotransmitters') +
+    paragraph('A. I') + paragraph('B. I &amp; II') +
+    paragraph('Identify the epithelia depicted below.') +
+    paragraph('', drawing) +
+    paragraph('A. Simple cuboidal') + paragraph('B. Transitional')
+  ));
+  expect(images.map((image) => image.questionNumber)).toEqual([2, 4]);
+});
+
+test('a figure in the case narrative after a closed question introduces the next question', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('1. Earlier question?') + paragraph('A. One') + paragraph('B. Two') +
+    paragraph('Q2-3 relate to this case') +
+    paragraph('A 50 year-old man collapsed in the ED waiting area.') +
+    paragraph('You noticed this rhythm on his cardiac monitoring.') +
+    paragraph('', drawing) +
+    paragraph('What is the definitive management of the condition?') +
+    paragraph('A. Defibrillation') + paragraph('B. Digoxin')
+  ));
+  expect(images).toHaveLength(1);
+  expect(images[0]).toMatchObject({ questionNumber: 2, placement: 'before' });
+});
+
+test('keeps a figure with its own question when it follows the options or a rationale', () => {
+  const underOptions = inspectDocxImages(mediaDocx(
+    paragraph('1. In the image below, which letter marks a sulcus?') + paragraph('A. C') + paragraph('B. D') +
+    paragraph('', drawing) +
+    paragraph('2. In the brain above, which letter marks the diencephalon?') + paragraph('A. D') + paragraph('B. E')
+  ));
+  const inRationale = inspectDocxImages(mediaDocx(
+    paragraph('1. Which diagram applies?') + paragraph('A. One') + paragraph('B. Two') +
+    paragraph('Answer: A') + paragraph('Central cord syndrome is explained by the layering of the cord.') +
+    paragraph('', drawing) +
+    paragraph('2. Next question?')
+  ));
+  const essay = inspectDocxImages(mediaDocx(
+    paragraph('1. Explain the tracing.') + paragraph('Consider the tracing below:') +
+    paragraph('', drawing) + paragraph('2. Next question?')
+  ));
+  expect(underOptions[0]).toMatchObject({ questionNumber: 1, placement: 'after' });
+  expect(inRationale[0]).toMatchObject({ questionNumber: 1, placement: 'after' });
+  expect(essay[0]).toMatchObject({ questionNumber: 1, placement: 'after' });
+});
+
+test('reads Q-prefixed stems and starred break markers', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('Q16. Based on the diagram, which ECG applies?') + paragraph('A. One') +
+    paragraph('***** BREAK *****') +
+    paragraph('', drawing) +
+    paragraph('Q17. What is the name of these T waves?')
+  ));
+  expect(images[0]).toMatchObject({ questionNumber: 17, placement: 'before' });
+});
+
+test('a figure inside the vignette of an unnumbered question belongs to that question', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('1. First question?') + paragraph('A. One') + paragraph('B. Two') +
+    paragraph('A 55-year-old woman presents with chest pain. Her ECG is shown.', drawing) +
+    paragraph('What is the most likely diagnosis?') +
+    paragraph('A. MI') + paragraph('B. PE')
+  ));
+  expect(images[0]).toMatchObject({ questionNumber: 2, placement: 'before' });
+});
+
+test('marks a figure printed after its own answer key as rationale, but not the next question\'s case figure', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('1. Which diagram applies?') + paragraph('A. One') + paragraph('B. Two') +
+    paragraph('Answer: A') +
+    paragraph('Rationale - the layering of the cord explains it.') +
+    paragraph('', drawing) +
+    paragraph('Case 4') +
+    paragraph('A 42 year old man presents with chest pain.') +
+    paragraph('', drawing) +
+    paragraph('2. Which ECG applies?')
+  ));
+  expect(images.map((image) => [image.questionNumber, image.afterAnswerKey])).toEqual([[1, true], [2, false]]);
+});
+
+test('a question whose figure is replaced does not also import the document\'s own', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-replaced-figure-'));
+  try {
+    const sourceDocx = path.join(directory, 'AE.docx');
+    await writeFile(sourceDocx, mediaDocx(paragraph('1. Which film applies?', drawing) + paragraph('2. Describe the film.', drawing)));
+    const page = path.join(directory, 'films-page.png');
+    await writeFile(page, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'));
+    const plan = buildAEPlan({
+      sourceLabel: 'Replacement', sourceDocx, breakMarkerCount: 0,
+      nodes: [{ title: 'AE 1', questions: [
+        { number: 1, type: 'essay', prompt: '1. Which film applies?\n{{image}}', replaceSourceFigures: true, images: [{ path: page }] },
+        { number: 2, type: 'essay', prompt: '2. Describe the film.\n{{image}}' }
+      ] }],
+      gates: []
+    });
+
+    const images = await resolveAEQuestionImages(plan);
+    expect(images.get(1)?.map((image) => image.filename)).toEqual(['films-page.png']);
+    // The question that did not ask for a replacement still gets the document's figure.
+    expect(images.get(2)?.map((image) => image.filename)).toEqual(['chart.png']);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

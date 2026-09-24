@@ -130,7 +130,7 @@ Prompts follow the document's layout while the paragraph format (Normal) and fon
 ## AE node title convention
 
 - One case: `AE Case <n> Q<first>-<last>`, or `AE Case <n> Q<n>` for a single question — for example `AE Case 3 Q3-6`.
-- Spanning cases: `AE Case <first> Q<first> to Case <last> Q<last>` — for example `AE Case 1 Q1 to Case 2 Q2`.
+- Spanning cases: `AE Case <first> Q<first>-Case <last> Q<last>` — for example `AE Case 1 Q1-Case 2 Q2`. A hyphen joins every range, so node and gate titles read the same way throughout a lesson.
 - A case heading stays in effect across break markers, so a node that continues the previous case is still titled with that case number.
 - Questions outside any numbered Case heading fall back to `AE Q<range>` and raise a warning.
 

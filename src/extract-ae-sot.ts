@@ -16,7 +16,10 @@ async function main(): Promise<void> {
   if (path.extname(absoluteInput).toLowerCase() !== '.docx') throw new Error('AE SOT input must be a .docx file.');
   const buffer = await readFile(absoluteInput);
   const { documentXml, ...layout } = readSOTDocxParts(buffer);
-  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), path.basename(absoluteInput, path.extname(absoluteInput)));
+  const columnQuestions = process.argv.includes('--column-questions');
+  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), path.basename(absoluteInput, path.extname(absoluteInput)), {
+    columnQuestions
+  });
   const output = JSON.stringify(analysis, null, 2);
   const outputPath = readArgument('--out');
   if (outputPath) {
@@ -29,7 +32,8 @@ async function main(): Promise<void> {
   if (draftPath) {
     const draft = buildAEDraft(analysis, {
       sourceDocx: path.basename(absoluteInput),
-      images: inspectDocxImages(buffer)
+      images: inspectDocxImages(buffer),
+      ...(columnQuestions ? { columnQuestions: true } : {})
     });
     const absoluteDraft = path.resolve(draftPath);
     await writeFile(absoluteDraft, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');

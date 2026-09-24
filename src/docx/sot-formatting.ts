@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import type { IratRequest } from '../config.js';
 import { resolveInputFile } from '../input-file.js';
-import { readZipEntries, requireZipEntry } from './archive.js';
-import { createQuestionTracker, decodeXml } from './media.js';
+import { readParagraphsWithListLabels, readSOTDocxParts } from '../ae/sot-paragraphs.js';
+import type { SOTLayoutParts } from '../ae/sot-layout.js';
+import { paragraphBlocks, withoutCompatibilityFallback, withoutTextBoxes } from './blocks.js';
+import { decodeXml, questionNumbersForParagraphs } from './media.js';
 
 /** One DOCX text run with the direct character formatting LAMS can reproduce. */
 export interface StyledRun {
@@ -34,12 +36,13 @@ const MARK_ANNOTATION = /\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*marks?
  * (paragraph or character styles) is intentionally ignored: only explicit bold, italic,
  * underline, and sub/superscript marks in the document are treated as SoT formatting.
  */
-export function extractStyledParagraphs(documentXml: string): StyledParagraph[] {
-  const questionFor = createQuestionTracker();
-  const paragraphs: StyledParagraph[] = [];
-  for (const paragraph of documentXml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)) {
+export function extractStyledParagraphs(documentXml: string, parts: SOTLayoutParts = {}): StyledParagraph[] {
+  const paragraphs: Omit<StyledParagraph, 'questionNumber'>[] = [];
+  for (const paragraph of paragraphBlocks(documentXml)) {
     const runs: StyledRun[] = [];
-    for (const run of (paragraph[1] ?? '').matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)) {
+    // Text boxes on a figure are labels drawn on the picture, never question text.
+    const prose = withoutTextBoxes(withoutCompatibilityFallback(paragraph));
+    for (const run of prose.matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)) {
       const xml = run[1] ?? '';
       const properties = /<w:rPr>([\s\S]*?)<\/w:rPr>/.exec(xml)?.[1] ?? '';
       const style = {
@@ -54,10 +57,13 @@ export function extractStyledParagraphs(documentXml: string): StyledParagraph[] 
         runs.push({ text: piece[1] !== undefined ? decodeXml(piece[1]) : ' ', ...style });
       }
     }
-    const text = runs.map((run) => run.text).join('').replace(/\s+/g, ' ').trim();
-    paragraphs.push({ questionNumber: questionFor(text), runs });
+    paragraphs.push({ runs });
   }
-  return paragraphs;
+  // Numbered from the text as printed, list labels included, so questions match the image rule.
+  const questions = questionNumbersForParagraphs(
+    readParagraphsWithListLabels(documentXml, parts).map((paragraph) => paragraph.structureText)
+  );
+  return paragraphs.map((paragraph, index) => ({ questionNumber: questions[index] ?? null, runs: paragraph.runs }));
 }
 
 /**
@@ -98,8 +104,8 @@ export function applySotFormatting(request: IratRequest, paragraphs: StyledParag
 export async function applySotFormattingFromDocx(request: IratRequest): Promise<SotFormattingResult> {
   if (!request.sourceDocx) return { applied: [], warnings: [] };
   const filename = await resolveInputFile(request.sourceDocx, '.docx');
-  const entries = readZipEntries(await readFile(filename));
-  return applySotFormatting(request, extractStyledParagraphs(requireZipEntry(entries, 'word/document.xml').toString('utf8')));
+  const { documentXml, ...parts } = readSOTDocxParts(await readFile(filename));
+  return applySotFormatting(request, extractStyledParagraphs(documentXml, parts));
 }
 
 /**

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { MAX_MARK_INPUT, QUESTION_TITLE, QUESTION_TYPE_BADGE, readRequiredState, REQUIRED_TOGGLE, waitForReferenceRows } from '../src/lams/irat-editor.js';
+import { MAX_MARK_INPUT, openPrintView, QUESTION_TITLE, QUESTION_TYPE_BADGE, readRequiredState, REQUIRED_TOGGLE, waitForReferenceRows } from '../src/lams/irat-editor.js';
 
 interface ReferenceRow {
   title: string;
@@ -183,4 +183,64 @@ test('waitForReferenceRows times out when a row never receives its controls', as
     '<table id="referencesTable"><tbody><tr><td><span class="fw-semibold">Question 1</span></td><td></td></tr></tbody></table>'
   );
   await expect(waitForReferenceRows(page, ['Question 1'], 500)).rejects.toThrow();
+});
+
+test('the Print View popup is given time to be generated, not just the action timeout', async ({ page }) => {
+  await page.context().route('**/printQuestions.do*', (route) => route.fulfill({ contentType: 'text/html', body: '<p>print</p>' }));
+  // LAMS builds the printable page for every question and image before opening the window, so a
+  // 15s action timeout is not the right budget: a 15-question iRAT takes longer than that.
+  await page.setContent(`
+    <button id="print" onclick="showQuestionsPrintPage()">Print</button>
+    <script>
+      function showQuestionsPrintPage() { setTimeout(() => window.open('https://lams.test/lams/tool/laasse10/authoring/printQuestions.do?sessionMapID=1', 'printPage'), 2500); }
+    </script>
+  `);
+
+  const printPage = await openPrintView(page, page, 1000);
+  expect(printPage).not.toBeNull();
+  await printPage.close();
+});
+
+test('a Print View click that fails reports its own error, not a stray popup timeout', async ({ page }) => {
+  await page.setContent('<p>The activity editor did not render its Print View control.</p>');
+
+  await expect(openPrintView(page, page, 500)).rejects.toThrow(/click/i);
+});
+
+test('the Print View opens even when a floating widget sits over its control', async ({ page }) => {
+  await page.context().route('**/printQuestions.do*', (route) => route.fulfill({ contentType: 'text/html', body: '<p>print</p>' }));
+  // The embedded help widget re-applies its own styles, so it cannot be reliably made
+  // click-through. The control's own handler is what opens the Print View, and the caller
+  // verifies the page that opens, so a blocked click is not a reason to fail.
+  await page.setContent(`
+    <button id="print" onclick="showQuestionsPrintPage()">Print</button>
+    <div id="overlay" style="position: fixed; inset: 0; background: rgba(0,0,0,.01)"></div>
+    <script>
+      window.opened = 0;
+      function showQuestionsPrintPage() { window.opened += 1; window.open('https://lams.test/lams/tool/laasse10/authoring/printQuestions.do?sessionMapID=1', 'printPage'); }
+    </script>
+  `);
+
+  const printPage = await openPrintView(page, page, 1000);
+  expect(await page.evaluate(() => (window as unknown as { opened: number }).opened)).toBe(1);
+  await printPage.close();
+});
+
+test('takes the Print View window, not whatever window opens first', async ({ page }) => {
+  // The activity dialog opens other windows of its own — a question's Question Bank statistics,
+  // for one — so the first popup after the click is not necessarily the Print View. Taking the
+  // wrong one verified a page of lesson titles against the question text and failed.
+  await page.setContent(`
+    <button id="print" onclick="showQuestionsPrintPage()">Print</button>
+    <script>
+      function showQuestionsPrintPage() {
+        window.open('https://lams.test/lams/qb/stats/show.do?qbQuestionUid=1', '_blank');
+        setTimeout(() => window.open('https://lams.test/lams/tool/laasse10/authoring/printQuestions.do?sessionMapID=1', '_blank'), 300);
+      }
+    </script>
+  `);
+  await page.context().route('**/*', (route) => route.fulfill({ contentType: 'text/html', body: '<p>page</p>' }));
+
+  const printPage = await openPrintView(page, page, 2000);
+  expect(printPage.url()).toContain('printQuestions.do');
 });
