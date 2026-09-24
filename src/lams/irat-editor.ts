@@ -716,7 +716,7 @@ export class LamsIratEditor implements IratEditor {
 
     for (const question of missing) {
       const requestedTitle = normalizeText(question.title);
-      const requestedContent = normalizeText(stripHtml(question.content));
+      const requestedContent = expectedQuestionDescriptionText(question.content, this.questionImages.get(question.title));
       const reference = questionBankReferences.get(requestedTitle);
       if (!reference) throw new Error(`No verified iRAT Question Bank reference was found for "${question.title}".`);
       const before = await rows.count();
@@ -1254,6 +1254,21 @@ async function verifyDefaultFormatting(frame: Frame, id: string, requested: stri
 
 function stripHtml(value: string): string {
   return value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ');
+}
+
+/**
+ * The live "question-description" block renders the stem followed by every image's
+ * caption (see `imageHtml` in ckeditor-media.ts), all as one text node. A captioned
+ * image therefore never text-matches a comparison built from the stem alone, so the
+ * expected text has to include each non-empty caption in upload order, exactly as
+ * `imageHtml` appends them.
+ */
+export function expectedQuestionDescriptionText(content: string, images: readonly { caption: string }[] | undefined): string {
+  const stem = normalizeText(stripHtml(content));
+  const captions = (images ?? [])
+    .map((image) => normalizeText(stripHtml(image.caption)))
+    .filter((caption) => caption !== '');
+  return [stem, ...captions].join(' ');
 }
 
 /**

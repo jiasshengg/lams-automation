@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import { LamsIratEditor, canonicalInlineHtml, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionStatsUid, questionVersionUid, snapshotIratReferenceRows, snapshotTratRows, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
+import { LamsIratEditor, canonicalInlineHtml, expectedQuestionDescriptionText, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionStatsUid, questionVersionUid, snapshotIratReferenceRows, snapshotTratRows, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
 
 const request: IratRequest = {
   activityName: 'iRAT', teamSetupName: 'Team Setup',
@@ -251,6 +251,28 @@ test('tRAT inventory repair permits only an exact missing suffix', () => {
   expect(() => missingTratQuestionSuffix(['Question 2'], questions)).toThrow('inventory/order did not match');
   expect(() => missingTratQuestionSuffix(['Question 1', 'Unexpected'], questions)).toThrow('inventory/order did not match');
   expect(() => missingTratQuestionSuffix(['Question 1', 'Question 2', 'Question 3'], questions)).toThrow('inventory/order did not match');
+});
+
+test('expected Question Bank text includes every image caption, as imageHtml renders them', () => {
+  // No images: unchanged from the plain stem, matching the pre-caption-aware behaviour.
+  expect(expectedQuestionDescriptionText('In the image below, which letter indicates a sulcus?', undefined))
+    .toBe('In the image below, which letter indicates a sulcus?');
+  expect(expectedQuestionDescriptionText('Stem text', []))
+    .toBe('Stem text');
+
+  // A single captioned image: the caption is appended, as `.question-description` renders it.
+  expect(expectedQuestionDescriptionText(
+    'In the brain above, which letter indicates the diencephalon?',
+    [{ caption: 'Medical gallery of Blausen Medical 2014' }]
+  )).toBe('In the brain above, which letter indicates the diencephalon? Medical gallery of Blausen Medical 2014');
+
+  // An uncaptioned image contributes nothing; a later captioned one still appends in order.
+  expect(expectedQuestionDescriptionText('Stem', [{ caption: '' }, { caption: 'Figure 1' }]))
+    .toBe('Stem Figure 1');
+
+  // Caption HTML is stripped and whitespace normalised the same way the stem is.
+  expect(expectedQuestionDescriptionText('Stem', [{ caption: '<em>Figure</em>  1\n' }]))
+    .toBe('Stem Figure 1');
 });
 
 test('Question Bank searches use a stable plain-text fragment', () => {
