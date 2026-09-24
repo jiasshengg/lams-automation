@@ -1,4 +1,5 @@
 import { isCaption } from '../docx/media.js';
+import { BREAK_MARKER, CASE_HEADING, NUMBERED_STEM, numberQuestionStems } from '../docx/question-numbering.js';
 import { sliceInlineHtml, stripOptionPrefixHtml, withoutUniformInlineTag } from './inline-html.js';
 import { IMAGE_SLOT_LINE } from './prompt-lines.js';
 import { extractSOTParagraphs, readDocumentXmlFromDocx, readSOTDocxParts, type SOTParagraph } from './sot-paragraphs.js';
@@ -29,8 +30,20 @@ export interface AEQuestionObservation {
   leadInLines: string[];
   /** Blank lines the document leaves directly above the stem. */
   blankLinesBeforeStem: number;
+  /**
+   * What the document prints between the stem and the options: result tables, the figures the
+   * options refer to, and the question sentence itself. The answer key and rationale are not here.
+   */
+  bodyLines: string[];
+  /** Credits for the figures shown, which the document prints after the answer key. */
+  creditLines: string[];
   optionLabels: string[];
   correctAnswerLabels: string[];
+  /**
+   * Labels the document names but will not commit to - "C, E, F, G, possibly H". Whether a hedged
+   * answer scores is the author's call, so it is recorded here rather than decided.
+   */
+  hedgedAnswerLabels: string[];
   options: AEObservedOption[];
 }
 
@@ -83,23 +96,59 @@ export interface AESOTAnalysis {
   warnings: string[];
 }
 
-export const BREAK_MARKER = /^-{3}\s*BREAK\s*-{3}$/i;
-export const CASE_HEADING = /^Case\s+(\d+)\b/i;
-export const SOT_QUESTION_START = /^(\d+)[.)]\s+\S/;
+export { BREAK_MARKER, CASE_HEADING };
+export const SOT_QUESTION_START = NUMBERED_STEM;
 const END_MARKER = /^END$/i;
 const OPTION_START = /^([A-Z])[.)]\s+\S/;
 const INLINE_OPTION = /(?:^|\s)([A-Z])[.)]\s+\S/g;
 const ANSWER_LINE = /^Answer\s*[-:]\s*(.+)$/i;
+/** "Select from above images: A, B, C, D" — the document naming the options it prints as figures. */
+const DECLARED_LABELS = /^(?:select|choose)\b[^:]*:\s*([A-Z](?:\s*,\s*[A-Z])+)/i;
+/** "Credit for above diagrams: http://…" — the source of the figures a question shows. */
+/** "possibly H", "possible C and G": the document naming an answer it will not commit to. */
+const HEDGED_ANSWER = /\bpossibl\w*\b/i;
+const CREDIT_LINE = /^Credit\b/i;
+/** The ruled line a paper answer is written on; LAMS gives the learner its own answer box. */
+const ANSWER_SPACE = /^[.…\s]+$/;
+/** "Diagram A", "ECG C." — a figure caption that labels one option. */
+const FIGURE_LABEL = /^([A-Za-z]+)\s+([A-Z])\.?$/;
+/**
+ * "Match the following features … with the peripheral blood films (PBF) (A – H)": one line naming
+ * the choices for every question that follows it, because the choices are figures printed once.
+ */
+const DECLARED_LABEL_RANGE = /\b(?:match|select|choose)\b[^.]*\(\s*([A-Z])\s*[–—-]\s*([A-Z])\s*\)/i;
+/**
+ * "…described in Q6 to Q10 with the peripheral blood films (PBF) (A – H)": a matching set whose
+ * questions are the columns of the table that follows, answered by a second table's Answer row.
+ */
+const DECLARED_COLUMN_SET = /\bQ(\d+)\s*(?:to|through|[-–—])\s*Q?(\d+)\b/i;
+const ANSWER_ROW = /^Answer\b/i;
 const RATIONALE_LINE = /^Rationale\b/i;
 /** Front matter of the first group (copyright, outcomes, labels) is never case narrative. */
 const METADATA_LABEL =
   /^(?:Module|Session Title|Authors and affiliations|Resource|Learning Outcomes|Specific Objectives for Session|Application title|Copyright Statement)\b/i;
 
-export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string): AESOTAnalysis {
+export interface AEAnalysisOptions {
+  /**
+   * Read a matching set stated as a table ("described in Q6 to Q10 … (A – H)") as one question per
+   * column. Off by default: those columns carry the document's own labels, which can repeat the
+   * numbers it prints for later questions, so including them renumbers everything after them.
+   */
+  columnQuestions?: boolean;
+}
+
+export function analyzeAESOT(
+  paragraphs: SOTParagraph[],
+  fallbackLabel: string,
+  options: AEAnalysisOptions = {}
+): AESOTAnalysis {
   const endIndex = paragraphs.findIndex((paragraph) => END_MARKER.test(paragraph.text));
   const contentEnd = endIndex >= 0 ? endIndex : paragraphs.length;
   const relevant = paragraphs.slice(0, contentEnd);
   const caseNumbers = caseNumberByParagraph(relevant);
+  // Numbered across the whole document, so an unpunctuated "3 Increased LDH…" is only a stem
+  // when it is the next number in sequence.
+  const stemNumbers = numberQuestionStems(relevant.map((paragraph) => paragraph.text), { inferUnnumbered: false });
   const breakIndexes = relevant
     .map((paragraph, index) => (BREAK_MARKER.test(paragraph.text) ? index : -1))
     .filter((index) => index >= 0);
@@ -112,10 +161,24 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
 
   if (groups.length === 0) throw new Error('The AE SOT did not contain any content.');
 
+  // Every question the document opens, in reading order: its numbered stems and the columns of
+  // any matching table. LAMS numbers questions 1..N, so that order is what the numbers follow.
+  const structuralProblems: string[] = [];
+  const starts = questionStartsInOrder(relevant, stemNumbers, structuralProblems, options.columnQuestions === true);
+  const renumbered = starts
+    .map((start, index) =>
+      start.printedNumber !== undefined && start.printedNumber !== index + 1
+        ? `question ${index + 1} as "${start.printedNumber}"`
+        : null
+    )
+    .filter((entry): entry is string => entry !== null);
+
   const questions: AEQuestionObservation[] = [];
   const unlabelledOptionBlockQuestions: number[] = [];
   const nodes = groups.map<AENodeObservation>(({ offset, paragraphs: untrimmedGroup }, index) => {
-    const firstQuestionIndex = untrimmedGroup.findIndex((paragraph) => SOT_QUESTION_START.test(paragraph.text));
+    const startAt = (groupIndex: number): QuestionStart[] =>
+      starts.filter((start) => start.paragraphIndex === offset + groupIndex);
+    const firstQuestionIndex = untrimmedGroup.findIndex((_paragraph, paragraphIndex) => startAt(paragraphIndex).length > 0);
     const precedingCaseIndex = untrimmedGroup.reduce(
       (latest, paragraph, paragraphIndex) =>
         paragraphIndex < firstQuestionIndex && CASE_HEADING.test(paragraph.text) ? paragraphIndex : latest,
@@ -123,12 +186,13 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
     );
     const groupStart = precedingCaseIndex >= 0 ? precedingCaseIndex : 0;
     const group = untrimmedGroup.slice(groupStart);
-    const questionStarts = group
-      .map((paragraph, paragraphIndex) => {
-        const match = paragraph.text.match(SOT_QUESTION_START);
-        return match ? { paragraphIndex, number: Number(match[1]) } : null;
-      })
-      .filter((value): value is { paragraphIndex: number; number: number } => value !== null);
+    const questionStarts = group.flatMap((_paragraph, paragraphIndex) =>
+      startAt(groupStart + paragraphIndex).map((start) => ({
+        paragraphIndex,
+        number: starts.indexOf(start) + 1,
+        ...(start.column ? { column: start.column } : {})
+      }))
+    );
 
     if (questionStarts.length === 0) {
       throw new Error(`Break-derived AE group ${index + 1} does not contain a numbered question.`);
@@ -140,12 +204,21 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
     // Only a question followed by another in this node can hand a lead-in forward.
     const leadInStarts = slices.map((slice, questionIndex) => (questionIndex < slices.length - 1 ? leadInStart(slice) : slice.length));
     const nodeQuestions = questionStarts.map((start, questionIndex) => {
+      if (start.column) {
+        const observation = columnQuestion(start.column, start.number, caseNumbers[offset + groupStart + start.paragraphIndex] ?? null);
+        questions.push(observation);
+        return observation;
+      }
       const previous = questionIndex > 0 ? slices[questionIndex - 1]!.slice(leadInStarts[questionIndex - 1]) : [];
       const observed = observeQuestion(
         slices[questionIndex]!.slice(0, leadInStarts[questionIndex]),
         start.number,
         caseNumbers[offset + groupStart + start.paragraphIndex] ?? null,
-        { leadInLines: promptLines(previous), blankLinesBeforeStem: group[start.paragraphIndex]!.blankLinesBefore }
+        {
+          leadInLines: promptLines(previous),
+          blankLinesBeforeStem: group[start.paragraphIndex]!.blankLinesBefore,
+          declaredLabels: declaredLabelsBefore(group, start.paragraphIndex)
+        }
       );
       questions.push(observed.observation);
       if (observed.unlabelledOptionBlock) unlabelledOptionBlockQuestions.push(start.number);
@@ -202,6 +275,31 @@ export function analyzeAESOT(paragraphs: SOTParagraph[], fallbackLabel: string):
   if (unlabelledOptionBlockQuestions.length > 0) {
     warnings.push(
       `Questions with an unlabelled option block that could not be resolved: ${formatNumberList(unlabelledOptionBlockQuestions)}. The option list could not be bounded automatically; confirm the options and answer key manually.`
+    );
+  }
+  warnings.push(...structuralProblems);
+  const hedgedQuestions = questions.filter((question) => question.hedgedAnswerLabels.length > 0);
+  if (hedgedQuestions.length > 0) {
+    warnings.push(
+      'The document hedges its answer key for ' +
+        hedgedQuestions.map((question) => `Q${question.number} (${question.hedgedAnswerLabels.join(', ')})`).join(', ') +
+        '. Ask the user whether a hedged answer scores like any other correct answer or not at all, ' +
+        'and set hedgedAnswers in the AE JSON to "include" or "exclude".'
+    );
+  }
+  if (renumbered.length > 0) {
+    warnings.push(
+      `LAMS numbers AE questions 1..${questions.length} in order, but the document numbers ${renumbered.join(', ')}. ` +
+        'The stems still show the numbers the document prints.'
+    );
+  }
+  const columnQuestions = starts
+    .map((start, index) => (start.column ? index + 1 : null))
+    .filter((number): number is number => number !== null);
+  if (columnQuestions.length > 0) {
+    warnings.push(
+      `Questions ${formatNumberList(columnQuestions)} are the columns of a matching table. Their stems name the column ` +
+        "and repeat the table's own question; confirm that wording and each column's answer key."
     );
   }
   if (questions.some((question) => question.caseNumber === null)) {
@@ -285,11 +383,15 @@ function caseNumberByParagraph(paragraphs: SOTParagraph[]): (number | null)[] {
   });
 }
 
-/** Matches the observed LAMS naming convention, e.g. "AE Case 3 Q3-6". */
+/**
+ * The LAMS naming convention: a hyphen joins the ends of a range, whether both are in one case
+ * ("AE Case 3 Q3-6") or the range runs across two ("AE Case 5 Q14-Case 6 Q15"). One question names
+ * itself ("AE Case 2 Q6"). Every AE gate then carries the title of the node it leads into.
+ */
 function suggestNodeTitle(firstCase: number | null, lastCase: number | null, first: number, last: number): string {
   if (firstCase === null || lastCase === null) return `AE ${formatQuestionRange(first, last)}`;
   if (firstCase === lastCase) return `AE Case ${firstCase} ${formatQuestionRange(first, last)}`;
-  return `AE Case ${firstCase} Q${first} to Case ${lastCase} Q${last}`;
+  return `AE Case ${firstCase} Q${first}-Case ${lastCase} Q${last}`;
 }
 
 /**
@@ -302,14 +404,19 @@ function promptLines(paragraphs: SOTParagraph[]): string[] {
   let awaitingCaption = false;
   for (const paragraph of paragraphs) {
     if (paragraph.text === '') {
-      lines.push(...blankLines(paragraph.blankLinesBefore), IMAGE_SLOT_LINE);
+      // A grouped figure holds several pictures, each uploaded separately into its own slot.
+      const slots = Array.from({ length: Math.max(1, paragraph.imageCount) }, () => IMAGE_SLOT_LINE);
+      lines.push(...blankLines(paragraph.blankLinesBefore), ...slots);
       awaitingCaption = true;
       continue;
     }
     const caption = awaitingCaption && isCaption(paragraph.text);
     awaitingCaption = false;
     if (caption || METADATA_LABEL.test(paragraph.text)) continue;
-    lines.push(...blankLines(paragraph.blankLinesBefore), paragraph.html);
+    // A picture anchored in a line of text (a label such as "From ASH Image Bank") still takes its
+    // own slot, ahead of the words, so it is not pushed down to the last slot of the prompt.
+    const slots = Array.from({ length: paragraph.imageCount }, () => IMAGE_SLOT_LINE);
+    lines.push(...blankLines(paragraph.blankLinesBefore), ...slots, paragraph.html);
   }
   return lines;
 }
@@ -324,6 +431,10 @@ function blankLines(count: number): string[] {
  * belongs to the question.
  */
 function leadInStart(slice: SOTParagraph[]): number {
+  // A new Case opens the reading for the question after it: its heading, narrative and figures
+  // all belong to that question, however the page happens to break around them.
+  const caseHeading = slice.findIndex((paragraph, index) => index > 0 && CASE_HEADING.test(paragraph.text));
+  if (caseHeading > 0) return caseHeading;
   let start = -1;
   slice.forEach((paragraph, index) => {
     if (index > 0 && paragraph.pageBreakBefore) start = index;
@@ -344,6 +455,11 @@ interface OptionEntry {
   end: number;
   /** False when the label was synthesised for an unprefixed block, so nothing is stripped. */
   labelled: boolean;
+  /**
+   * The option is the caption printed under its figure. It names the figure for a reader as well
+   * as being the answer to pick, so the prompt keeps it where the document prints it.
+   */
+  caption?: boolean;
   // False for options recovered from a collapsed run: they all share one
   // paragraph, so its bold flag cannot single any of them out as the answer.
   boldEligible: boolean;
@@ -394,6 +510,13 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   unlabelledOptionBlock: boolean;
 } {
   const body = paragraphs.slice(1);
+  // "Select from above images: A, B, C, D" names the options outright, because the choices
+  // themselves are figures printed earlier. Nothing else in the question is an option list.
+  const declared = body.find((paragraph) => DECLARED_LABELS.test(paragraph.text));
+  if (declared) {
+    const labels = declared.text.match(DECLARED_LABELS)![1]!.split(/\s*,\s*/);
+    return { entries: labels.map((label) => labelEntry(label, label)), unlabelledOptionBlock: false };
+  }
   // Answer and rationale prose often enumerates "A. … B. …" while discussing the
   // options, so it must never be read as the option list itself.
   const optionBody = body.filter(
@@ -413,6 +536,11 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
     if (match) labelled.push(wholeParagraphEntry(match[1]!, paragraph, { boldEligible: true, labelled: true }));
   }
   if (labelled.length > 0) return { entries: labelled, unlabelledOptionBlock: false };
+
+  // Figures labelled in a sequence ("Diagram A", "Diagram B", …, or "ECG A."): the caption under
+  // each figure is the option a learner picks, and the answer key names it by its letter.
+  const sequence = labelledFigureSequence(optionBody);
+  if (sequence.length > 0) return { entries: sequence, unlabelledOptionBlock: false };
 
   const answerIndex = paragraphs.findIndex((paragraph) => ANSWER_LINE.test(paragraph.text));
   const candidates = answerIndex > 1 ? paragraphs.slice(1, answerIndex) : [];
@@ -448,18 +576,238 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   return { entries: [], unlabelledOptionBlock: answerLabel !== undefined };
 }
 
+/**
+ * What the learner reads after the stem: the result tables, the figures the options refer to, and
+ * the question sentence. It stops at the answer key, and the options themselves are shown by LAMS
+ * as options rather than repeated in the prompt.
+ */
+function learnerBody(paragraphs: SOTParagraph[], options: OptionEntry[]): SOTParagraph[] {
+  const answer = paragraphs.findIndex(
+    (paragraph) => ANSWER_LINE.test(paragraph.text) || RATIONALE_LINE.test(paragraph.text)
+  );
+  // Nothing after the last option is for the learner: a document that states no "Answer" line
+  // still explains itself there, and that explanation is the answer.
+  let lastOption = -1;
+  paragraphs.forEach((paragraph, index) => {
+    if (options.some((option) => option.paragraph === paragraph)) lastOption = index;
+  });
+  const ends = [answer, lastOption + 1].filter((index) => index > 0);
+  const end = ends.length > 0 ? Math.min(...ends) : paragraphs.length;
+  return paragraphs
+    .slice(1, end)
+    .filter((paragraph) => !ANSWER_SPACE.test(paragraph.text))
+    .filter((paragraph) => options.every((option) => option.paragraph !== paragraph || option.caption === true))
+    // Word marks the answer by emboldening the whole caption. The learner reads the caption under
+    // the figure, so it keeps the words and loses the emphasis that would give the answer away.
+    .map((paragraph) =>
+      options.some((option) => option.paragraph === paragraph)
+        ? { ...paragraph, html: withoutUniformInlineTag(paragraph.html, 'strong') }
+        : paragraph
+    );
+}
+
+/** The credits the document prints for the figures this question shows. */
+function creditLines(paragraphs: SOTParagraph[]): SOTParagraph[] {
+  return paragraphs.slice(1).filter((paragraph) => CREDIT_LINE.test(paragraph.text));
+}
+
+/** One column of a matching table, read as its own question. */
+interface ColumnQuestion {
+  /** The column heading, such as "Q6"; the stem names it so a learner knows which column to read. */
+  label: string;
+  stem: string;
+  /** The shared instruction and the table the learner reads, repeated for every column question. */
+  leadInLines: string[];
+  optionLabels: string[];
+  correctAnswerLabels: string[];
+}
+
+interface QuestionStart {
+  paragraphIndex: number;
+  /** The number the document prints, when it prints one. */
+  printedNumber?: number;
+  column?: ColumnQuestion;
+}
+
+/**
+ * Every question opening in the document: a numbered stem, or one column of a matching table
+ * whose instruction names a question range ("described in Q6 to Q10 … (A – H)").
+ */
+function questionStartsInOrder(
+  paragraphs: SOTParagraph[],
+  stemNumbers: (number | null)[],
+  problems: string[],
+  columnQuestions: boolean
+): QuestionStart[] {
+  const starts: QuestionStart[] = [];
+  paragraphs.forEach((paragraph, index) => {
+    const printed = stemNumbers[index];
+    if (printed !== null && printed !== undefined) {
+      starts.push({ paragraphIndex: index, printedNumber: printed });
+      return;
+    }
+    const columns = columnQuestionsAt(paragraphs, index, problems);
+    if (columns.length === 0) return;
+    if (!columnQuestions) {
+      problems.push(
+        `A matching set described as "Q${columns[0]!.label.replace(/\D/g, '')} to Q${columns.at(-1)!.label.replace(/\D/g, '')}" ` +
+          'is a table in the case reading, not questions. Rerun with --column-questions to write one question per column; ' +
+          'that follows the labels in the table and renumbers every later question.'
+      );
+      return;
+    }
+    for (const column of columns) starts.push({ paragraphIndex: index, column });
+  });
+  return starts;
+}
+
+/**
+ * A matching set stated as a table: one instruction naming the question range and the option
+ * labels, the table of columns the questions describe, and a second table whose Answer row holds
+ * each column's key. Anything missing means this is ordinary case text, not a question set.
+ */
+function columnQuestionsAt(paragraphs: SOTParagraph[], index: number, problems: string[]): ColumnQuestion[] {
+  const declaration = paragraphs[index]!;
+  const range = declaration.text.match(DECLARED_COLUMN_SET);
+  const labels = declaration.text.match(DECLARED_LABEL_RANGE);
+  if (!range || !labels) return [];
+  const tableIndex = paragraphs.findIndex((paragraph, other) => other > index && paragraph.cells !== undefined);
+  if (tableIndex < 0) return [];
+  const answerTable = paragraphs
+    .slice(tableIndex + 1)
+    .map((paragraph) => paragraph.cells)
+    .find((rows) => rows?.some((row) => ANSWER_ROW.test(row[0] ?? '')));
+  const answerRow = answerTable?.find((row) => ANSWER_ROW.test(row[0] ?? ''));
+  if (!answerTable || !answerRow) return [];
+  const table = paragraphs[tableIndex]!;
+  const header = table.cells?.[0] ?? [];
+  // Each key is read from its column's position, so the two tables must name their columns the
+  // same way. A repeated or reordered heading would hand a question another question's answer.
+  const answerHeader = answerTable[0] ?? [];
+  const aligned =
+    answerRow.length === header.length &&
+    header.every((heading, column) => !/^Q\s?\d+$/i.test(heading) || answerHeader[column] === heading);
+  if (!aligned) {
+    problems.push(
+      `The matching set described as "Q${range[1]} to Q${range[2]}" was not read as questions: its answer table does not ` +
+        'line up with its question table, so no column can be given its key with confidence. Write those questions by hand.'
+    );
+    return [];
+  }
+  const first = Number(range[1]);
+  const last = Number(range[2]);
+  const optionLabels = labelRange(labels[1]!, labels[2]!);
+  // The table's own closing row asks the question ("Which PBF?"); each column repeats it.
+  const asked = (table.cells ?? []).map((row) => row[0] ?? '').find((cell) => cell.endsWith('?')) ?? 'Which option matches?';
+  return header.flatMap((heading, column) => {
+    const match = heading.match(/^Q\s?(\d+)$/i);
+    const number = match ? Number(match[1]) : NaN;
+    if (!match || number < first || number > last) return [];
+    return [
+      {
+        label: heading,
+        stem: `${heading}: ${asked}`,
+        leadInLines: [declaration.html, table.html],
+        optionLabels,
+        correctAnswerLabels: unique([...(answerRow[column] ?? '').matchAll(/\b([A-Z])\b/g)].map((letter) => letter[1]!)).filter(
+          (letter) => optionLabels.includes(letter)
+        )
+      }
+    ];
+  });
+}
+
+function labelRange(first: string, last: string): string[] {
+  const from = first.charCodeAt(0);
+  const to = last.charCodeAt(0);
+  return to > from ? Array.from({ length: to - from + 1 }, (_value, index) => String.fromCharCode(from + index)) : [];
+}
+
+function columnQuestion(column: ColumnQuestion, number: number, caseNumber: number | null): AEQuestionObservation {
+  return {
+    number,
+    type: column.correctAnswerLabels.length > 1 ? 'multiple-select' : 'single-select',
+    explicitMarks: null,
+    caseNumber,
+    promptHtml: column.stem,
+    leadInLines: column.leadInLines,
+    blankLinesBeforeStem: 0,
+    bodyLines: [],
+    creditLines: [],
+    hedgedAnswerLabels: [],
+    optionLabels: column.optionLabels,
+    correctAnswerLabels: column.correctAnswerLabels,
+    options: column.optionLabels.map((label) => ({
+      label,
+      html: label,
+      correct: column.correctAnswerLabels.includes(label)
+    }))
+  };
+}
+
+/** The labels the latest matching instruction above a stem declares for it, "(A – H)" as A…H. */
+function declaredLabelsBefore(group: SOTParagraph[], stemIndex: number): string[] {
+  let labels: string[] = [];
+  group.slice(0, stemIndex).forEach((paragraph) => {
+    const match = paragraph.text.match(DECLARED_LABEL_RANGE);
+    if (!match) return;
+    const first = match[1]!.charCodeAt(0);
+    const last = match[2]!.charCodeAt(0);
+    labels = last > first ? Array.from({ length: last - first + 1 }, (_value, index) => String.fromCharCode(first + index)) : [];
+  });
+  return labels;
+}
+
+/** An option whose whole text is its own label, so nothing is stripped from it. */
+function labelEntry(label: string, text: string): OptionEntry {
+  const paragraph: SOTParagraph = { text, html: text, bold: false, imageCount: 0, blankLinesBefore: 0, pageBreakBefore: false };
+  return { label, paragraph, start: 0, end: text.length, labelled: false, boldEligible: true };
+}
+
+/**
+ * Captions that label figures in order: "Diagram A", "Diagram B", "ECG C." — the same word, then
+ * a letter, running from A. Fewer than two, or a broken run, is not an option list.
+ */
+function labelledFigureSequence(paragraphs: SOTParagraph[]): OptionEntry[] {
+  const labelled = paragraphs
+    .map((paragraph) => ({ paragraph, match: paragraph.text.match(FIGURE_LABEL) }))
+    .filter((entry): entry is { paragraph: SOTParagraph; match: RegExpMatchArray } => entry.match !== null);
+  if (labelled.length < 2) return [];
+  const word = labelled[0]!.match[1]!.toLowerCase();
+  const sequential = labelled.every(
+    (entry, index) => entry.match[1]!.toLowerCase() === word && entry.match[2] === optionLabelAt(index)
+  );
+  if (!sequential) return [];
+  return labelled.map((entry) => ({
+    ...wholeParagraphEntry(entry.match[2]!, entry.paragraph, { boldEligible: true, labelled: false }),
+    caption: true
+  }));
+}
+
 function observeQuestion(
   paragraphs: SOTParagraph[],
   number: number,
   caseNumber: number | null,
-  layout: { leadInLines: string[]; blankLinesBeforeStem: number }
+  layout: { leadInLines: string[]; blankLinesBeforeStem: number; declaredLabels: string[] }
 ): ObservedQuestion {
-  const { entries: optionParagraphs, unlabelledOptionBlock } = collectOptionEntries(paragraphs);
+  const own = collectOptionEntries(paragraphs);
+  // A matching question states no options of its own; the labels declared for its group are the
+  // choices, and its answer key names them.
+  const declared = own.entries.length === 0 && layout.declaredLabels.length > 0;
+  const { entries: optionParagraphs, unlabelledOptionBlock } = declared
+    ? { entries: layout.declaredLabels.map((label) => labelEntry(label, label)), unlabelledOptionBlock: false }
+    : own;
   const optionLabels = optionParagraphs.map(({ label }) => label);
   const explicitAnswer = paragraphs
     .map((paragraph) => paragraph.text.match(ANSWER_LINE)?.[1])
     .find((value) => value !== undefined);
-  const explicitLabels = explicitAnswer ? [...explicitAnswer.matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!) : [];
+  // "C, E, F, G, possibly H": every label before the hedge is one the document states outright,
+  // and everything from the hedge onwards is an answer it will not commit to.
+  const hedgeAt = explicitAnswer === undefined ? -1 : explicitAnswer.search(HEDGED_ANSWER);
+  const stated = explicitAnswer === undefined ? '' : hedgeAt < 0 ? explicitAnswer : explicitAnswer.slice(0, hedgeAt);
+  const hedgedText = explicitAnswer === undefined || hedgeAt < 0 ? '' : explicitAnswer.slice(hedgeAt);
+  const explicitLabels = [...stated.matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!);
+  const hedgedLabels = [...hedgedText.matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!);
   const boldLabels = optionParagraphs
     .filter(({ paragraph, boldEligible }) => boldEligible && paragraph.bold)
     .map(({ label }) => label);
@@ -470,8 +818,13 @@ function observeQuestion(
   );
   const stem = paragraphs[0];
   const prompt = stem?.text ?? '';
+  const bodyLines = promptLines(learnerBody(paragraphs, optionParagraphs));
+  const credits = promptLines(creditLines(paragraphs));
   const marksMatch = prompt.match(/\(?\s*(\d+)\s+marks?\s*\)?/i);
-  const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || correctAnswerLabels.length > 1;
+  // A hedged answer counts towards how many answers there could be: once it is included, the
+  // question takes more than one.
+  const answerCount = correctAnswerLabels.length + unique(hedgedLabels).filter((label) => optionLabels.includes(label)).length;
+  const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || answerCount > 1;
   const type: ObservedAEQuestionType =
     optionLabels.length === 0 ? 'open-response' : multipleSelect ? 'multiple-select' : 'single-select';
   return {
@@ -483,8 +836,11 @@ function observeQuestion(
       promptHtml: stem?.html ?? '',
       leadInLines: layout.leadInLines,
       blankLinesBeforeStem: layout.blankLinesBeforeStem,
+      bodyLines,
+      creditLines: credits,
       optionLabels,
       correctAnswerLabels,
+      hedgedAnswerLabels: unique(hedgedLabels).filter((label) => optionLabels.includes(label)),
       options: optionParagraphs.map((entry) => ({
         label: entry.label,
         html: withoutUniformInlineTag(optionHtml(entry), 'strong'),

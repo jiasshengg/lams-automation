@@ -74,6 +74,101 @@ export async function waitForAuthoringReady(page: Page, config: LamsConfig): Pro
       { cause: error }
     );
   }
+  await letClicksThroughDecorations(page);
+}
+
+const CLICK_BLOCKER_STYLE =
+  '#authoringToastContainer, #authoringToastContainer *, #gitbook-widget-button, .gitbook-widget ' +
+  '{ pointer-events: none !important; }';
+/** Pages already carrying the rule for every document they load. */
+const clickThroughPages = new WeakSet<Page>();
+
+/**
+ * Two floating decorations sit over the top-right of the authoring page and swallow clicks meant
+ * for the design: LAMS's own autosave toast ("Design autosaved"), which appears while work is in
+ * progress, and the embedded help widget. Neither belongs to the design, so they are made
+ * click-through — they still show exactly what they showed before.
+ *
+ * The rule is registered for every future document as well as this one, because opening a lesson
+ * navigates the authoring page and would otherwise drop it, leaving the widget to swallow a click
+ * minutes later in a stage that has nothing to do with it.
+ */
+export async function letClicksThroughDecorations(page: Page): Promise<void> {
+  if (!clickThroughPages.has(page)) {
+    clickThroughPages.add(page);
+    await page
+      .addInitScript((content: string) => {
+        const add = (): void => {
+          const style = document.createElement('style');
+          style.textContent = content;
+          document.head?.append(style);
+        };
+        if (document.head) add();
+        else document.addEventListener('DOMContentLoaded', add, { once: true });
+      }, CLICK_BLOCKER_STYLE)
+      .catch(() => undefined);
+  }
+  await page.addStyleTag({ content: CLICK_BLOCKER_STYLE }).catch(() => undefined);
+  // The help widget renders inside a shadow root, which a page stylesheet cannot reach, and its
+  // host element is what actually takes the click. Locators do reach it, so each match — and the
+  // host it sits in — is told directly not to take pointer events.
+  for (const selector of CLICK_BLOCKERS) {
+    await page
+      .locator(selector)
+      .evaluateAll((elements) => {
+        for (const element of elements) {
+          for (let target: Element | null = element; target; target = (target.getRootNode() as ShadowRoot).host ?? null) {
+            (target as HTMLElement).style?.setProperty('pointer-events', 'none', 'important');
+            if (!(target.getRootNode() instanceof ShadowRoot)) break;
+          }
+        }
+      })
+      .catch(() => undefined);
+  }
+  await letClicksThroughWidgetFrames(page);
+}
+
+const CLICK_BLOCKERS = ['#authoringToastContainer', '#gitbook-widget-button', '#gitbook-widget-iframe', '.gitbook-widget'];
+
+/**
+ * The help widget is injected as a bare `<iframe>` with no id or class, so only its URL identifies
+ * it. The frame element, and the wrapper holding nothing else, are what take a click meant for the
+ * control underneath; the widget itself keeps working for anyone using the page by hand.
+ */
+export async function letClicksThroughWidgetFrames(page: Page): Promise<void> {
+  // The widget's frame carries no src attribute of its own — the page gives it its document — so
+  // the browser's own list of frames is the only place its address appears.
+  for (const frame of page.frames()) {
+    if (!/gitbook/i.test(frame.url())) continue;
+    const element = await frame.frameElement().catch(() => null);
+    if (!element) continue;
+    await element
+      .evaluate((node: Element) => {
+        let target: HTMLElement | null = node as HTMLElement;
+        while (target && target !== document.body) {
+          target.style.setProperty('pointer-events', 'none', 'important');
+          // Stop at the first container holding anything else: it belongs to the page, not to the
+          // widget, and the page still needs its clicks.
+          target = target.parentElement?.children.length === 1 ? target.parentElement : null;
+        }
+      })
+      .catch(() => undefined);
+    await element.dispose().catch(() => undefined);
+  }
+  // A widget whose frame has not finished loading is still identifiable by the address the page
+  // gave it, so the same is done for any iframe that names one.
+  await page
+    .evaluate(() => {
+      for (const frame of Array.from(document.querySelectorAll('iframe'))) {
+        if (!/gitbook/i.test(frame.getAttribute('src') ?? '')) continue;
+        let target: HTMLElement | null = frame;
+        while (target && target !== document.body) {
+          target.style.setProperty('pointer-events', 'none', 'important');
+          target = target.parentElement?.children.length === 1 ? target.parentElement : null;
+        }
+      }
+    })
+    .catch(() => undefined);
 }
 
 export async function listAuthoringNodes(page: Page, config: LamsConfig): Promise<AuthoringNode[]> {

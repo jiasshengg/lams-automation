@@ -15,7 +15,7 @@ function p(text: string, options: { spacing?: Spacing; list?: number; style?: st
       : ''
   ].join('');
   const pageBreak = options.pageBreak ? '<w:r><w:br w:type="page"/></w:r>' : '';
-  const drawing = options.drawing ? '<w:r><w:drawing><wp:inline/></w:drawing></w:r>' : '';
+  const drawing = options.drawing ? '<w:r><w:drawing><wp:inline><a:blip r:embed="rId1"/></wp:inline></w:drawing></w:r>' : '';
   const run = text === '' ? '' : `<w:r><w:t xml:space="preserve">${text}</w:t></w:r>`;
   return `<w:p>${properties ? `<w:pPr>${properties}</w:pPr>` : ''}${pageBreak}${drawing}${run}</w:p>`;
 }
@@ -168,7 +168,7 @@ test('text after a page break opens the next question instead of trailing the pr
   expect(third.prompt).toBe(['After stable treatment, Mr Kumar starts another medicine.', '', '3. Which change is expected? (4 marks)'].join('\n'));
 });
 
-test('writes blank lines as empty Normal blocks and never doubles the gap after a Case heading', () => {
+test('writes blank lines as empty Normal blocks and keeps one gap before the QUESTION heading', () => {
   const input = {
     sourceLabel: 'Layout',
     breakMarkerCount: 0,
@@ -182,8 +182,10 @@ test('writes blank lines as empty Normal blocks and never doubles the gap after 
     ],
     gates: []
   };
+  // However many empty paragraphs the document leaves above the stem, the heading is preceded by
+  // the single blank line a reader sees between the case text and the question.
   expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toBe(
-    '<div><strong><u>Case 6</u></strong></div><div><br></div><div>A patient.</div><!--sot-image--><div><br></div><div><br></div><div>QUESTION 1</div><div><br></div><div>Why?</div>'
+    '<div><strong><u>Case 6</u></strong></div><div><br></div><div>A patient.</div><!--sot-image--><div><br></div><div>QUESTION 1</div><div><br></div><div>Why?</div>'
   );
 });
 
@@ -249,4 +251,50 @@ test('places each figure in the slot the document printed it in', () => {
   );
   // A slot with no figure to fill it leaves nothing behind for CKEditor.
   expect(questionDescriptionHtml(prompt, [])).not.toContain('sot-image');
+});
+
+test('lines laid out with tab stops become one borderless table, with the indented header over its column', () => {
+  // The document aligns lab results with runs of tabs, and pushes "Reference Range" across the
+  // page with an indent so it stands over the last column. Rendered as text those columns drift
+  // apart, because the number of tabs differs from line to line.
+  const tabbed = (...parts: string[]) =>
+    `<w:p><w:r>${parts.map((part, index) => (index === 0 ? '' : '<w:tab/><w:tab/>') + `<w:t>${part}</w:t>`).join('')}</w:r></w:p>`;
+  const header = '<w:p><w:pPr><w:ind w:left="4320" w:firstLine="720"/></w:pPr><w:r><w:t>Reference Range</w:t></w:r></w:p>';
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    <w:p><w:r><w:t>His full blood count results are as listed:</w:t></w:r></w:p>
+    ${header}
+    ${tabbed('Hb', '13.8 g/dL', '13.6 – 16.6 g/dL')}
+    ${tabbed('WBC', '7.8 x 109/L', '4.0 – 9.6 x 109/L')}
+    <w:p><w:r><w:t>Which of the following applies?</w:t></w:r></w:p>
+  </w:body></w:document>`);
+
+  const table = paragraphs.map((paragraph) => paragraph.html).find((html) => html.startsWith('<table'));
+  expect(table).toBeDefined();
+  // Three columns, the header standing in the last one, so every row lines up.
+  expect(table).toContain('<td></td><td></td><td>Reference Range</td>');
+  expect(table).toContain('<td>Hb</td><td>13.8 g/dL</td><td>13.6 – 16.6 g/dL</td>');
+  expect(table).toContain('<td>WBC</td><td>7.8 x 109/L</td><td>4.0 – 9.6 x 109/L</td>');
+  // The document rules no lines around these, so neither does LAMS.
+  expect(table).toContain('data-layout="tabs"');
+  // The prose around the block is untouched.
+  expect(paragraphs[0]!.text).toBe('His full blood count results are as listed:');
+  expect(paragraphs.at(-1)!.text).toBe('Which of the following applies?');
+});
+
+test('a header positioned by tabs joins its block, and empty columns are dropped', () => {
+  // The document positions "Reference range" with a run of tabs rather than an indent, and leaves
+  // a trailing tab on some rows. Neither should add a column of its own.
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    <w:p><w:r><w:tab/><w:tab/><w:tab/><w:tab/><w:t>Reference range</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Serum iron</w:t><w:tab/><w:tab/><w:t>8 umol/L</w:t><w:tab/><w:tab/><w:t>10 – 30 umol/L</w:t><w:tab/></w:r></w:p>
+    <w:p><w:r><w:t>Transferrin</w:t><w:tab/><w:tab/><w:t>1.2 g/L</w:t><w:tab/><w:tab/><w:t>1.9 – 3.8 g/L</w:t><w:tab/></w:r></w:p>
+  </w:body></w:document>`);
+
+  expect(paragraphs).toHaveLength(1);
+  const table = paragraphs[0]!.html;
+  expect((table.match(/<tr>/g) ?? []).length).toBe(3);
+  // Three columns throughout: no empty one left by the trailing tabs.
+  expect((table.match(/<td/g) ?? []).length).toBe(9);
+  expect(table).toContain('<td></td><td></td><td>Reference range</td>');
+  expect(table).toContain('<td>Serum iron</td><td>8 umol/L</td><td>10 – 30 umol/L</td>');
 });

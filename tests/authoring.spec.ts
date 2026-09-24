@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
-import { inspectAuthoringGraph, listAuthoringNodes, openActivityProperties } from '../src/lams/authoring.js';
+import { inspectAuthoringGraph, listAuthoringNodes, openActivityProperties, waitForAuthoringReady } from '../src/lams/authoring.js';
 import { openExactAEActivity } from '../src/lams/ae.js';
 
 test('lists visible authoring node names and types from a configured DOM shape', async ({ page }) => {
@@ -205,4 +205,115 @@ test('confirms a tool activity whose dialog title is a span, not an input', asyn
 
   await openActivityProperties(page, 8, 'iRAT', 2_000);
   await expect(page.locator('.propertiesContentFieldTitle')).toHaveText('iRAT');
+});
+
+test('a floating toast or help widget no longer swallows an authoring click', async ({ page }) => {
+  // Both overlays were observed intercepting the iRAT question Delete control: LAMS's own
+  // "Design autosaved" toast, and the help widget the page embeds. Neither is part of the design.
+  await page.setContent(`
+    <div id="loadingOverlay" style="display: none"></div>
+    <button id="deleteQuestion" style="position: fixed; top: 20px; right: 20px; width: 120px; height: 40px">Delete</button>
+    <div id="authoringToastContainer" class="toast-container position-fixed top-0 end-0 p-3" style="position: fixed; top: 0; right: 0; width: 300px; height: 200px; background: rgba(0,0,0,.1)">
+      <div class="toast-body">Design autosaved</div>
+    </div>
+    <button id="gitbook-widget-button" style="position: fixed; top: 0; right: 0; width: 300px; height: 200px"></button>
+    <script>document.getElementById('deleteQuestion').addEventListener('click', () => { window.deleted = true; });</script>
+  `);
+  const config = { browser: { actionTimeoutMs: 2000 } } as LamsConfig;
+
+  await waitForAuthoringReady(page, config);
+
+  await page.locator('#deleteQuestion').click({ timeout: 2000 });
+  expect(await page.evaluate(() => (window as unknown as { deleted?: boolean }).deleted)).toBe(true);
+  // The toast still shows what LAMS wants to say; it just cannot take the click.
+  await expect(page.locator('#authoringToastContainer')).toBeVisible();
+});
+
+test('the click-through rule survives the navigation that opening a lesson performs', async ({ page }) => {
+  const blockers = `
+    <div id="loadingOverlay" style="display: none"></div>
+    <button id="target" style="position: fixed; top: 20px; right: 20px; width: 120px; height: 40px">Print</button>
+    <button id="gitbook-widget-button" style="position: fixed; top: 0; right: 0; width: 300px; height: 200px"></button>
+    <script>document.getElementById('target').addEventListener('click', () => { window.clicked = true; });</script>
+  `;
+  await page.route('**/openAuthoring.do*', (route) =>
+    route.fulfill({ contentType: 'text/html', body: `<html><head></head><body>${blockers}</body></html>` })
+  );
+  await page.goto('https://lams.test/authoring/openAuthoring.do');
+  const config = { browser: { actionTimeoutMs: 2000 } } as LamsConfig;
+  await waitForAuthoringReady(page, config);
+
+  // Opening a lesson reloads the authoring page; the rule has to come back with it.
+  await page.goto('https://lams.test/authoring/openAuthoring.do?lesson=2');
+
+  await page.locator('#target').click({ timeout: 2000 });
+  expect(await page.evaluate(() => (window as unknown as { clicked?: boolean }).clicked)).toBe(true);
+});
+
+test('a help widget inside a shadow root is made click-through too', async ({ page }) => {
+  // The embedded widget renders in a shadow root, where a page stylesheet cannot reach it, so the
+  // element itself has to be told not to take pointer events.
+  await page.setContent(`
+    <div id="loadingOverlay" style="display: none"></div>
+    <button id="target" style="position: fixed; top: 20px; right: 20px; width: 120px; height: 40px">Print</button>
+    <div id="widget-host"></div>
+    <script>
+      const host = document.getElementById('widget-host').attachShadow({ mode: 'open' });
+      host.innerHTML = '<button data-color-scheme="light" id="gitbook-widget-button" style="position: fixed; top: 0; right: 0; width: 300px; height: 200px"></button>';
+      document.getElementById('target').addEventListener('click', () => { window.clicked = true; });
+    </script>
+  `);
+
+  await waitForAuthoringReady(page, { browser: { actionTimeoutMs: 2000 } } as LamsConfig);
+
+  await page.locator('#target').click({ timeout: 2000 });
+  expect(await page.evaluate(() => (window as unknown as { clicked?: boolean }).clicked)).toBe(true);
+});
+
+test('the help widget iframe and its wrapper stop taking clicks, whatever they are named', async ({ page }) => {
+  // The widget is injected as a bare <iframe> with no id or class, inside its own wrapper, and
+  // only its URL identifies it. Playwright reports the button inside it as the interceptor.
+  await page.route('**/~gitbook/embed*', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<button id="gitbook-widget-button" style="width:100%;height:100%"></button>' })
+  );
+  await page.route('**/openAuthoring.do*', (route) =>
+    route.fulfill({ contentType: 'text/html', body: `
+      <div id="loadingOverlay" style="display: none"></div>
+      <button id="target" style="position: fixed; top: 20px; right: 20px; width: 120px; height: 40px">Print</button>
+      <div id="wrapper" style="position: fixed; top: 0; right: 0; width: 300px; height: 200px">
+        <iframe style="width: 300px; height: 200px; border: 0" src="/lams/~gitbook/embed?theme=light"></iframe>
+      </div>
+      <script>document.getElementById('target').addEventListener('click', () => { window.clicked = true; });</script>` })
+  );
+  await page.goto('https://lams.test/authoring/openAuthoring.do');
+
+  await waitForAuthoringReady(page, { browser: { actionTimeoutMs: 2000 } } as LamsConfig);
+
+  await page.locator('#target').click({ timeout: 2000 });
+  expect(await page.evaluate(() => (window as unknown as { clicked?: boolean }).clicked)).toBe(true);
+});
+
+test('the help widget is found by the frame it loads, not by any attribute on the page', async ({ page }) => {
+  // The real widget's iframe has no src attribute: the page hands it its document, so only the
+  // browser's frame list knows where it came from.
+  await page.route('**/~gitbook/embed*', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<button id="gitbook-widget-button" style="width:100%;height:100%"></button>' })
+  );
+  await page.route('**/openAuthoring.do*', (route) =>
+    route.fulfill({ contentType: 'text/html', body: `
+      <div id="loadingOverlay" style="display: none"></div>
+      <button id="target" style="position: fixed; top: 20px; right: 20px; width: 120px; height: 40px">Print</button>
+      <div id="wrapper" style="position: fixed; top: 0; right: 0; width: 300px; height: 200px"><iframe style="width:300px;height:200px;border:0"></iframe></div>
+      <script>
+        document.getElementById('target').addEventListener('click', () => { window.clicked = true; });
+        document.querySelector('iframe').contentWindow.location.replace('/lams/~gitbook/embed?theme=light');
+      </script>` })
+  );
+  await page.goto('https://lams.test/authoring/openAuthoring.do');
+  await page.waitForFunction(() => document.querySelector('iframe')?.contentWindow?.location.href.includes('gitbook'));
+
+  await waitForAuthoringReady(page, { browser: { actionTimeoutMs: 2000 } } as LamsConfig);
+
+  await page.locator('#target').click({ timeout: 2000 });
+  expect(await page.evaluate(() => (window as unknown as { clicked?: boolean }).clicked)).toBe(true);
 });

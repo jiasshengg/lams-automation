@@ -11,6 +11,8 @@ import type { AESOTAnalysis } from './sot-docx.js';
 export interface AEDraftPlan {
   sourceLabel: string;
   sourceDocx?: string;
+  /** Recorded so the Source-of-Truth check reads the document the same way the draft did. */
+  columnQuestions?: boolean;
   breakMarkerCount: number;
   _review: string[];
   nodes: AEDraftNode[];
@@ -27,8 +29,12 @@ export interface AEDraftQuestion {
   type: 'mcq' | 'essay';
   prompt: string;
   marks?: number;
-  options?: { text: string; correct: boolean }[];
+  options?: { text: string; correct: boolean; hedged?: boolean }[];
   TODO_answerKey?: string;
+  /** Reviewed additions: pictures for this question, and whether they replace the document's own. */
+  images?: { path: string; altText?: string; widthPx?: number; placement?: 'before' | 'after'; caption?: string }[];
+  replaceSourceFigures?: boolean;
+  promptReplacements?: { find: string; replaceWith: string }[];
 }
 
 export interface AEDraftGate {
@@ -40,7 +46,7 @@ export interface AEDraftGate {
 
 export function buildAEDraft(
   analysis: AESOTAnalysis,
-  options: { sourceDocx?: string; images?: DocxImage[] } = {}
+  options: { sourceDocx?: string; images?: DocxImage[]; columnQuestions?: boolean } = {}
 ): AEDraftPlan {
   const nodes = analysis.nodes.map<AEDraftNode>((node) => ({
     title: node.suggestedTitle,
@@ -50,7 +56,11 @@ export function buildAEDraft(
       const prompt = trimBlankLines([
         ...opening,
         ...Array.from({ length: question.blankLinesBeforeStem }, () => ''),
-        question.promptHtml
+        question.promptHtml,
+        ...question.bodyLines,
+        // The credit for the figures a question shows belongs with them, even though the document
+        // prints it after the answer key.
+        ...(question.creditLines.length > 0 ? ['', ...question.creditLines] : [])
       ]).join('\n');
       const draft: AEDraftQuestion = {
         number,
@@ -59,7 +69,13 @@ export function buildAEDraft(
       };
       if (question.explicitMarks !== null) draft.marks = question.explicitMarks;
       if (question.options.length > 0) {
-        draft.options = question.options.map((option) => ({ text: option.html, correct: option.correct }));
+        draft.options = question.options.map((option) => ({
+          text: option.html,
+          correct: option.correct,
+          // The document names this one without committing to it, so the reviewer decides whether
+          // it scores; until then the plan refuses to guess.
+          ...(question.hedgedAnswerLabels.includes(option.label) ? { hedged: true } : {})
+        }));
       }
       if (draft.options && !draft.options.some((option) => option.correct)) {
         draft.TODO_answerKey = 'No answer key was detected in the Source-of-Truth; mark the correct option before preflight.';
@@ -75,6 +91,9 @@ export function buildAEDraft(
     beforeQuestionNumber: gate.beforeQuestionNumber
   }));
 
+  const hedged = analysis.questions
+    .filter((question) => question.hedgedAnswerLabels.length > 0)
+    .map((question) => `Q${question.number} (${question.hedgedAnswerLabels.join(', ')})`);
   const multipleAnswer = nodes
     .flatMap((node) => node.questions)
     .filter((question) => (question.options ?? []).filter((option) => option.correct).length > 1)
@@ -83,11 +102,18 @@ export function buildAEDraft(
   return {
     sourceLabel: analysis.sourceLabel,
     ...(options.sourceDocx ? { sourceDocx: options.sourceDocx } : {}),
+    ...(options.columnQuestions ? { columnQuestions: true } : {}),
     breakMarkerCount: analysis.breakMarkerCount,
     _review: [
       'DRAFT transcribed from the DOCX. Not authority for LAMS; confirm every title, answer key, and mark.',
       'Node titles follow the "AE Case <n> Q<range>" convention derived from the Case headings in the document.',
-      ...(options.images ? [imageSummary(options.images)] : []),
+      ...(options.images ? imageSummary(options.images) : []),
+      ...(hedged.length > 0
+        ? [
+            `The document hedges its answer key for ${hedged.join(', ')}. Ask the user whether a hedged answer ` +
+              'scores like any other correct answer or not at all, then set hedgedAnswers to "include" or "exclude".'
+          ]
+        : []),
       ...(multipleAnswer.length > 0
         ? [
             `Questions with more than one correct answer: ${multipleAnswer.join(', ')}. Ask the user whether to split the credit ` +
@@ -108,14 +134,24 @@ function trimBlankLines(lines: string[]): string[] {
   return content.length === 0 ? [] : lines.slice(content[0], content.at(-1)! + 1);
 }
 
-function imageSummary(images: DocxImage[]): string {
-  const assigned = images.filter((image) => image.questionNumber !== null);
+function imageSummary(images: DocxImage[]): string[] {
+  const importable = images.filter((image) => !image.afterAnswerKey);
+  const assigned = importable.filter((image) => image.questionNumber !== null);
   const before = assigned.filter((image) => image.placement === 'before').map((image) => `Q${image.questionNumber}`);
-  const unassigned = images.length - assigned.length;
+  const unassigned = importable.length - assigned.length;
+  const rationale = images.filter((image) => image.afterAnswerKey).map((image) => `Q${image.questionNumber}`);
   return [
-    `Embedded images: ${images.length} (${assigned.length} assigned by question number`,
-    before.length > 0 ? `, printed above the stem for ${[...new Set(before)].join(', ')}` : '',
-    unassigned > 0 ? `, ${unassigned} unassigned and not imported` : '',
-    '). Set sourceDocx to import them.'
-  ].join('');
+    [
+      `Embedded images: ${importable.length} (${assigned.length} assigned by question number`,
+      before.length > 0 ? `, printed above the stem for ${[...new Set(before)].join(', ')}` : '',
+      unassigned > 0 ? `, ${unassigned} unassigned and not imported` : '',
+      '). Set sourceDocx to import them.'
+    ].join(''),
+    ...(rationale.length > 0
+      ? [
+          `${rationale.length} further image(s) are printed under the answer key of ${[...new Set(rationale)].join(', ')}, ` +
+            'so they illustrate the rationale and are NOT imported. Name the file in that question\'s "images" if a learner should see it.'
+        ]
+      : [])
+  ];
 }

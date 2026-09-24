@@ -49,3 +49,22 @@ export function mediaDocx(paragraphs: string): Buffer {
 
 export const drawing = '<w:r><w:drawing><wp:inline><wp:extent cx="5715000" cy="2857500"/><wp:docPr id="1" name="Chart" descr="A &amp; B"/><a:blip r:embed="rId1"/></wp:inline></w:drawing></w:r>';
 export const paragraph = (text: string, image = '') => `<w:p><w:r><w:t>${text}</w:t></w:r>${image}</w:p>`;
+
+const textBox = (label: string) =>
+  `<wps:wsp><wps:txbx><w:txbxContent><w:p><w:r><w:t>${label}</w:t></w:r></w:p></w:txbxContent></wps:txbx></wps:wsp>`;
+const groupedPicture = (cx: number) =>
+  `<pic:pic><pic:blipFill><a:blip r:embed="rId1"/></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="1000"/></a:xfrm></pic:spPr></pic:pic>`;
+
+/**
+ * A figure the way Word saves a grouped drawing: two pictures with text-box labels laid over
+ * them, whose nested paragraphs sit inside the anchoring paragraph, and a legacy VML fallback
+ * repeating the same picture.
+ */
+export const groupedDrawing =
+  '<w:r><mc:AlternateContent><mc:Choice Requires="wpg"><w:drawing><wp:anchor>' +
+  '<wp:extent cx="4000000" cy="1000000"/><wp:docPr id="2" name="Group"/>' +
+  '<wpg:wgp><wpg:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="4000000" cy="1000000"/><a:chOff x="0" y="0"/><a:chExt cx="4000" cy="1000"/></a:xfrm></wpg:grpSpPr>' +
+  `${groupedPicture(2000)}${textBox('A')}${groupedPicture(2000)}${textBox('B')}` +
+  '</wpg:wgp></wp:anchor></w:drawing></mc:Choice>' +
+  '<mc:Fallback><w:pict><v:shape><v:imagedata r:id="rId1"/></v:shape><v:textbox><w:txbxContent><w:p><w:r><w:t>A</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback>' +
+  '</mc:AlternateContent></w:r>';

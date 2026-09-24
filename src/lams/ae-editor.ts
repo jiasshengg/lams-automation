@@ -9,6 +9,7 @@ import { imageHtml, uploadCkEditorImages, type UploadedImage } from './ckeditor-
 import {
   ACTIVITY_DIALOG,
   MAX_MARK_INPUT,
+  openPrintView,
   QUESTION_TITLE,
   REQUIRED_TOGGLE
 } from './irat-editor.js';
@@ -149,7 +150,7 @@ export class LamsAEEditor {
     images: QuestionImageAsset[]
   ): Promise<UploadedImage[]> {
     const row = activityFrame.locator('#referencesTable tbody tr').nth(rowIndex);
-    await row.locator('.edit-reference-link').click();
+    await clickRowControl(row.locator('.edit-reference-link'), this.timeoutMs);
     const questionFrame = await childFrame(activityFrame.locator('iframe[src*="editReference.do"]'), this.timeoutMs);
     const uploaded = await this.populateQuestion(questionFrame, question, images, true);
     await activityFrame.locator('iframe[src*="editReference.do"]').waitFor({ state: 'detached', timeout: this.timeoutMs });
@@ -221,7 +222,7 @@ export class LamsAEEditor {
   }
 
   private async applyReferenceFields(activityFrame: Frame, question: AEQuestionPlan): Promise<void> {
-    const row = await exactQuestionRow(activityFrame, question.title);
+    const row = await exactQuestionRow(activityFrame, question.title, this.timeoutMs);
     const mark = row.locator(MAX_MARK_INPUT);
     if (Number(await mark.inputValue()) !== question.marks) {
       await mark.fill(String(question.marks));
@@ -254,9 +255,10 @@ export class LamsAEEditor {
   }
 
   private async verifyPrintView(frame: Frame, nodePlan: AENodePlan, uploadedImages: UploadedImage[]): Promise<void> {
-    const popupPromise = this.page.waitForEvent('popup', { timeout: this.timeoutMs });
-    await frame.locator('button[onclick*="showQuestionsPrintPage"]').click();
-    const printPage = await popupPromise;
+    // The same control, opened the same way as the iRAT's: identified by the page LAMS prints
+    // from, given time to be generated, and opened through the control itself if something
+    // floating covers it.
+    const printPage = await openPrintView(this.page, frame, this.timeoutMs);
     try {
       await printPage.waitForLoadState('load');
       // The Print View fills itself in after load, so reading it immediately can see an empty body.
@@ -309,20 +311,29 @@ export function questionDescriptionHtml(promptHtml: string, images: UploadedImag
   const parts = promptHtml.split(IMAGE_SLOT_HTML);
   if (parts.length > 1) {
     // The prompt marks where the document printed each figure: one figure per slot in order, any
-    // extra figures joining the last slot. An unfilled slot simply disappears.
-    const figures = images.filter((image) => image.placement === 'before');
+    // extra figures joining the last slot. An unfilled slot simply disappears. Which side of the
+    // stem a figure was printed on is already said by where its slot is, so every figure fills a
+    // slot — leaving the ones printed below the stem to the end would put them under the labels
+    // and credits that belong beneath them.
+    const slots = parts.length - 1;
+    const inSlots = images.slice(0, slots);
+    // A figure with no slot left still has the side of the stem it was printed on to go by: one
+    // printed above joins the last slot, one printed below closes the prompt.
+    const spare = images.slice(slots);
+    const spareAbove = spare.filter((image) => image.placement === 'before');
+    const spareBelow = spare.filter((image) => image.placement === 'after');
     const filled = parts.reduce((html, part, index) => {
       if (index === 0) return part;
-      const slotFigures = index === parts.length - 1 ? figures.slice(index - 1) : figures.slice(index - 1, index);
+      const slotFigures = index === slots ? [...inSlots.slice(index - 1), ...spareAbove] : inSlots.slice(index - 1, index);
       return `${html}${imageHtml(slotFigures)}${part}`;
     }, '');
-    return `${filled}${after}`;
+    return `${filled}${imageHtml(spareBelow)}`;
   }
   if (before === '') return `${promptHtml}${after}`;
   // A figure printed above the stem still belongs below the case narrative that introduces it
   // ("...the karyotype below:"), so it goes immediately before the QUESTION heading or numbered stem
   // rather than above the case heading. With neither to find, it leads the prompt as in the source.
-  const stem = /<div>(?=(?:<[^>]+>)*\s*(?:QUESTION\s+\d+\s*<|\d+\s*[.)]))/.exec(promptHtml);
+  const stem = /<div>(?=(?:<[^>]+>)*\s*(?:QUESTION\s+\d+\s*<|Q?\d+\s*[.)]))/.exec(promptHtml);
   const at = stem?.index ?? 0;
   return `${promptHtml.slice(0, at)}${before}${promptHtml.slice(at)}${after}`;
 }
@@ -356,8 +367,37 @@ async function childFrame(iframe: Locator, timeoutMs: number): Promise<Frame> {
   return frame;
 }
 
-async function exactQuestionRow(frame: Frame, title: string): Promise<Locator> {
+/**
+ * Clicks a control inside the question table. The authoring footer is fixed to the bottom of the
+ * dialog and a tooltip follows the pointer, so a row that lands under either cannot be clicked
+ * where it is: the row is brought to the middle of the view first, and tooltips — which are
+ * decoration, and disappear by themselves — are stopped from taking the click.
+ */
+export async function clickRowControl(control: Locator, timeoutMs: number): Promise<void> {
+  await control.evaluate((element: Element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
+  await control
+    .page()
+    .addStyleTag({ content: '.tooltip, .tooltip * { pointer-events: none !important; }' })
+    .catch(() => undefined);
+  await control.click({ timeout: timeoutMs });
+}
+
+export async function exactQuestionRow(frame: Frame, title: string, timeoutMs: number): Promise<Locator> {
   const rows = frame.locator('#referencesTable tbody tr');
+  // The dialog draws its question table after the frame loads, and fills the titles a moment
+  // after that, so reading it too early sees no rows — or rows whose titles are still empty — and
+  // calls every question missing. An activity that really lacks the question still reports that,
+  // once the wait has given the table its chance.
+  await frame
+    .waitForFunction(
+      ({ rowSelector, titleSelector, expected }) =>
+        Array.from(document.querySelectorAll(rowSelector)).some(
+          (row) => (row.querySelector(titleSelector)?.textContent ?? '').replace(/\s+/g, ' ').trim() === expected
+        ),
+      { rowSelector: '#referencesTable tbody tr', titleSelector: QUESTION_TITLE, expected: normalize(title) },
+      { timeout: timeoutMs }
+    )
+    .catch(() => undefined);
   const matches: number[] = [];
   for (let index = 0; index < await rows.count(); index += 1) {
     if (normalize(await rows.nth(index).locator(QUESTION_TITLE).innerText()) === normalize(title)) matches.push(index);
@@ -457,14 +497,39 @@ export async function verifyAEPrintContent(
         ).body.textContent ?? '',
       question.promptHtml
     );
-    const expected = [question.title, promptText, ...question.options.map((option) => option.text)];
-    for (const value of expected) {
-      if (!text.includes(normalize(value))) {
-        throw new Error(
-          `AE Print View for "${nodePlan.title}" omitted expected text: "${normalize(value)}". ` +
-            `Print View held ${text.length} characters: "${text.slice(0, 300)}".`
-        );
+    // Checked block by block: a prompt runs to hundreds of words, and reporting the whole of it as
+    // "missing" says nothing about which line the Print View actually lacks.
+    const blocks = await printPage.evaluate(
+      (html) =>
+        html
+          .split(/<\/p>|<\/div>|<\/t[dhr]>|<br\s*\/?>/i)
+          .map((block) => new DOMParser().parseFromString(block.replace(/<[^>]*>/g, ''), 'text/html').body.textContent ?? ''),
+      question.promptHtml
+    );
+    // Read in order, so a line that arrived in the wrong place is reported as such. The lines are
+    // not contiguous in the Print View: each figure's caption is printed between them.
+    let cursor = 0;
+    for (const value of [question.title, ...blocks]) {
+      const wanted = normalize(value);
+      if (wanted === '') continue;
+      const at = text.indexOf(wanted, cursor);
+      if (at >= 0) {
+        cursor = at + wanted.length;
+        continue;
       }
+      const elsewhere = text.includes(wanted);
+      throw new Error(
+        `AE Print View for "${nodePlan.title}" ${elsewhere ? 'holds this line of question ' + question.number + ' out of order' : 'omitted expected text'}: ` +
+          `"${wanted}". Print View held ${text.length} characters: "${text.slice(0, 300)}".`
+      );
+    }
+    for (const option of question.options) {
+      const wanted = normalize(option.text);
+      if (wanted === '' || text.includes(wanted)) continue;
+      throw new Error(
+        `AE Print View for "${nodePlan.title}" omitted an option of question ${question.number}: "${wanted}". ` +
+          `Print View held ${text.length} characters: "${text.slice(0, 300)}".`
+      );
     }
   }
   const imageUrls = new Set(

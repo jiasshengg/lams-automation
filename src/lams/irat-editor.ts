@@ -1,6 +1,6 @@
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
-import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
+import { inspectAuthoringGraph, letClicksThroughDecorations, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
 import { matchingTratRequest, type IratEditor, type IratObservedQuestion, type IratObservedState, type IratSavedQuestionReference } from './irat.js';
 import type { QuestionImageAsset } from '../docx/question-images.js';
 import { imageHtml, uploadCkEditorImages } from './ckeditor-media.js';
@@ -483,9 +483,7 @@ export class LamsIratEditor implements IratEditor {
 
   async verifyPrintView(request: IratRequest): Promise<void> {
     const frame = await this.ensureActivityFrame();
-    const popupPromise = this.page.waitForEvent('popup', { timeout: this.timeoutMs });
-    await frame.locator('button[onclick*="showQuestionsPrintPage"]').click();
-    const printPage = await popupPromise;
+    const printPage = await openPrintView(this.page, frame, this.timeoutMs);
     try {
       await printPage.waitForLoadState('domcontentloaded');
       const printableText = normalizeText(await printPage.locator('body').innerText());
@@ -661,9 +659,7 @@ export class LamsIratEditor implements IratEditor {
       throw new Error(`tRAT still shows ${staleVersions} question version(s) with a newer shared version available.`);
     }
 
-    const popupPromise = this.page.waitForEvent('popup', { timeout: this.timeoutMs });
-    await frame.locator('button[onclick*="showQuestionsPrintPage"]').click();
-    const printPage = await popupPromise;
+    const printPage = await openPrintView(this.page, frame, this.timeoutMs);
     try {
       await printPage.waitForLoadState('domcontentloaded');
       const body = printPage.locator('body');
@@ -1091,6 +1087,46 @@ async function exactQuestionRow(frame: Frame, title: string): Promise<Locator> {
   }
   if (matchingIndexes.length !== 1) throw new Error(`Expected one iRAT question named "${title}"; found ${matchingIndexes.length}.`);
   return rows.nth(matchingIndexes[0]!);
+}
+
+/**
+ * Opens an activity's Print View and returns its window. LAMS renders every question, answer, and
+ * stored image into that page before opening it, so how long it takes grows with the activity: a
+ * fifteen-question iRAT with figures outlives the ordinary action timeout. The wait is therefore
+ * at least a minute, while the click itself still has to succeed within the action timeout.
+ */
+export const PRINT_VIEW_TIMEOUT_MS = 60_000;
+/** The page LAMS prints an activity's questions from: `.../authoring/printQuestions.do?...`. */
+const PRINT_VIEW_URL = /printQuestions\.do/i;
+
+export async function openPrintView(page: Page, frame: Frame | Page, timeoutMs: number): Promise<Page> {
+  // The help widget floats exactly where this control sits, so first make sure it cannot take
+  // the click; it re-applies its own styles, so that is not always enough.
+  await letClicksThroughDecorations(page);
+  // The dialog opens windows of its own as well — a question's Question Bank statistics, for one —
+  // so the Print View is identified by the page LAMS prints it from, not by being first to appear.
+  const popupPromise = page.waitForEvent('popup', {
+    timeout: Math.max(timeoutMs, PRINT_VIEW_TIMEOUT_MS),
+    predicate: async (candidate) => {
+      if (PRINT_VIEW_URL.test(candidate.url())) return true;
+      await candidate.waitForLoadState('domcontentloaded').catch(() => undefined);
+      return PRINT_VIEW_URL.test(candidate.url());
+    }
+  });
+  // When the click fails, nothing ever awaits this wait. Left alone it rejects later, once the
+  // browser has closed, and that crash replaces the click's own error with a useless one.
+  popupPromise.catch(() => undefined);
+  const control = frame.locator('button[onclick*="showQuestionsPrintPage"]');
+  try {
+    await control.click({ timeout: timeoutMs });
+  } catch (error) {
+    if (!(error instanceof Error) || !/intercepts pointer events/.test(error.message)) throw error;
+    // Something decorative is covering the control. Its own handler is what opens the Print View,
+    // and the page that opens is verified line by line, so the outcome is still proven.
+    console.log('A floating widget covered the Print View control; opening it through the control itself.');
+    await control.evaluate((element: HTMLElement) => element.click());
+  }
+  return popupPromise;
 }
 
 async function waitForChildFrame(parent: Frame, selector: string, timeoutMs: number): Promise<Frame> {

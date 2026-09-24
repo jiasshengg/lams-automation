@@ -1,8 +1,18 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { paragraphContent } from '../ae/sot-paragraphs.js';
+import { paragraphContent, readParagraphsWithListLabels, readSOTDocxParts } from '../ae/sot-paragraphs.js';
 import { readZipEntries, requireZipEntry } from './archive.js';
+import { paragraphBlocks, textBoxContents, withoutCompatibilityFallback } from './blocks.js';
+import {
+  ANSWER_OR_RATIONALE,
+  NUMBERED_STEM,
+  SECTION_BOUNDARY,
+  isOptionLine,
+  isStructuralLine,
+  numberQuestionStems,
+  questionForEachParagraph
+} from './question-numbering.js';
 
 /** Where the image sits relative to its question stem in the source document. */
 export type ImagePlacement = 'before' | 'after';
@@ -30,6 +40,16 @@ export interface DocxImage {
   crop: ImageCrop | null;
   /** Inline HTML of the caption line printed under the image, or '' when there is none. */
   caption: string;
+  /**
+   * Text boxes Word lays over the picture (lane markers, panel letters). They are not part of the
+   * embedded file, so an upload loses them; '' when the picture has none.
+   */
+  overlayText: string;
+  /**
+   * The document prints this figure after its own question's answer key, so it illustrates the
+   * rationale rather than the question. Importing it would show learners part of the answer.
+   */
+  afterAnswerKey: boolean;
   paragraphIndex: number;
   imageIndex: number;
   altText: string;
@@ -50,6 +70,8 @@ export interface ExtractedDocxImage {
   /** Display crop from the document, or null when the whole picture is shown. */
   crop: ImageCrop | null;
   caption: string;
+  overlayText: string;
+  afterAnswerKey: boolean;
   paragraphIndex: number;
   imageIndex: number;
   altText: string;
@@ -65,33 +87,15 @@ export interface DocxMediaManifest {
   images: ExtractedDocxImage[];
 }
 
-const QUESTION_START = /^\s*(\d+)[.)]\s+\S/;
-// Mark annotations can occur inside a question sentence (the iRAT baseline Q6 does so).
-// Requiring the marker at the paragraph end shifts every later image association.
-const UNNUMBERED_MARKED_QUESTION = /(?:\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*marks?\s*\])/i;
-// A new section opens the narrative for the question that follows it, so a figure
-// printed under the heading illustrates that next question rather than the last one.
-const SECTION_BOUNDARY = /^(?:-{3}\s*BREAK\s*-{3}$|Case\s+\d+\b)/i;
-
 /**
- * Tracks which SoT question each paragraph belongs to, in document order. Images and
- * inline formatting share this rule so both are assigned to the same question numbers.
+ * The question each paragraph belongs to, in document order. Images and inline formatting share
+ * this rule so both are assigned to the same question numbers.
  */
-export function createQuestionTracker(): (paragraphText: string) => number | null {
-  let currentQuestion: number | null = null;
-  let inferredQuestion = 0;
-  return (text) => {
-    const question = text.match(QUESTION_START);
-    if (question) {
-      currentQuestion = Number(question[1]);
-      inferredQuestion = Math.max(inferredQuestion, currentQuestion);
-    } else if (UNNUMBERED_MARKED_QUESTION.test(text)) {
-      inferredQuestion += 1;
-      currentQuestion = inferredQuestion;
-    }
-    return currentQuestion;
-  };
+export function questionNumbersForParagraphs(texts: string[]): (number | null)[] {
+  return questionForEachParagraph(numberQuestionStems(texts, { inferUnnumbered: true }));
 }
+
+type ReadParagraph = ReturnType<typeof paragraphContent> & { xml: string };
 
 export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const entries = readZipEntries(buffer);
@@ -99,18 +103,19 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const relationships = parseRelationships(
     requireZipEntry(entries, 'word/_rels/document.xml.rels').toString('utf8')
   );
-  const paragraphs = [...documentXml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)].map((match) => ({
-    xml: match[1] ?? '',
-    ...paragraphContent(match[1] ?? '')
-  }));
+  const parts = readSOTDocxParts(buffer);
+  const read = readParagraphsWithListLabels(documentXml, parts);
+  const paragraphs: ReadParagraph[] = read.map(({ xml, content }) => ({ ...content, xml: withoutCompatibilityFallback(xml) }));
+  const texts = read.map((paragraph) => paragraph.structureText);
+  const stems = numberQuestionStems(texts, { inferUnnumbered: true });
   const images: DocxImage[] = [];
-  // Images seen after a section boundary but before the next stem; they illustrate
-  // the question that follows, so their number is only known once it is reached.
+  // Images seen after a section boundary, or in the narrative leading into the next stem; they
+  // illustrate the question that follows, so their number is only known once it is reached.
   const awaitingQuestion: DocxImage[] = [];
   // Images whose caption, if any, is the next paragraph that carries text.
   const awaitingCaption: DocxImage[] = [];
   let currentQuestion: number | null = null;
-  let inferredQuestion = 0;
+  let currentStem = -1;
   let imageIndex = 0;
   let sectionStarted = false;
 
@@ -121,52 +126,52 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
       const caption = isCaption(text, xml) ? withHyperlinkTargets(paragraph.html, text, xml, relationships) : '';
       for (const pending of awaitingCaption.splice(0)) pending.caption = caption;
     }
-    const question = text.match(QUESTION_START);
-    if (question) {
-      currentQuestion = Number(question[1]);
-      inferredQuestion = Math.max(inferredQuestion, currentQuestion);
-    } else if (UNNUMBERED_MARKED_QUESTION.test(text)) {
-      inferredQuestion += 1;
-      currentQuestion = inferredQuestion;
+    const stem = stems[paragraphIndex];
+    if (stem !== null && stem !== undefined) {
+      currentQuestion = stem;
+      currentStem = paragraphIndex;
     } else if (SECTION_BOUNDARY.test(text)) {
       currentQuestion = null;
+      currentStem = -1;
       sectionStarted = true;
     }
-    if (currentQuestion !== null) {
+    if (currentQuestion !== null && currentStem === paragraphIndex) {
       for (const pending of awaitingQuestion.splice(0)) pending.questionNumber = currentQuestion;
     }
+    const leadIn = currentQuestion !== null && inNextQuestionLeadIn(texts, stems, currentStem, paragraphIndex);
 
-    for (const drawing of xml.matchAll(/<(?:w:drawing|w:pict)\b[^>]*>([\s\S]*?)<\/(?:w:drawing|w:pict)>/g)) {
-      const drawingXml = drawing[0];
-      const relationshipId = /(?:r:embed|r:id)=["']([^"']+)["']/.exec(drawingXml)?.[1];
-      if (!relationshipId) continue;
-      const target = relationships.get(relationshipId);
+    for (const picture of pictureReferences(xml)) {
+      const target = relationships.get(picture.relationshipId);
       if (!target || target.external) continue;
       const sourcePart = normalizeWordTarget(target.value);
       const data = entries.get(sourcePart);
-      if (!data) throw new Error(`Image relationship ${relationshipId} points to missing DOCX entry ${sourcePart}.`);
+      if (!data) throw new Error(`Image relationship ${picture.relationshipId} points to missing DOCX entry ${sourcePart}.`);
       imageIndex += 1;
+      const drawingXml = picture.drawingXml;
       const extent = /<wp:extent\b[^>]*\bcx=["'](\d+)["'][^>]*\bcy=["'](\d+)["']/.exec(drawingXml);
-      const crop = parseSourceRectangle(drawingXml);
+      const crop = parseSourceRectangle(picture.pictureXml);
       const docProperties = /<wp:docPr\b([^>]*)\/?>(?:<\/wp:docPr>)?/.exec(drawingXml)?.[1] ?? '';
       const altText = attribute(docProperties, 'descr') || attribute(docProperties, 'title') || '';
       const extension = path.extname(sourcePart).toLowerCase();
       const sha256 = createHash('sha256').update(data).digest('hex');
+      const assigned = leadIn ? null : currentQuestion;
       const image: DocxImage = {
         id: `image-${imageIndex}`,
-        relationshipId,
+        relationshipId: picture.relationshipId,
         sourcePart,
         sourceFilename: path.basename(sourcePart),
         contentType: contentTypeFor(extension),
-        questionNumber: currentQuestion,
-        placement: currentQuestion === null ? 'before' : 'after',
+        questionNumber: assigned,
+        placement: assigned === null ? 'before' : 'after',
         caption: '',
+        overlayText: picture.overlayText,
+        afterAnswerKey:
+          !leadIn && currentStem >= 0 && texts.slice(currentStem + 1, paragraphIndex + 1).some((text) => ANSWER_OR_RATIONALE.test(text)),
         paragraphIndex,
         imageIndex,
         altText,
         crop,
-        widthPx: extent ? emuToPixels(Number(extent[1])) : null,
-        heightPx: extent ? emuToPixels(Number(extent[2])) : null,
+        ...displaySize(picture, extent),
         sha256,
         data
       };
@@ -174,10 +179,96 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
       awaitingCaption.push(image);
       // Before the document's first section boundary there is no question to wait
       // for, so cover art and logos stay unassigned instead of joining question 1.
-      if (currentQuestion === null && sectionStarted) awaitingQuestion.push(image);
+      if (leadIn || (currentQuestion === null && sectionStarted)) awaitingQuestion.push(image);
     }
   });
   return images;
+}
+
+/**
+ * A figure printed in the case narrative after a question has closed (its options already
+ * given, then fresh prose) belongs to the next question: "You noticed this rhythm on his cardiac
+ * monitoring." Nothing structural may sit between the figure and that next stem.
+ */
+function inNextQuestionLeadIn(
+  texts: string[],
+  stems: (number | null)[],
+  currentStem: number,
+  index: number
+): boolean {
+  if (currentStem < 0 || currentStem === index) return false;
+  const nextStem = stems.findIndex((stem, stemIndex) => stemIndex > index && stem !== null);
+  if (nextStem < 0) return false;
+  if (texts.slice(index + 1, nextStem).some((text) => isStructuralLine(text))) return false;
+  // The figure's own paragraph counts: a vignette can carry its figure inline.
+  const before = texts.slice(currentStem + 1, index + 1);
+  let lastOption = -1;
+  before.forEach((text, offset) => {
+    if (isOptionLine(text)) lastOption = offset;
+  });
+  if (lastOption < 0) return false;
+  const afterOptions = before.slice(lastOption + 1);
+  if (afterOptions.some((text) => ANSWER_OR_RATIONALE.test(text))) return false;
+  return afterOptions.some((text) => text !== '' && !isCaption(text));
+}
+
+/**
+ * A lone picture shows at the drawing's extent. A grouped one shows at its own extent in the
+ * group's child coordinates, scaled by how large the whole group is drawn on the page.
+ */
+function displaySize(
+  picture: PictureReference,
+  extent: RegExpExecArray | null
+): { widthPx: number | null; heightPx: number | null } {
+  if (!extent) return { widthPx: null, heightPx: null };
+  if (!picture.grouped) return { widthPx: emuToPixels(Number(extent[1])), heightPx: emuToPixels(Number(extent[2])) };
+  const own = /<a:ext\b[^>]*\bcx=["'](\d+)["'][^>]*\bcy=["'](\d+)["']/.exec(picture.pictureXml);
+  const children = /<a:chExt\b[^>]*\bcx=["'](\d+)["'][^>]*\bcy=["'](\d+)["']/.exec(picture.drawingXml);
+  if (!own || !children || Number(children[1]) === 0 || Number(children[2]) === 0) return { widthPx: null, heightPx: null };
+  return {
+    widthPx: emuToPixels((Number(own[1]) * Number(extent[1])) / Number(children[1])),
+    heightPx: emuToPixels((Number(own[2]) * Number(extent[2])) / Number(children[2]))
+  };
+}
+
+interface PictureReference {
+  relationshipId: string;
+  /** The whole drawing, whose extent and properties describe what the page shows. */
+  drawingXml: string;
+  /** The picture element itself, whose crop applies to this file only. */
+  pictureXml: string;
+  /** One of several pictures arranged in a group, so the drawing's extent is not its own size. */
+  grouped: boolean;
+  overlayText: string;
+}
+
+/**
+ * Every embedded picture in a paragraph. A grouped drawing can hold several pictures with text
+ * boxes laid over them, and each picture is its own upload.
+ */
+function pictureReferences(paragraphXml: string): PictureReference[] {
+  const references: PictureReference[] = [];
+  for (const drawing of paragraphXml.matchAll(/<(w:drawing|w:pict)\b[^>]*>[\s\S]*?<\/\1>/g)) {
+    const drawingXml = drawing[0];
+    const overlayText = textBoxContents(drawingXml)
+      .map((xml) => paragraphBlocks(xml).map((paragraph) => paragraphContent(paragraph).text).join(' '))
+      .map((text) => text.trim())
+      .filter((text) => text !== '')
+      .join(' | ');
+    const pictures = drawing[1] === 'w:drawing'
+      ? [...drawingXml.matchAll(/<pic:pic\b[\s\S]*?<\/pic:pic>|<a:blip\b[^>]*>/g)]
+      : [...drawingXml.matchAll(/<v:imagedata\b[^>]*>/g)];
+    // A bare <a:blip> is counted only when no <pic:pic> wraps it, so no picture is read twice.
+    const wrapped = pictures.filter((match) => match[0].startsWith('<pic:pic'));
+    const chosen = wrapped.length > 0 ? wrapped : pictures;
+    for (const picture of chosen) {
+      const relationshipId = /(?:r:embed|r:id)=["']([^"']+)["']/.exec(picture[0])?.[1];
+      if (!relationshipId) continue;
+      const pictureXml = wrapped.length > 0 ? picture[0] : drawingXml;
+      references.push({ relationshipId, drawingXml, pictureXml, grouped: chosen.length > 1, overlayText });
+    }
+  }
+  return references;
 }
 
 /**
@@ -187,7 +278,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
  */
 export function isCaption(text: string, paragraphXml = ''): boolean {
   const structurallyPossible = (
-    !QUESTION_START.test(text) &&
+    !NUMBERED_STEM.test(text) &&
     !SECTION_BOUNDARY.test(text) &&
     !/^[A-Z][.)]\s+\S/.test(text) &&
     !/^(?:Answer|Rationale)\b/i.test(text)
@@ -267,6 +358,8 @@ export async function extractDocxImages(
       questionNumber: image.questionNumber,
       placement: image.placement,
       caption: image.caption,
+      overlayText: image.overlayText,
+      afterAnswerKey: image.afterAnswerKey,
       paragraphIndex: image.paragraphIndex,
       imageIndex: image.imageIndex,
       altText: image.altText,

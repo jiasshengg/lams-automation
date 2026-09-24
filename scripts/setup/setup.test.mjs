@@ -217,3 +217,69 @@ test('direct runner propagates failed operation status while saving output', () 
     assert.match(readFileSync(log, 'utf8'), /Supply --repair-json/);
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 });
+
+test('profile lock waits for the owner to finish rather than failing the run', async () => {
+  const { acquireProfileLock } = await import('./profile-lock.mjs');
+  const profile = mkdtempSync(path.join(os.tmpdir(), 'lams-profile-wait-'));
+  try {
+    const release = await acquireProfileLock(profile);
+    // A window someone is reading the lesson in holds the profile; the next run should wait for
+    // it, not stop. Release it shortly after the second run starts waiting.
+    setTimeout(() => void release(), 150);
+    const second = await acquireProfileLock(profile, { waitMs: 5000 });
+    await second();
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('profile lock still reports an owner that never finishes', async () => {
+  const { acquireProfileLock } = await import('./profile-lock.mjs');
+  const profile = mkdtempSync(path.join(os.tmpdir(), 'lams-profile-busy-'));
+  try {
+    const release = await acquireProfileLock(profile);
+    await assert.rejects(acquireProfileLock(profile, { waitMs: 200 }), /already reserved/);
+    await release();
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('a profile Chromium itself still holds is waited for, not reported as a crash', async () => {
+  const { isProfileBusyError } = await import('./browser-profile.mjs');
+  // Chromium refuses a second launch on a profile a window already has open.
+  assert.equal(isProfileBusyError(new Error('browserType.launchPersistentContext: Opening in existing browser session.')), true);
+  assert.equal(isProfileBusyError(new Error('browserType.launchPersistentContext: Executable doesn\'t exist')), false);
+  assert.equal(isProfileBusyError(undefined), false);
+});
+
+test('a profile in use is recognised from the browser\'s own lock, before anything is launched', async () => {
+  const { isProfileOpenInBrowser } = await import('./browser-profile.mjs');
+  const profile = mkdtempSync(path.join(os.tmpdir(), 'lams-profile-open-'));
+  try {
+    assert.equal(isProfileOpenInBrowser(profile), false);
+    // Chromium writes this while a window is using the profile; launching again would only hand
+    // a blank tab to that window, so the wait has to notice it without launching.
+    writeFileSync(path.join(profile, 'lockfile'), '');
+    assert.equal(isProfileOpenInBrowser(profile), true);
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('a reservation left by a process that died is taken over, not waited on forever', async () => {
+  const { acquireProfileLock } = await import('./profile-lock.mjs');
+  const profile = mkdtempSync(path.join(os.tmpdir(), 'lams-profile-stale-'));
+  try {
+    // A run killed mid-flight leaves its reservation behind. Nothing owns it, so the next run
+    // takes it over rather than waiting for a process that no longer exists.
+    mkdirSync(`${profile}.automation-lock`);
+    writeFileSync(`${profile}.automation-lock/owner.json`, JSON.stringify({ pid: 999999, id: 'dead' }));
+
+    const release = await acquireProfileLock(profile, { waitMs: 2000 });
+    await release();
+  } finally {
+    rmSync(`${profile}.automation-lock`, { recursive: true, force: true });
+    rmSync(profile, { recursive: true, force: true });
+  }
+});

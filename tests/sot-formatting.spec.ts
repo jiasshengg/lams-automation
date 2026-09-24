@@ -122,3 +122,20 @@ test('ignores mark annotations and the answer-key bold on whole options', () => 
   expect(unwrapWholeBold('<strong>The <em>lac</em> operon</strong>')).toBe('The <em>lac</em> operon');
   expect(unwrapWholeBold('<strong>Only</strong> this <strong>part</strong>')).toBe('<strong>Only</strong> this <strong>part</strong>');
 });
+
+test('numbers an unnumbered question whose options are a Word-numbered list', () => {
+  // Word prints "A." "B." from the list definition; the letters are not typed in the runs.
+  const numbering = '<w:numbering><w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="upperLetter"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>' +
+    '<w:num w:numId="7"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="8"><w:abstractNumId w:val="0"/></w:num></w:numbering>';
+  const option = (list: number, text: string) =>
+    `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${list}"/></w:numPr></w:pPr>${run(text)}</w:p>`;
+  const xml = [
+    p(run('1. A numbered question?')), option(7, 'One'), option(7, 'Two'),
+    p(run('Which is the unnumbered second question?')), option(8, 'Three'), option(8, 'Four')
+  ].join('');
+
+  expect(extractStyledParagraphs(xml, { numberingXml: numbering }).map((paragraph) => paragraph.questionNumber))
+    .toEqual([1, 1, 1, 2, 2, 2]);
+  // Without the list definitions the options are unrecognisable, so nothing is inferred.
+  expect(extractStyledParagraphs(xml).map((paragraph) => paragraph.questionNumber)).toEqual([1, 1, 1, 1, 1, 1]);
+});

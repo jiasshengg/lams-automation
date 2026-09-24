@@ -16,6 +16,11 @@ export type AEQuestionType = 'mcq' | 'essay';
 export interface AEOptionInput {
   text: string;
   correct?: boolean;
+  /**
+   * The document names this option as an answer without committing to it ("possibly H"). Whether
+   * it scores is the author's call, stated once for the plan as `hedgedAnswers`.
+   */
+  hedged?: boolean;
   /** Optional percentage credit. Correct-option weights must total 100. */
   weight?: number;
 }
@@ -29,6 +34,18 @@ export interface AEQuestionInput {
   options?: AEOptionInput[];
   sourceQuestionNumber?: number;
   images?: QuestionImageRequest[];
+  /**
+   * The document's own figure for this question cannot be handed over - a collage of floating
+   * pictures whose printed arrangement is not recorded in the file - so the reviewed `images`
+   * stand in for it. The figure's slots and the stray labels between them make way for them.
+   */
+  replaceSourceFigures?: boolean;
+  /**
+   * Text the document leaves for the reviewer to supply, such as "<insert videos>" where two
+   * videos belong. Each replacement states exactly what it replaces, so the Source-of-Truth check
+   * reads the document the same way and still compares every other word.
+   */
+  promptReplacements?: { find: string; replaceWith: string }[];
 }
 
 export interface AENodeInput {
@@ -52,10 +69,16 @@ export interface AEGateInput {
  */
 export type AEMultipleAnswerCredit = 'split' | 'full';
 
+export type AEHedgedAnswers = 'include' | 'exclude';
+
 export interface AEPlanInput {
   sourceLabel: string;
   multipleAnswerCredit?: AEMultipleAnswerCredit;
+  /** How an answer the document hedges is scored: like any other correct answer, or not at all. */
+  hedgedAnswers?: AEHedgedAnswers;
   sourceDocx?: string;
+  /** The plan was drafted with a matching table read as one question per column. */
+  columnQuestions?: boolean;
   breakMarkerCount: number;
   expectedTotalMarks?: number;
   attempts?: number;
@@ -86,6 +109,9 @@ export interface AEQuestionPlan {
   options: AEOptionPlan[];
   sourceQuestionNumber: number;
   images: QuestionImageRequest[];
+  /** The reviewed images replace the document's figure; the document's own are not imported. */
+  replaceSourceFigures: boolean;
+  promptReplacements: { find: string; replaceWith: string }[];
 }
 
 export interface AENodePlan {
@@ -116,6 +142,7 @@ export interface AEActivitySettings {
 export interface AEPlan {
   sourceLabel: string;
   sourceDocx?: string;
+  columnQuestions?: boolean;
   breakMarkerCount: number;
   requiredAENodes: number;
   requiredAEGates: number;
@@ -179,7 +206,7 @@ export function buildAEPlan(value: unknown): AEPlan {
         );
       }
       expectedQuestionNumber += 1;
-      return buildQuestion(question, input.multipleAnswerCredit);
+      return buildQuestion(question, input.multipleAnswerCredit, input.hedgedAnswers);
     })
   }));
   validateGateAdjacency(input);
@@ -195,6 +222,7 @@ export function buildAEPlan(value: unknown): AEPlan {
   return {
     sourceLabel: input.sourceLabel,
     ...(input.sourceDocx ? { sourceDocx: input.sourceDocx } : {}),
+    ...(input.columnQuestions ? { columnQuestions: true } : {}),
     breakMarkerCount: input.breakMarkerCount,
     requiredAENodes,
     requiredAEGates,
@@ -237,7 +265,34 @@ export function aeGateTitle(followingNodeTitle: string): string {
   return `AE Gate ${followingNodeTitle}`;
 }
 
-function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMultipleAnswerCredit): AEQuestionPlan {
+function buildQuestion(
+  question: AEQuestionInput,
+  multipleAnswerCredit?: AEMultipleAnswerCredit,
+  hedgedAnswers?: AEHedgedAnswers
+): AEQuestionPlan {
+  const hedged = (question.options ?? []).filter((option) => option.hedged === true);
+  if (hedged.length > 0 && hedgedAnswers === undefined) {
+    throw new Error(
+      `Question ${question.number} has ${hedged.length} hedged answer(s) the document will not commit to ` +
+        `(${hedged.map((option) => option.text).join(', ')}). Ask the user whether a hedged answer scores like any ` +
+        'other correct answer or not at all, and set hedgedAnswers to "include" or "exclude" in the AE JSON.'
+    );
+  }
+  // Once the reviewer has decided, a hedged answer is an ordinary option either way.
+  const decided: AEQuestionInput = {
+    ...question,
+    ...(question.options
+      ? {
+          options: question.options.map((option) =>
+            option.hedged === true ? { ...option, correct: hedgedAnswers === 'include', hedged: false } : option
+          )
+        }
+      : {})
+  };
+  return buildDecidedQuestion(decided, multipleAnswerCredit);
+}
+
+function buildDecidedQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMultipleAnswerCredit): AEQuestionPlan {
   const marks = question.marks ?? 4;
   if (!Number.isInteger(marks) || marks <= 0) {
     throw new Error(`Question ${question.number} marks must be a positive integer; found ${marks}`);
@@ -250,7 +305,13 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
       number: question.number,
       title: question.title ?? `Question ${question.number}`,
       type: question.type,
-      promptHtml: normalizePrompt(question.prompt, question.number, question.sourceQuestionNumber ?? question.number),
+      promptHtml: normalizePrompt(
+        question.prompt,
+        question.number,
+        question.sourceQuestionNumber ?? question.number,
+        question.replaceSourceFigures === true,
+        question.promptReplacements ?? []
+      ),
       marks,
       answerRequired: true,
       prefixSequentialLetters: false,
@@ -259,7 +320,9 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
       selectLatestVersion: true,
       options: [],
       sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
-      images: question.images ?? []
+      images: question.images ?? [],
+      replaceSourceFigures: question.replaceSourceFigures === true,
+      promptReplacements: question.promptReplacements ?? []
     };
   }
 
@@ -299,7 +362,13 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
     number: question.number,
     title: question.title ?? `Question ${question.number}`,
     type: question.type,
-    promptHtml: normalizePrompt(question.prompt, question.number, question.sourceQuestionNumber ?? question.number),
+    promptHtml: normalizePrompt(
+        question.prompt,
+        question.number,
+        question.sourceQuestionNumber ?? question.number,
+        question.replaceSourceFigures === true,
+        question.promptReplacements ?? []
+      ),
     marks,
     answerRequired: true,
     prefixSequentialLetters: true,
@@ -316,7 +385,9 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
       };
     }),
     sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
-    images: question.images ?? []
+    images: question.images ?? [],
+    replaceSourceFigures: question.replaceSourceFigures === true,
+    promptReplacements: question.promptReplacements ?? []
   };
 }
 
@@ -344,10 +415,14 @@ function renderPromptTable(line: string, number: number): string {
   if (rows.length === 0 || rows.some((cells) => cells.length === 0)) {
     throw new Error(`Question ${number} contains a table with no readable rows or cells`);
   }
+  // A block the document laid out with tab stops is aligned text, not a ruled table: it keeps the
+  // columns and leaves the lines out, exactly as the page prints it.
+  const tabbed = /\bdata-layout=["']tabs["']/i.test(line);
+  const cellStyle = tabbed ? TAB_CELL_STYLE : TABLE_CELL_STYLE;
   const body = rows
     .map((cells) =>
       `<tr>${cells
-        .map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}${cell.align === null ? '' : ` align="${cell.align}"`} style="${TABLE_CELL_STYLE}">${cell.html}</td>`)
+        .map((cell) => `<td${cell.width === null ? '' : ` width="${cell.width}%"`}${cell.align === null ? '' : ` align="${cell.align}"`} style="${cellStyle}">${cell.html}</td>`)
         .join('')}</tr>`
     )
     .join('');
@@ -355,6 +430,7 @@ function renderPromptTable(line: string, number: number): string {
   const declared = Number(/^\s*<table\b[^>]*\bwidth=["'](\d{1,4})["']/i.exec(line)?.[1] ?? 0);
   const width = declared > 0 && declared <= MAX_TABLE_WIDTH_PX ? String(declared) : '100%';
   // border/cellpadding/cellspacing reproduce Word's TableGrid style: single ruled lines throughout.
+  if (tabbed) return `<table border="0" cellpadding="0" cellspacing="0" style="${TAB_TABLE_STYLE}">${body}</table>`;
   return `<table border="1" cellpadding="4" cellspacing="0" width="${width}" style="${TABLE_STYLE}">${body}</table>`;
 }
 
@@ -365,6 +441,10 @@ const MAX_TABLE_WIDTH_PX = 1200;
 // The font is deliberately left unset so tables use the LAMS site default, not the SoT's font.
 const TABLE_STYLE = 'border-collapse:collapse;border:1px solid #000';
 const TABLE_CELL_STYLE = 'border:1px solid #000;padding:0 7px;vertical-align:top;line-height:1.15';
+// A tabbed block is aligned text: no rules, and the gap between columns is the space Word's tab
+// stops leave. The table sizes itself to its content rather than filling the editor.
+const TAB_TABLE_STYLE = 'border-collapse:collapse;width:auto';
+const TAB_CELL_STYLE = 'border:0;padding:0 24px 0 0;vertical-align:top;line-height:1.15';
 
 const MARK_ANNOTATION = /\s*(?:\[\s*(?:\d+|x)\s+marks?\s*\]|\(\s*(?:\d+|x)\s+marks?\s*\))(\s*\.)?/gi;
 
@@ -385,19 +465,35 @@ const QUESTION_HEADING = /^\s*question\s+(\d+)\s*:?\s*$/i;
  * The documented AE format opens each question with an all-caps "QUESTION <n>" line, a blank
  * line, then the stem without its "<n>." number. A heading already present is only re-cased.
  */
-function withQuestionHeading(entries: string[], number: number): string[] {
+function withQuestionHeading(entries: string[], number: number, sourceNumber: number): string[] {
   const recased = entries.map((entry) => {
     const heading = QUESTION_HEADING.exec(inlineHtmlToText(entry));
     return heading ? `QUESTION ${heading[1]}` : entry;
   });
   const hasHeading = recased.some((entry) => QUESTION_HEADING.test(entry));
   // The stem follows any case narrative, so a numbered list in that narrative never wins.
-  const stemIndex = recased.reduce(
-    (last, entry, index) => (!TABLE_LINE.test(entry) && stripQuestionNumberHtml(entry, number) !== null ? index : last),
+  const numbered = (entry: string): string | null =>
+    TABLE_LINE.test(entry) ? null : stripQuestionNumberHtml(entry, [number, sourceNumber]);
+  let stemIndex = recased.reduce((last, entry, index) => (numbered(entry) !== null ? index : last), -1);
+  // A question the document states without a number of its own — one column of a matching table —
+  // still opens with its heading, ahead of the last line of the prompt: its own stem.
+  const unnumberedStem = recased.reduce(
+    (last, entry, index) => (entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML && !TABLE_LINE.test(entry) ? index : last),
     -1
   );
-  if (stemIndex < 0) return recased;
-  const stem = stripQuestionNumberHtml(recased[stemIndex]!, number)!;
+  if (stemIndex < 0 && unnumberedStem < 0) return recased;
+  if (stemIndex < 0) {
+    return hasHeading
+      ? recased
+      : [...recased.slice(0, unnumberedStem), `QUESTION ${number}`, BLANK_LINE, ...recased.slice(unnumberedStem)];
+  }
+  const stem = numbered(recased[stemIndex]!)!;
+  // The heading brings its own gap with it, so the document's spacing above the stem is kept to
+  // the single blank line a reader sees between the case text and the question.
+  while (stemIndex > 1 && recased[stemIndex - 1] === BLANK_LINE && recased[stemIndex - 2] === BLANK_LINE) {
+    recased.splice(stemIndex - 1, 1);
+    stemIndex -= 1;
+  }
   const replacement = hasHeading ? [stem] : [`QUESTION ${number}`, BLANK_LINE, stem];
   return [...recased.slice(0, stemIndex), ...replacement, ...recased.slice(stemIndex + 1)];
 }
@@ -415,11 +511,72 @@ function promptEntries(prompt: string): string[] {
     return inlineHtmlToText(raw.trim()) === '' ? [BLANK_LINE] : [];
   });
   const content = entries.flatMap((entry, index) => (entry === BLANK_LINE ? [] : [index]));
-  return content.length === 0 ? [] : entries.slice(content[0], content.at(-1)! + 1);
+  return content.length === 0 ? [] : withoutReservedSpace(entries.slice(content[0], content.at(-1)! + 1));
 }
 
-function normalizePrompt(prompt: string, number: number, sourceNumber: number): string {
-  const cleaned = withQuestionHeading(promptEntries(prompt), sourceNumber);
+/**
+ * Leaves one figure slot where the document's figure began and removes the rest of it: the other
+ * slots, and the labels printed among them, which belong to the arrangement being replaced.
+ */
+function withOneFigureSlot(entries: string[]): string[] {
+  const first = entries.indexOf(IMAGE_SLOT_HTML);
+  const last = entries.lastIndexOf(IMAGE_SLOT_HTML);
+  if (first < 0) return entries;
+  // The labels printed on and around the figure ("Normal", "2000X G", "H", a source credit) are
+  // part of the arrangement being replaced, and the replacement picture already shows them. The
+  // region grows over those short lines until the document's prose resumes.
+  let start = first;
+  while (start > 0 && isFigureLabel(entries[start - 1]!)) start -= 1;
+  let end = last;
+  while (end < entries.length - 1 && isFigureLabel(entries[end + 1]!)) end += 1;
+  return [...entries.slice(0, start), IMAGE_SLOT_HTML, ...entries.slice(end + 1)];
+}
+
+/** The longest a line can be and still read as a label on a figure rather than as its own prose. */
+const FIGURE_LABEL_LENGTH = 40;
+
+function isFigureLabel(entry: string): boolean {
+  if (entry === BLANK_LINE || entry === IMAGE_SLOT_HTML) return true;
+  const text = inlineHtmlToText(entry).trim();
+  // A line ending in a colon introduces the line after it ("Note:"), so it is prose, not a label.
+  return text.length > 0 && text.length <= FIGURE_LABEL_LENGTH && !/[.?!]/.test(text) && !text.endsWith(':');
+}
+
+/** How many blank lines in a row a reader sees as a gap rather than as reserved page space. */
+const MAX_BLANK_LINES = 2;
+
+/**
+ * Word reserves room for a figure that floats over the text by leaving empty paragraphs behind it.
+ * The figure is inline in LAMS, so those empty paragraphs become a wall of blank lines that hides
+ * whatever follows the figure. A run longer than a reader would call a gap is collapsed to one.
+ */
+function withoutReservedSpace(entries: string[]): string[] {
+  const kept: string[] = [];
+  let blanks = 0;
+  for (const entry of entries) {
+    blanks = entry === BLANK_LINE ? blanks + 1 : 0;
+    if (blanks > MAX_BLANK_LINES) continue;
+    kept.push(entry);
+  }
+  return kept;
+}
+
+function normalizePrompt(
+  prompt: string,
+  number: number,
+  sourceNumber: number,
+  replaceFigures = false,
+  replacements: { find: string; replaceWith: string }[] = []
+): string {
+  const supplied = replacements.reduce((text, replacement) => {
+    const escaped = escapeHtmlText(replacement.find);
+    if (!text.includes(replacement.find) && !text.includes(escaped)) {
+      throw new Error(`Question ${number}: the prompt does not contain "${replacement.find}" to replace.`);
+    }
+    return text.split(replacement.find).join(replacement.replaceWith).split(escaped).join(replacement.replaceWith);
+  }, prompt);
+  const entries = replaceFigures ? withOneFigureSlot(promptEntries(supplied)) : promptEntries(supplied);
+  const cleaned = withQuestionHeading(entries, number, sourceNumber);
   if (!cleaned.some((entry) => entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML)) {
     throw new Error(`Question ${number} prompt is empty after removing mark annotations`);
   }
@@ -531,11 +688,35 @@ function parseInput(value: unknown): AEPlanInput {
             parsedOption.correct = option.correct;
           }
           if (option.weight !== undefined) parsedOption.weight = numberValue(option.weight, `Question ${number} option ${optionIndex + 1} weight`);
+          if (option.hedged !== undefined) {
+            if (typeof option.hedged !== 'boolean') throw new Error(`Question ${number} option ${optionIndex + 1} hedged must be boolean`);
+            parsedOption.hedged = option.hedged;
+          }
           return parsedOption;
         });
       }
       if (question.sourceQuestionNumber !== undefined) {
         parsedQuestion.sourceQuestionNumber = positiveInteger(question.sourceQuestionNumber, `Question ${number} sourceQuestionNumber`);
+      }
+      if (question.promptReplacements !== undefined) {
+        if (!Array.isArray(question.promptReplacements)) {
+          throw new Error(`Question ${number} promptReplacements must be an array`);
+        }
+        parsedQuestion.promptReplacements = question.promptReplacements.map((entry, entryIndex) => {
+          if (!isRecord(entry)) throw new Error(`Question ${number} promptReplacements[${entryIndex}] must be an object`);
+          return {
+            find: nonEmptyString(entry.find, `Question ${number} promptReplacements[${entryIndex}].find`),
+            replaceWith: typeof entry.replaceWith === 'string'
+              ? entry.replaceWith
+              : nonEmptyString(entry.replaceWith, `Question ${number} promptReplacements[${entryIndex}].replaceWith`)
+          };
+        });
+      }
+      if (question.replaceSourceFigures !== undefined) {
+        if (typeof question.replaceSourceFigures !== 'boolean') {
+          throw new Error(`Question ${number} replaceSourceFigures must be true or false`);
+        }
+        parsedQuestion.replaceSourceFigures = question.replaceSourceFigures;
       }
       if (question.images !== undefined) {
         if (!Array.isArray(question.images)) throw new Error(`Question ${number} images must be an array`);
@@ -557,6 +738,16 @@ function parseInput(value: unknown): AEPlanInput {
   });
 
   const parsed: AEPlanInput = { sourceLabel, breakMarkerCount, nodes, gates, ...(sourceDocx ? { sourceDocx } : {}) };
+  if (value.columnQuestions !== undefined) {
+    if (typeof value.columnQuestions !== 'boolean') throw new Error('columnQuestions must be true or false');
+    parsed.columnQuestions = value.columnQuestions;
+  }
+  if (value.hedgedAnswers !== undefined) {
+    if (value.hedgedAnswers !== 'include' && value.hedgedAnswers !== 'exclude') {
+      throw new Error('hedgedAnswers must be "include" or "exclude"');
+    }
+    parsed.hedgedAnswers = value.hedgedAnswers;
+  }
   if (value.multipleAnswerCredit !== undefined) {
     if (value.multipleAnswerCredit !== 'split' && value.multipleAnswerCredit !== 'full') {
       throw new Error('multipleAnswerCredit must be "split" or "full"');

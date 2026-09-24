@@ -57,3 +57,56 @@ test('reports a different number of nodes or questions', () => {
   const merged = { ...draft, breakMarkerCount: 0, gates: [], nodes: [{ title: 'AE Case 1 Q1-2', questions: draft.nodes.flatMap((node) => node.questions) }] };
   expect(compareAEPlanToSOT(buildAEPlan(merged), analysis())[0]).toContain('has 1 AE node; the Source-of-Truth has 2');
 });
+
+test('a declared figure replacement is compared against the document read the same way', () => {
+  const documentXml = `<w:document><w:body>
+    <w:p><w:r><w:t>Case 1</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Refer to the following blood films A to H.</w:t></w:r></w:p>
+    <w:p><w:r><w:drawing><wp:inline><a:blip r:embed="rId1"/></wp:inline></w:drawing></w:r></w:p>
+    <w:p><w:r><w:t>B A</w:t></w:r></w:p>
+    <w:p><w:r><w:drawing><wp:inline><a:blip r:embed="rId1"/></wp:inline></w:drawing></w:r></w:p>
+    <w:p><w:r><w:t>1. Microcytosis</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Answer - A</w:t></w:r></w:p>
+    <w:p><w:r><w:t>END</w:t></w:r></w:p>
+  </w:body></w:document>`;
+  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml), 'Example');
+  const draft = buildAEDraft(analysis, { sourceDocx: 'AE.docx' });
+  const question = draft.nodes[0]!.questions[0]!;
+  question.replaceSourceFigures = true;
+  question.images = [{ path: 'films-page.png' }];
+
+  expect(compareAEPlanToSOT(buildAEPlan(draft as never), analysis)).toEqual([]);
+
+  // The declaration only excuses the figure. Changed words are still caught.
+  const edited = JSON.parse(JSON.stringify(draft));
+  edited.nodes[0].questions[0].prompt = edited.nodes[0].questions[0].prompt.replace('blood films A to H', 'blood films A to G');
+  expect(compareAEPlanToSOT(buildAEPlan(edited), analysis).join(' ')).toContain('prompt differs');
+});
+
+test('a declared text replacement is applied, and compared against the document the same way', () => {
+  // The document says "<insert videos>" where two videos belong. The reviewer supplies their
+  // links; everything else in the prompt is still compared with the document.
+  const documentXml = `<w:document><w:body>
+    <w:p><w:r><w:t>Case 6</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Mr Kong fell in his kitchen.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>&lt;insert videos&gt;</w:t></w:r></w:p>
+    <w:p><w:r><w:t>1. Which diagram applies?</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Answer: prose</w:t></w:r></w:p>
+    <w:p><w:r><w:t>END</w:t></w:r></w:p>
+  </w:body></w:document>`;
+  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml), 'Example');
+  const draft = buildAEDraft(analysis, { sourceDocx: 'AE.docx' });
+  draft.nodes[0]!.questions[0]!.promptReplacements = [
+    { find: '<insert videos>', replaceWith: 'https://youtu.be/VY9L5tmSTas<br>https://youtu.be/wDOQFb1gpt4' }
+  ];
+
+  const plan = buildAEPlan(draft as never);
+  expect(plan.nodes[0]!.questions[0]!.promptHtml).toContain('https://youtu.be/VY9L5tmSTas');
+  expect(plan.nodes[0]!.questions[0]!.promptHtml).not.toContain('insert videos');
+  expect(compareAEPlanToSOT(plan, analysis)).toEqual([]);
+
+  // The declaration covers only the text it names; other edits are still reported.
+  const edited = JSON.parse(JSON.stringify(draft));
+  edited.nodes[0].questions[0].prompt = edited.nodes[0].questions[0].prompt.replace('Mr Kong fell', 'Mr Tan fell');
+  expect(compareAEPlanToSOT(buildAEPlan(edited), analysis).join(' ')).toContain('prompt differs');
+});

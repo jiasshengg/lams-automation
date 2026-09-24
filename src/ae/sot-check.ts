@@ -13,7 +13,7 @@ export const SKIP_SOT_CHECK_FLAG = '--skip-sot-check';
  * Answer keys, marks, and weights are not compared: resolving those is what review is for.
  */
 export function compareAEPlanToSOT(plan: AEPlan, analysis: AESOTAnalysis): string[] {
-  const expected = expectedPlan(analysis);
+  const expected = expectedPlan(analysis, plan);
   if (plan.nodes.length !== expected.nodes.length) {
     return [`The AE JSON has ${count(plan.nodes.length, 'AE node')}; the Source-of-Truth has ${expected.nodes.length}.`];
   }
@@ -68,7 +68,9 @@ export async function assertAEPlanMatchesSOT(plan: AEPlan, argv: readonly string
     throw new Error(`The AE JSON names no sourceDocx, so it cannot be checked against the AE Source-of-Truth. ${regenerate}`);
   }
   const { documentXml, ...layout } = readSOTDocxParts(await readFile(await resolveInputFile(plan.sourceDocx, '.docx')));
-  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), plan.sourceLabel);
+  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), plan.sourceLabel, {
+    columnQuestions: plan.columnQuestions === true
+  });
   const differences = compareAEPlanToSOT(plan, analysis);
   if (differences.length > 0) {
     throw new Error(
@@ -80,14 +82,25 @@ export async function assertAEPlanMatchesSOT(plan: AEPlan, argv: readonly string
 }
 
 /** The plan a fresh draft of the document produces, with any unstated answer key filled so it builds. */
-function expectedPlan(analysis: AESOTAnalysis): AEPlan {
+function expectedPlan(analysis: AESOTAnalysis, plan: AEPlan): AEPlan {
   const draft = buildAEDraft(analysis);
+  // A question whose figure the reviewer replaced is read the same way on both sides, so the
+  // comparison still covers every word around the figure it could not reproduce.
+  const reviewed = new Map(plan.nodes.flatMap((node) => node.questions).map((question) => [question.number, question]));
+  const replaced = new Set([...reviewed.values()].filter((question) => question.replaceSourceFigures).map((question) => question.number));
   for (const question of draft.nodes.flatMap((node) => node.questions)) {
     if (question.options && !question.options.some((option) => option.correct)) question.options[0]!.correct = true;
+    if (replaced.has(question.number)) (question as { replaceSourceFigures?: boolean }).replaceSourceFigures = true;
+    const declared = reviewed.get(question.number)?.promptReplacements ?? [];
+    if (declared.length > 0) {
+      (question as { promptReplacements?: { find: string; replaceWith: string }[] }).promptReplacements = declared;
+    }
   }
   try {
     // Credit is not compared, so either multiple-answer choice builds the same prompts and options.
-    return buildAEPlan({ ...draft, multipleAnswerCredit: 'split' });
+    // Neither credit nor answer keys are compared, so any choice builds the same prompts and
+    // options — including for an answer the document hedges.
+    return buildAEPlan({ ...draft, multipleAnswerCredit: 'split', hedgedAnswers: 'exclude' });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`The AE Source-of-Truth could not be transcribed for comparison: ${reason}. Rerun with ${SKIP_SOT_CHECK_FLAG} after checking the JSON by hand.`);
