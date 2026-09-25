@@ -505,9 +505,16 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   }
   // Answer and rationale prose often enumerates "A. … B. …" while discussing the
   // options, so it must never be read as the option list itself.
-  const optionBody = body.filter(
-    (paragraph) => !ANSWER_LINE.test(paragraph.text) && !RATIONALE_LINE.test(paragraph.text)
+  // A rationale often walks through the options as its own lettered list ("A. The problem is…"),
+  // so nothing from the first answer or rationale line onwards is an option. A Roman list
+  // ("I. … II. … V. …") is the material the lettered options refer to; its "I." and "V."
+  // would otherwise read as option letters.
+  const keyIndex = body.findIndex(
+    (paragraph) => ANSWER_LINE.test(paragraph.text) || RATIONALE_LINE.test(paragraph.text)
   );
+  const beforeKey = keyIndex < 0 ? body : body.slice(0, keyIndex);
+  const romanItems = romanListParagraphs(beforeKey);
+  const optionBody = beforeKey.filter((paragraph) => !romanItems.has(paragraph));
   // A genuinely collapsed run occupies one paragraph; more than one prefixed
   // paragraph is proof that any inline split would be spurious.
   const allowInlineSplit = optionBody.filter((paragraph) => OPTION_START.test(paragraph.text)).length <= 1;
@@ -560,6 +567,34 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   // The answer names a label, so an option list exists but could not be bounded.
   // Report it rather than silently degrading the question to open-response.
   return { entries: [], unlabelledOptionBlock: answerLabel !== undefined };
+}
+
+const ROMAN_ITEM = /^([IVX]+)[.)]\s+\S/;
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+/**
+ * Paragraphs forming a Roman-numbered list: a run of non-empty paragraphs labelled I., II., III., …
+ * in sequence, at least two long. A lone "I." or "V." is left to be read as an option letter.
+ */
+function romanListParagraphs(paragraphs: SOTParagraph[]): Set<SOTParagraph> {
+  const items = new Set<SOTParagraph>();
+  let run: SOTParagraph[] = [];
+  const close = () => {
+    if (run.length >= 2) run.forEach((paragraph) => items.add(paragraph));
+    run = [];
+  };
+  for (const paragraph of paragraphs) {
+    if (paragraph.text === '') continue;
+    const label = ROMAN_ITEM.exec(paragraph.text)?.[1];
+    if (label !== undefined && label === ROMAN_NUMERALS[run.length]) {
+      run.push(paragraph);
+      continue;
+    }
+    close();
+    if (label === 'I') run.push(paragraph);
+  }
+  close();
+  return items;
 }
 
 /**

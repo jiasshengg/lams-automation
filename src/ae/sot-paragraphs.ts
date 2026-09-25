@@ -135,6 +135,8 @@ export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts 
 const HEADER_INDENT_TWIPS = 2880;
 /** One or more tabs in a row separate two columns; the gap they leave is four spaces each. */
 const TAB_COLUMN_BREAK = new RegExp(TAB_GAP + '+', 'g');
+/** A cell holding nothing but a question number, such as "8." or "Q8.". */
+const QUESTION_NUMBER_CELL = /^Q?\d+[.)]?$/i;
 
 /**
  * Word lays a block of results out with tab stops, not a table: each line holds a label, a value
@@ -198,6 +200,9 @@ function tabColumns(paragraph: SOTParagraph | undefined): string[] | null {
   if (paragraph === undefined || paragraph.imageCount > 0 || !paragraph.html.includes(TAB_GAP)) return null;
   const columns = paragraph.html.split(TAB_COLUMN_BREAK).map((cell) => cell.trim());
   const filled = columns.filter((cell) => cell !== '').length;
+  // "8.<tab>Human nucleated cells tend to be:" is a question number hung before its stem.
+  const text = columns.filter((cell) => cell !== '');
+  if (filled === 2 && QUESTION_NUMBER_CELL.test(text[0]!.replace(/<[^>]+>/g, ''))) return null;
   return filled >= 2 || (filled === 1 && columns[0] === '') ? columns : null;
 }
 
