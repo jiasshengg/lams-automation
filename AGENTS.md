@@ -46,6 +46,9 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - Validate required nodes, counts, connections, Team Setup associations, and gate names.
 - Extract embedded DOCX images with question associations, captions, and above/below placement, and import them through the observed CKEditor upload endpoint.
 - Preserve the bold, italic, underline, superscript, and subscript of the Source-of-Truth in AE prompts and options; escape every other tag.
+- Reproduce the Source-of-Truth's own presentation rather than a house style. Keep credit and attribution lines (`Credit for above diagrams:`, `Diagram available at`, `Chart available at`) with their exact wording, their emphasis, and their position relative to the figure they credit; a URL the document prints as underlined plain text stays underlined plain text and never becomes a hyperlink. Keep a bare URL bare, one per line. Leave a credit that sits in an answer key or rationale block out of the learner-facing prompt, as that material is already excluded.
+- Fill an author placeholder such as `<insert videos>` only with values the user supplies, formatted the way the document formats the surrounding links, and leave any adjacent copyright or credit line untouched.
+- Keep an embedded figure in its printed position and placement. Rebuild a figure into one composite image only when the DOCX stores it as floating shapes whose arrangement it does not record; say so in the plan's `_review`, and match the arrangement the document prints.
 - Name AE nodes from their Case headings and question range, joining every range with a hyphen and never the word "to" (`AE Case 3 Q3-6`, `AE Case 1 Q1-Case 2 Q2`), and leave AE activity descriptions empty.
 - Name every AE gate `AE Gate ` plus the title of the node after it, including the gate the template supplies before the AE chain, which is renamed in place.
 - Write reviewed AE MCQ/essay questions and canonical activity settings.
