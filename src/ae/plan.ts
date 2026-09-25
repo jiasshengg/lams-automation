@@ -16,11 +16,6 @@ export type AEQuestionType = 'mcq' | 'essay';
 export interface AEOptionInput {
   text: string;
   correct?: boolean;
-  /**
-   * The document names this option as an answer without committing to it ("possibly H"). Whether
-   * it scores is the author's call, stated once for the plan as `hedgedAnswers`.
-   */
-  hedged?: boolean;
   /** Optional percentage credit. Correct-option weights must total 100. */
   weight?: number;
 }
@@ -69,13 +64,9 @@ export interface AEGateInput {
  */
 export type AEMultipleAnswerCredit = 'split' | 'full';
 
-export type AEHedgedAnswers = 'include' | 'exclude';
-
 export interface AEPlanInput {
   sourceLabel: string;
   multipleAnswerCredit?: AEMultipleAnswerCredit;
-  /** How an answer the document hedges is scored: like any other correct answer, or not at all. */
-  hedgedAnswers?: AEHedgedAnswers;
   sourceDocx?: string;
   /** The plan was drafted with a matching table read as one question per column. */
   columnQuestions?: boolean;
@@ -206,7 +197,7 @@ export function buildAEPlan(value: unknown): AEPlan {
         );
       }
       expectedQuestionNumber += 1;
-      return buildQuestion(question, input.multipleAnswerCredit, input.hedgedAnswers);
+      return buildQuestion(question, input.multipleAnswerCredit);
     })
   }));
   validateGateAdjacency(input);
@@ -265,34 +256,7 @@ export function aeGateTitle(followingNodeTitle: string): string {
   return `AE Gate ${followingNodeTitle}`;
 }
 
-function buildQuestion(
-  question: AEQuestionInput,
-  multipleAnswerCredit?: AEMultipleAnswerCredit,
-  hedgedAnswers?: AEHedgedAnswers
-): AEQuestionPlan {
-  const hedged = (question.options ?? []).filter((option) => option.hedged === true);
-  if (hedged.length > 0 && hedgedAnswers === undefined) {
-    throw new Error(
-      `Question ${question.number} has ${hedged.length} hedged answer(s) the document will not commit to ` +
-        `(${hedged.map((option) => option.text).join(', ')}). Ask the user whether a hedged answer scores like any ` +
-        'other correct answer or not at all, and set hedgedAnswers to "include" or "exclude" in the AE JSON.'
-    );
-  }
-  // Once the reviewer has decided, a hedged answer is an ordinary option either way.
-  const decided: AEQuestionInput = {
-    ...question,
-    ...(question.options
-      ? {
-          options: question.options.map((option) =>
-            option.hedged === true ? { ...option, correct: hedgedAnswers === 'include', hedged: false } : option
-          )
-        }
-      : {})
-  };
-  return buildDecidedQuestion(decided, multipleAnswerCredit);
-}
-
-function buildDecidedQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMultipleAnswerCredit): AEQuestionPlan {
+function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMultipleAnswerCredit): AEQuestionPlan {
   const marks = question.marks ?? 4;
   if (!Number.isInteger(marks) || marks <= 0) {
     throw new Error(`Question ${question.number} marks must be a positive integer; found ${marks}`);
@@ -688,10 +652,6 @@ function parseInput(value: unknown): AEPlanInput {
             parsedOption.correct = option.correct;
           }
           if (option.weight !== undefined) parsedOption.weight = numberValue(option.weight, `Question ${number} option ${optionIndex + 1} weight`);
-          if (option.hedged !== undefined) {
-            if (typeof option.hedged !== 'boolean') throw new Error(`Question ${number} option ${optionIndex + 1} hedged must be boolean`);
-            parsedOption.hedged = option.hedged;
-          }
           return parsedOption;
         });
       }
@@ -741,12 +701,6 @@ function parseInput(value: unknown): AEPlanInput {
   if (value.columnQuestions !== undefined) {
     if (typeof value.columnQuestions !== 'boolean') throw new Error('columnQuestions must be true or false');
     parsed.columnQuestions = value.columnQuestions;
-  }
-  if (value.hedgedAnswers !== undefined) {
-    if (value.hedgedAnswers !== 'include' && value.hedgedAnswers !== 'exclude') {
-      throw new Error('hedgedAnswers must be "include" or "exclude"');
-    }
-    parsed.hedgedAnswers = value.hedgedAnswers;
   }
   if (value.multipleAnswerCredit !== undefined) {
     if (value.multipleAnswerCredit !== 'split' && value.multipleAnswerCredit !== 'full') {
