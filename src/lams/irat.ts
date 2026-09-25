@@ -263,6 +263,7 @@ export async function resolveIratRequest(config: LamsConfig): Promise<IratReques
     console.log(`SoT inline formatting applied from ${request.sourceDocx} to ${formatting.applied.length} question fields.`);
   }
   for (const warning of formatting.warnings) console.warn(`SoT formatting warning: ${warning}`);
+  for (const warning of formatting.reviewWarnings) console.warn(`SoT review needed: ${warning}`);
   return request;
 }
 

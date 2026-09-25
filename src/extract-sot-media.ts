@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolveInputFile } from './input-file.js';
-import { extractDocxImages } from './docx/media.js';
+import { detectCaseHeadings, extractDocxImages, formatUnresolvedSotWarnings } from './docx/media.js';
 
 async function main(): Promise<void> {
   const input = readArgument('--sot-docx');
@@ -10,13 +10,17 @@ async function main(): Promise<void> {
   const source = await resolveInputFile(input, '.docx');
   const defaultName = `${path.basename(source, path.extname(source)).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()}-media`;
   const outputDirectory = path.resolve(readArgument('--out-dir') ?? path.join('artifacts', defaultName));
-  const manifest = await extractDocxImages(await readFile(source), source, outputDirectory);
+  const buffer = await readFile(source);
+  const manifest = await extractDocxImages(buffer, source, outputDirectory);
   const manifestPath = path.resolve(readArgument('--manifest') ?? path.join(outputDirectory, 'manifest.json'));
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   console.log(`Extracted ${manifest.imageCount} image(s) from ${source}`);
   console.log(`Manifest: ${manifestPath}`);
   if (manifest.unassignedImageIds.length > 0) {
     console.log(`Review required: ${manifest.unassignedImageIds.length} image(s) were not associated with a numbered question.`);
+  }
+  for (const warning of formatUnresolvedSotWarnings(detectCaseHeadings(buffer), manifest.images)) {
+    console.log(`Review needed: ${warning}`);
   }
 }
 

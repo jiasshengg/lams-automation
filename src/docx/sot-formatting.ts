@@ -4,7 +4,7 @@ import { resolveInputFile } from '../input-file.js';
 import { readParagraphsWithListLabels, readSOTDocxParts } from '../ae/sot-paragraphs.js';
 import type { SOTLayoutParts } from '../ae/sot-layout.js';
 import { paragraphBlocks, withoutCompatibilityFallback, withoutTextBoxes } from './blocks.js';
-import { decodeXml, questionNumbersForParagraphs } from './media.js';
+import { decodeXml, detectCaseHeadings, formatUnresolvedSotWarnings, inspectDocxImages, questionNumbersForParagraphs, type CaseHeadingObservation } from './media.js';
 
 /** One DOCX text run with the direct character formatting LAMS can reproduce. */
 export interface StyledRun {
@@ -25,6 +25,12 @@ export interface SotFormattingResult {
   applied: string[];
   /** Fields whose text was not found in the SoT, so the request's own formatting stayed. */
   warnings: string[];
+  /**
+   * Likely shared case headings/figures the SoT gives no sequential number to anchor to,
+   * so nothing was written automatically — flagged for manual review rather than silently
+   * skipped. See `formatUnresolvedSotWarnings` in `./media.js`.
+   */
+  reviewWarnings: string[];
 }
 
 const PLAIN: Omit<StyledRun, 'text'> = { bold: false, italic: false, underline: false, vertical: null };
@@ -73,8 +79,16 @@ export function extractStyledParagraphs(documentXml: string, parts: SOTLayoutPar
  * sub/superscript. Text that cannot be found in the SoT keeps the request's own tags and
  * is reported so the reviewer can check the transcription.
  */
-export function applySotFormatting(request: IratRequest, paragraphs: StyledParagraph[]): SotFormattingResult {
-  const result: SotFormattingResult = { applied: [], warnings: [] };
+export function applySotFormatting(
+  request: IratRequest,
+  paragraphs: StyledParagraph[],
+  caseHeadings: readonly CaseHeadingObservation[] = []
+): SotFormattingResult {
+  const result: SotFormattingResult = {
+    applied: [],
+    warnings: [],
+    reviewWarnings: formatUnresolvedSotWarnings(caseHeadings, [])
+  };
   const document = flatten(paragraphs);
   request.questions.forEach((question, index) => {
     const sourceNumber = question.sourceQuestionNumber ?? index + 1;
@@ -89,6 +103,9 @@ export function applySotFormatting(request: IratRequest, paragraphs: StyledParag
       return styled;
     };
     question.content = format(question.content, `${question.title} content`);
+    question.content = prependCaseHeading(question.content, sourceNumber, caseHeadings, () =>
+      result.applied.push(`${question.title} content (case heading prepended from SoT)`)
+    );
     question.answers.forEach((answer, answerIndex) => {
       // The SoT marks the answer key by bolding a whole option, which must never reach
       // learners. Bold spanning the entire option is dropped; partial bold is genuine.
@@ -102,10 +119,42 @@ export function applySotFormatting(request: IratRequest, paragraphs: StyledParag
 }
 
 export async function applySotFormattingFromDocx(request: IratRequest): Promise<SotFormattingResult> {
-  if (!request.sourceDocx) return { applied: [], warnings: [] };
+  if (!request.sourceDocx) return { applied: [], warnings: [], reviewWarnings: [] };
   const filename = await resolveInputFile(request.sourceDocx, '.docx');
-  const { documentXml, ...parts } = readSOTDocxParts(await readFile(filename));
-  return applySotFormatting(request, extractStyledParagraphs(documentXml, parts));
+  const buffer = await readFile(filename);
+  const { documentXml, ...parts } = readSOTDocxParts(buffer);
+  const paragraphs = extractStyledParagraphs(documentXml, parts);
+  const result = applySotFormatting(request, paragraphs, detectCaseHeadings(buffer));
+  result.reviewWarnings.push(...formatUnresolvedSotWarnings([], inspectDocxImages(buffer)));
+  return result;
+}
+
+/**
+ * Prepends the exact "Qxx-yy relate to this case" heading text (bold, its own line) to
+ * the one question the SoT's numbering shows it introduces — mirroring the convention
+ * that a case heading is reproduced only on the first question of its group. A no-op
+ * when no heading matches this question, or when it is already there (safe to re-run).
+ */
+function prependCaseHeading(
+  content: string,
+  sourceNumber: number,
+  caseHeadings: readonly CaseHeadingObservation[],
+  onApplied: () => void
+): string {
+  const heading = caseHeadings.find((observation) => observation.nextQuestionNumber === sourceNumber);
+  if (!heading) return content;
+  const headingHtml = `<strong>${escapeHtmlText(heading.text)}</strong>`;
+  if (stripTags(content).trim().startsWith(stripTags(headingHtml))) return content;
+  onApplied();
+  return `${headingHtml}<br>${content}`;
+}
+
+function stripTags(value: string): string {
+  return value.replace(/<[^>]*>/g, '');
+}
+
+function escapeHtmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**

@@ -26,7 +26,16 @@ export async function resolveIratQuestionImages(request: IratRequest): Promise<M
   for (let index = 0; index < request.questions.length; index += 1) {
     const question = request.questions[index]!;
     const sourceNumber = question.sourceQuestionNumber ?? index + 1;
-    const automatic = sourceImages.filter((image) => image.questionNumber === sourceNumber).map(toAsset);
+    const ownImages = sourceImages.filter((image) => image.questionNumber === sourceNumber).map(toAsset);
+    // A figure the SoT prints once but visually serves this question and the one before
+    // it (each phrased "image above"/"image below") is reproduced here too, matching
+    // how it would be captured if a reviewer duplicated it by hand: same file and
+    // caption, but placed ahead of this question's own content since it was already
+    // shown after the previous question's.
+    const shared = sourceImages
+      .filter((image) => image.sharedWithQuestionNumber === sourceNumber)
+      .map((image) => ({ ...toAsset(image), placement: 'before' as const }));
+    const automatic = [...ownImages, ...shared];
     const explicit = await resolveExplicitImages(question.images ?? []);
     result.set(question.title, deduplicate([...automatic, ...explicit]));
   }

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { inspectDocxImages, parseSourceRectangle } from '../src/docx/media.js';
+import { detectCaseHeadings, formatUnresolvedSotWarnings, inspectDocxImages, parseSourceRectangle } from '../src/docx/media.js';
 import { resolveAEQuestionImages } from '../src/docx/question-images.js';
 import { buildAEPlan } from '../src/ae/plan.js';
 import { drawing, groupedDrawing, mediaDocx, paragraph } from './helpers/docx-media.js';
@@ -258,4 +258,65 @@ test('a question whose figure is replaced does not also import the document\'s o
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('detects a case-relates heading and the numbered question it introduces', () => {
+  const headings = detectCaseHeadings(mediaDocx(
+    paragraph('24. Earlier unrelated question?') +
+    paragraph('Q25-27 relate to this case') +
+    paragraph('A 50 year-old gentleman was in ED waiting area...') +
+    paragraph('25. What is the definitive management of the condition?')
+  ));
+  expect(headings).toHaveLength(1);
+  expect(headings[0]).toMatchObject({ text: 'Q25-27 relate to this case', nextQuestionNumber: 25 });
+});
+
+test('detects a singular case-relates heading regardless of case and spacing', () => {
+  const headings = detectCaseHeadings(mediaDocx(
+    paragraph('q 28   relates to this case') + paragraph('28. What is the diagnosis?')
+  ));
+  expect(headings[0]).toMatchObject({ text: 'q 28 relates to this case', nextQuestionNumber: 28 });
+});
+
+test('a case heading followed by no numbered question reports null rather than guessing', () => {
+  const headings = detectCaseHeadings(mediaDocx(
+    paragraph('Q19-20 relate to this case') + paragraph('An unnumbered stem with no digits at all.')
+  ));
+  expect(headings[0]).toMatchObject({ nextQuestionNumber: null });
+});
+
+test('a case heading followed by another heading before any number reports null', () => {
+  const headings = detectCaseHeadings(mediaDocx(
+    paragraph('Q1-2 relate to this case') + paragraph('Case 3') + paragraph('3. A real numbered question?')
+  ));
+  expect(headings[0]).toMatchObject({ text: 'Q1-2 relate to this case', nextQuestionNumber: null });
+});
+
+test('flags a figure as shared with the next question when only its caption separates them', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('19. In the image below, which letter indicates a sulcus?') +
+    paragraph('A. C') +
+    paragraph('', drawing) +
+    paragraph('Medical gallery of Blausen Medical 2014') +
+    paragraph('20. In the brain above, which letter indicates the diencephalon?')
+  ));
+  expect(images).toHaveLength(1);
+  expect(images[0]).toMatchObject({ questionNumber: 19, sharedWithQuestionNumber: 20 });
+});
+
+test('does not flag a figure as shared when more content follows before the next question', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('4. Which explanation best accounts for the change?') +
+    paragraph('', drawing) +
+    paragraph('A. Clearance has increased') +
+    paragraph('5. Next question?')
+  ));
+  expect(images[0]).toMatchObject({ questionNumber: 4, sharedWithQuestionNumber: null });
+});
+
+test('does not flag a figure as shared with a non-adjacent question number', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('4. Stem?') + paragraph('', drawing) + paragraph('9. A much later unrelated question?')
+  ));
+  expect(images[0]).toMatchObject({ questionNumber: 4, sharedWithQuestionNumber: null });
 });

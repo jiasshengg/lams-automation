@@ -56,6 +56,22 @@ export interface DocxImage {
   widthPx: number | null;
   heightPx: number | null;
   sha256: string;
+  /**
+   * Set when this figure sits immediately before the next sequentially-numbered
+   * question's stem (only its caption, if any, comes between them) — the same
+   * mechanical signal a reviewer uses to notice a figure is shared between the
+   * question it follows and the one it introduces. Null when no numbered question
+   * immediately follows, so nothing else can be inferred automatically.
+   */
+  sharedWithQuestionNumber: number | null;
+  /**
+   * Set when the text immediately after this figure reads like it introduces another
+   * question referencing the same image (an "above" reference paired with a labelled-
+   * diagram stem or an explicit figure noun — see `sharingSignals`), but no sequentially-
+   * numbered question was found there to confirm it — the source likely has no numbering
+   * to anchor to. This is a hint for a warning, never a resolved question association.
+   */
+  possibleUnresolvedSharing: boolean;
   data: Buffer;
 }
 
@@ -78,6 +94,8 @@ export interface ExtractedDocxImage {
   widthPx: number | null;
   heightPx: number | null;
   sha256: string;
+  sharedWithQuestionNumber: number | null;
+  possibleUnresolvedSharing: boolean;
 }
 
 export interface DocxMediaManifest {
@@ -86,6 +104,12 @@ export interface DocxMediaManifest {
   unassignedImageIds: string[];
   images: ExtractedDocxImage[];
 }
+
+/** A bold "Q25-27 relate to this case" (or "Q16 to 20 relate…", singular "Q25 relates…") heading. */
+export const CASE_RELATES_HEADING = /^Q\s*\d+(?:\s*(?:[-–—]|to)\s*\d+)?\s+relates?\s+to\s+this\s+case\b/i;
+// A case heading opens the narrative for the question that follows it, like any section
+// boundary, so a figure printed under it illustrates that next question, not the last one.
+const IMAGE_SECTION_BOUNDARY = new RegExp(`${SECTION_BOUNDARY.source}|${CASE_RELATES_HEADING.source}`, 'i');
 
 /**
  * The question each paragraph belongs to, in document order. Images and inline formatting share
@@ -96,6 +120,47 @@ export function questionNumbersForParagraphs(texts: string[]): (number | null)[]
 }
 
 type ReadParagraph = ReturnType<typeof paragraphContent> & { xml: string };
+
+export interface CaseHeadingObservation {
+  /** Exact heading text as printed, e.g. "Q25-27 relate to this case". */
+  text: string;
+  paragraphIndex: number;
+  /**
+   * The SoT's own sequential question number this heading introduces — only set when a
+   * numbered question stem is the next thing found (no other section boundary between
+   * them), matching how `questionNumbersForParagraphs`/`inspectDocxImages` resolve numbering.
+   */
+  nextQuestionNumber: number | null;
+}
+
+/**
+ * Finds every bold "Qxx[-yy] relate(s) to this case" heading and the sequentially-numbered
+ * question it introduces. Only mechanical, regex-detectable signals are used — this never
+ * guesses at boundaries in text that carries no explicit question numbering.
+ */
+export function detectCaseHeadings(buffer: Buffer): CaseHeadingObservation[] {
+  const { documentXml, ...parts } = readSOTDocxParts(buffer);
+  const texts = readParagraphsWithListLabels(documentXml, parts).map((paragraph) => paragraph.structureText);
+  // Explicitly numbered stems only: an inferred number is a guess this must not build on.
+  const stems = numberQuestionStems(texts, { inferUnnumbered: false });
+  const observations: CaseHeadingObservation[] = [];
+  texts.forEach((text, paragraphIndex) => {
+    if (!CASE_RELATES_HEADING.test(text)) return;
+    let nextQuestionNumber: number | null = null;
+    for (let index = paragraphIndex + 1; index < texts.length; index += 1) {
+      const stem = stems[index];
+      if (stem !== null && stem !== undefined) {
+        nextQuestionNumber = stem;
+        break;
+      }
+      // A different heading/case/break before any numbered question means this
+      // heading's own case has no numbered question to introduce.
+      if (IMAGE_SECTION_BOUNDARY.test(texts[index]!)) break;
+    }
+    observations.push({ text, paragraphIndex, nextQuestionNumber });
+  });
+  return observations;
+}
 
 export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const entries = readZipEntries(buffer);
@@ -130,7 +195,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
     if (stem !== null && stem !== undefined) {
       currentQuestion = stem;
       currentStem = paragraphIndex;
-    } else if (SECTION_BOUNDARY.test(text)) {
+    } else if (IMAGE_SECTION_BOUNDARY.test(text)) {
       currentQuestion = null;
       currentStem = -1;
       sectionStarted = true;
@@ -173,6 +238,8 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
         crop,
         ...displaySize(picture, extent),
         sha256,
+        // A lead-in figure already goes to the next question, so it is shared with nothing.
+        ...(leadIn ? NOT_SHARED : sharingSignals(paragraphs, stems, paragraphIndex, currentQuestion)),
         data
       };
       images.push(image);
@@ -272,6 +339,101 @@ function pictureReferences(paragraphXml: string): PictureReference[] {
 }
 
 /**
+ * Human-readable review prompts for the two shared-content patterns that could not be
+ * resolved automatically — a case heading with no numbered question to attach to, and a
+ * figure whose neighbouring text reads like it is shared but has no confirming number.
+ * Both stem from the same root cause: the source gives that content no digit to anchor
+ * to, so nothing is silently applied and nothing is silently skipped without a prompt.
+ */
+export function formatUnresolvedSotWarnings(
+  caseHeadings: readonly CaseHeadingObservation[],
+  images: readonly Pick<DocxImage, 'id' | 'sourceFilename' | 'questionNumber' | 'possibleUnresolvedSharing'>[]
+): string[] {
+  const warnings: string[] = [];
+  for (const heading of caseHeadings) {
+    if (heading.nextQuestionNumber === null) {
+      warnings.push(
+        `Case heading "${heading.text}" (paragraph ${heading.paragraphIndex}) is not followed by a sequentially-numbered question, so it could not be attached automatically. If it introduces a group of questions, prepend it to the first one by hand.`
+      );
+    }
+  }
+  for (const image of images) {
+    if (image.possibleUnresolvedSharing) {
+      const owner = image.questionNumber === null ? 'an unassigned figure' : `the figure after question ${image.questionNumber}`;
+      warnings.push(
+        `${owner} (${image.sourceFilename}, ${image.id}) is immediately followed by text reading "image above", but no sequentially-numbered question confirms it. If the next question also needs this figure, add it to that question's images by hand.`
+      );
+    }
+  }
+  return warnings;
+}
+
+// What actually precedes "above" in a real SoT varies by what the figure depicts
+// ("the brain above", "the ECG above", "the image above") — matching only the noun
+// "image" would have missed the exact case that motivated this. Instead this pairs a
+// generic "above" reference with the classic labelled-diagram stem ("which letter/
+// arrow/label/point indicates…"), or falls back to an explicit image/figure noun for
+// phrasing that names no label at all ("refer to the diagram above").
+const ABOVE_REFERENCE = /\babove\b/i;
+const LABELLED_DIAGRAM_STEM = /\bwhich\s+(?:letter|arrow|label|point|number|option)\b/i;
+const GENERIC_FIGURE_NOUN = /\b(?:image|figure|diagram|picture|chart|graph|photo|photograph|scan)\b/i;
+const NOT_SHARED = { sharedWithQuestionNumber: null, possibleUnresolvedSharing: false } as const;
+
+/**
+ * Mechanical "shared figure" signals, both read from whatever immediately follows this
+ * image (skipping only a caption or a short uncaptioned attribution line — an answer
+ * option, "Answer"/"Rationale" line, or another section boundary is never skipped past):
+ * `sharedWithQuestionNumber` is set only when that following text is the very next
+ * sequentially-numbered question's stem — a firm, resolved association. Independently,
+ * `possibleUnresolvedSharing` notices the same "above" phrasing a reviewer would (see
+ * `ABOVE_REFERENCE`/`LABELLED_DIAGRAM_STEM`/`GENERIC_FIGURE_NOUN`), even when no question
+ * number confirms it (typically because the source gives
+ * that next question no number to anchor to); it is a hint to flag for review, never a
+ * resolved association, and `sharedWithQuestionNumber` already covers the case where a
+ * number is present, so this never fires alongside it.
+ */
+function sharingSignals(
+  paragraphs: { text: string; xml: string }[],
+  stems: (number | null)[],
+  imageParagraphIndex: number,
+  ownQuestionNumber: number | null
+): { sharedWithQuestionNumber: number | null; possibleUnresolvedSharing: boolean } {
+  let index = imageParagraphIndex + 1;
+  while (index < paragraphs.length && paragraphs[index]!.text === '') index += 1;
+  if (index >= paragraphs.length) return NOT_SHARED;
+  if (
+    isCaption(paragraphs[index]!.text, paragraphs[index]!.xml) ||
+    isInterstitialAttributionLine(paragraphs[index]!.text)
+  ) {
+    index += 1;
+    while (index < paragraphs.length && paragraphs[index]!.text === '') index += 1;
+    if (index >= paragraphs.length) return NOT_SHARED;
+  }
+  const candidate = paragraphs[index]!.text;
+  const nextNumber = stems[index] ?? null;
+  const resolved = ownQuestionNumber !== null && nextNumber === ownQuestionNumber + 1 ? nextNumber : null;
+  return {
+    sharedWithQuestionNumber: resolved,
+    possibleUnresolvedSharing:
+      resolved === null &&
+      ABOVE_REFERENCE.test(candidate) &&
+      (LABELLED_DIAGRAM_STEM.test(candidate) || GENERIC_FIGURE_NOUN.test(candidate))
+  };
+}
+
+/** A short line that is not itself a question, option, answer key, or new section. */
+function isInterstitialAttributionLine(text: string): boolean {
+  return (
+    text !== '' &&
+    text.split(/\s+/).length <= 12 &&
+    !NUMBERED_STEM.test(text) &&
+    !/^[A-Z][.)]\s+\S/.test(text) &&
+    !/^(?:Answer|Rationale)\b/i.test(text) &&
+    !IMAGE_SECTION_BOUNDARY.test(text)
+  );
+}
+
+/**
  * A figure caption is the line printed directly under the image. Question stems,
  * answer options, answer keys, rationales, and new sections all belong to the
  * document structure instead, so an image followed by one of them has no caption.
@@ -279,7 +441,7 @@ function pictureReferences(paragraphXml: string): PictureReference[] {
 export function isCaption(text: string, paragraphXml = ''): boolean {
   const structurallyPossible = (
     !NUMBERED_STEM.test(text) &&
-    !SECTION_BOUNDARY.test(text) &&
+    !IMAGE_SECTION_BOUNDARY.test(text) &&
     !/^[A-Z][.)]\s+\S/.test(text) &&
     !/^(?:Answer|Rationale)\b/i.test(text)
   );
@@ -366,7 +528,9 @@ export async function extractDocxImages(
       crop: image.crop,
       widthPx: image.widthPx,
       heightPx: image.heightPx,
-      sha256: image.sha256
+      sha256: image.sha256,
+      sharedWithQuestionNumber: image.sharedWithQuestionNumber,
+      possibleUnresolvedSharing: image.possibleUnresolvedSharing
     });
   }
   return {

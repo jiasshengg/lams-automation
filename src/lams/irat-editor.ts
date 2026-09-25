@@ -303,7 +303,9 @@ export class LamsIratEditor implements IratEditor {
       this.questionImages.get(question.title) ?? []
     );
     uploaded.forEach((image) => this.uploadedImageUrls.add(image.url));
-    await setCkEditor(questionFrame, 'description', `${inlineHtml(question.content)}${imageHtml(uploaded)}`);
+    const { context, finalLine } = splitAtFinalLine(inlineHtml(question.content));
+    const description = `${context}${imageHtml(uploaded, 'before')}${finalLine}${imageHtml(uploaded, 'after')}`;
+    await setCkEditor(questionFrame, 'description', description);
     await verifyDefaultFormatting(questionFrame, 'description', question.content, `"${question.title}" content`);
     if (question.feedback !== undefined) {
       await questionFrame.getByRole('button', { name: 'Feedback for students (optional)', exact: true }).click();
@@ -1257,18 +1259,38 @@ function stripHtml(value: string): string {
 }
 
 /**
- * The live "question-description" block renders the stem followed by every image's
- * caption (see `imageHtml` in ckeditor-media.ts), all as one text node. A captioned
- * image therefore never text-matches a comparison built from the stem alone, so the
- * expected text has to include each non-empty caption in upload order, exactly as
- * `imageHtml` appends them.
+ * Splits inline-HTML content at its last line break so a "before"-placed image can be
+ * inserted between any case narrative and the final line, matching a Source-of-Truth
+ * case vignette's own layout (context, then figure, then the direct question). Content
+ * with no line break has no narrative to separate from, so it is entirely the final line
+ * and a "before" image goes immediately ahead of it.
  */
-export function expectedQuestionDescriptionText(content: string, images: readonly { caption: string }[] | undefined): string {
-  const stem = normalizeText(stripHtml(content));
-  const captions = (images ?? [])
-    .map((image) => normalizeText(stripHtml(image.caption)))
-    .filter((caption) => caption !== '');
-  return [stem, ...captions].join(' ');
+function splitAtFinalLine(html: string): { context: string; finalLine: string } {
+  const breaks = [...html.matchAll(/<br\s*\/?>/gi)];
+  const last = breaks.at(-1);
+  if (!last) return { context: '', finalLine: html };
+  const breakEnd = last.index! + last[0].length;
+  return { context: html.slice(0, breakEnd), finalLine: html.slice(breakEnd) };
+}
+
+/**
+ * The live "question-description" block renders context, any "before" image's caption,
+ * the final line, then any "after" image's caption, all as one text node (see
+ * `splitAtFinalLine` above and `imageHtml` in ckeditor-media.ts). A captioned image
+ * therefore never text-matches a comparison built from the stem alone, so the expected
+ * text has to include each non-empty caption in the same position `imageHtml` renders it.
+ */
+export function expectedQuestionDescriptionText(
+  content: string,
+  images: readonly { caption: string; placement: 'before' | 'after' }[] | undefined
+): string {
+  const { context, finalLine } = splitAtFinalLine(content);
+  const contextText = normalizeText(stripHtml(context));
+  const finalText = normalizeText(stripHtml(finalLine));
+  const captionText = (image: { caption: string }) => normalizeText(stripHtml(image.caption));
+  const beforeCaptions = (images ?? []).filter((image) => image.placement === 'before').map(captionText).filter((caption) => caption !== '');
+  const afterCaptions = (images ?? []).filter((image) => image.placement === 'after').map(captionText).filter((caption) => caption !== '');
+  return [contextText, ...beforeCaptions, finalText, ...afterCaptions].filter((part) => part !== '').join(' ');
 }
 
 /**

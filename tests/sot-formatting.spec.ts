@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
 import { readZipEntries, requireZipEntry } from '../src/docx/archive.js';
 import { applySotFormatting, extractStyledParagraphs, formatFromSot, unwrapWholeBold } from '../src/docx/sot-formatting.js';
-import { mediaDocx } from './helpers/docx-media.js';
+import { detectCaseHeadings } from '../src/docx/media.js';
+import { mediaDocx, paragraph } from './helpers/docx-media.js';
 
 const run = (text: string, properties = '') => `<w:r>${properties ? `<w:rPr>${properties}</w:rPr>` : ''}<w:t xml:space="preserve">${text}</w:t></w:r>`;
 const p = (...runs: string[]) => `<w:p>${runs.join('')}</w:p>`;
@@ -138,4 +139,50 @@ test('numbers an unnumbered question whose options are a Word-numbered list', ()
     .toEqual([1, 1, 1, 2, 2, 2]);
   // Without the list definitions the options are unrecognisable, so nothing is inferred.
   expect(extractStyledParagraphs(xml).map((paragraph) => paragraph.questionNumber)).toEqual([1, 1, 1, 1, 1, 1]);
+});
+
+test('prepends the matching case heading to only the first question of its group', () => {
+  const irat = request();
+  irat.questions[0]!.sourceQuestionNumber = 25;
+  irat.questions[1]!.sourceQuestionNumber = 26;
+  const paragraphs = extractStyledParagraphs(documentXml);
+  applySotFormatting(irat, paragraphs, [{ text: 'Q25-27 relate to this case', paragraphIndex: 0, nextQuestionNumber: 25 }]);
+  expect(irat.questions[0]!.content).toBe('<strong>Q25-27 relate to this case</strong><br>The <em>lac</em> operon is <strong>repressed</strong> by glucose');
+  // The heading names a range, but only the question the SoT's own numbering
+  // introduces gets it — the next question in that same case does not repeat it.
+  expect(irat.questions[1]!.content).not.toContain('relate to this case');
+});
+
+test('re-running case-heading prepending is a no-op once it is already there', () => {
+  const irat = request();
+  irat.questions[0]!.sourceQuestionNumber = 25;
+  irat.questions = [irat.questions[0]!];
+  const paragraphs = extractStyledParagraphs(documentXml);
+  const heading = { text: 'Q25-27 relate to this case', paragraphIndex: 0, nextQuestionNumber: 25 };
+  applySotFormatting(irat, paragraphs, [heading]);
+  const onceApplied = irat.questions[0]!.content;
+  applySotFormatting(irat, paragraphs, [heading]);
+  expect(irat.questions[0]!.content).toBe(onceApplied);
+  expect(irat.questions[0]!.content.match(/relate to this case/g)).toHaveLength(1);
+});
+
+test('detects a case heading from a real DOCX and prepends it end to end', () => {
+  const buffer = mediaDocx(
+    paragraph('Q25-27 relate to this case') +
+    [
+      p(run('25. The '), run('lac', '<w:i/>'), run(' operon is '), run('repressed', '<w:b/>'), run(' by glucose')),
+      p(run('A. '), run('True', '<w:i/>'))
+    ].join('')
+  );
+  const xml = requireZipEntry(readZipEntries(buffer), 'word/document.xml').toString('utf8');
+  const irat = request();
+  irat.questions = [{
+    ...irat.questions[0]!,
+    sourceQuestionNumber: 25,
+    content: 'The lac operon is repressed by glucose',
+    answers: [{ text: 'True', correct: true, weight: 100 }]
+  }];
+  delete irat.questions[0]!.feedback;
+  applySotFormatting(irat, extractStyledParagraphs(xml), detectCaseHeadings(buffer));
+  expect(irat.questions[0]!.content).toBe('<strong>Q25-27 relate to this case</strong><br>The <em>lac</em> operon is <strong>repressed</strong> by glucose');
 });

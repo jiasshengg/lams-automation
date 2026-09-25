@@ -260,19 +260,42 @@ test('expected Question Bank text includes every image caption, as imageHtml ren
   expect(expectedQuestionDescriptionText('Stem text', []))
     .toBe('Stem text');
 
-  // A single captioned image: the caption is appended, as `.question-description` renders it.
+  // A single "after"-placed captioned image: the caption is appended at the very end.
   expect(expectedQuestionDescriptionText(
     'In the brain above, which letter indicates the diencephalon?',
-    [{ caption: 'Medical gallery of Blausen Medical 2014' }]
+    [{ caption: 'Medical gallery of Blausen Medical 2014', placement: 'after' }]
   )).toBe('In the brain above, which letter indicates the diencephalon? Medical gallery of Blausen Medical 2014');
 
   // An uncaptioned image contributes nothing; a later captioned one still appends in order.
-  expect(expectedQuestionDescriptionText('Stem', [{ caption: '' }, { caption: 'Figure 1' }]))
+  expect(expectedQuestionDescriptionText('Stem', [{ caption: '', placement: 'after' }, { caption: 'Figure 1', placement: 'after' }]))
     .toBe('Stem Figure 1');
 
   // Caption HTML is stripped and whitespace normalised the same way the stem is.
-  expect(expectedQuestionDescriptionText('Stem', [{ caption: '<em>Figure</em>  1\n' }]))
+  expect(expectedQuestionDescriptionText('Stem', [{ caption: '<em>Figure</em>  1\n', placement: 'after' }]))
     .toBe('Stem Figure 1');
+
+  // A "before"-placed image (no line break in content) sits ahead of the whole single-line stem.
+  expect(expectedQuestionDescriptionText(
+    'In the brain above, which letter indicates the diencephalon?',
+    [{ caption: '', placement: 'before' }]
+  )).toBe('In the brain above, which letter indicates the diencephalon?');
+
+  // Case-vignette content: a "before" image (and its caption) sits between the narrative
+  // context and the final direct-question line, not after everything — the SoT's own order.
+  expect(expectedQuestionDescriptionText(
+    'A 50 year-old gentleman was in ED.<br>What is the definitive management of the condition?',
+    [{ caption: '', placement: 'before' }]
+  )).toBe('A 50 year-old gentleman was in ED. What is the definitive management of the condition?');
+  expect(expectedQuestionDescriptionText(
+    'A 50 year-old gentleman was in ED.<br>What is the definitive management of the condition?',
+    [{ caption: 'ECG strip', placement: 'before' }]
+  )).toBe('A 50 year-old gentleman was in ED. ECG strip What is the definitive management of the condition?');
+
+  // "before" and "after" images on the same question land on either side of the split.
+  expect(expectedQuestionDescriptionText(
+    'Context.<br>Final question?',
+    [{ caption: 'Before caption', placement: 'before' }, { caption: 'After caption', placement: 'after' }]
+  )).toBe('Context. Before caption Final question? After caption');
 });
 
 test('Question Bank searches use a stable plain-text fragment', () => {
