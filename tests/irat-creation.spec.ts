@@ -309,6 +309,12 @@ test('reads the selected Question Bank version UID from a LAMS version action', 
   expect(questionVersionUid('not a version action')).toBeUndefined();
 });
 
+test('reads the version UID when the first argument is a helper call, not a bare index', () => {
+  // The live tRAT (Scratchie) page computes the item index with getScratchieItemIndexFromEl(this)
+  // instead of a literal number (observed 2026-09-25); the parser must not require \d+ there.
+  expect(questionVersionUid('changeItemQuestionVersion(getScratchieItemIndexFromEl(this), 77979, 78070);')).toBe('78070');
+});
+
 test('reads the Question Bank UID from a single-version stats action', () => {
   expect(questionStatsUid('javascript:window.open("https://example.test/lams/qb/stats/show.do?qbQuestionUid=76966", "_blank")'))
     .toBe('76966');

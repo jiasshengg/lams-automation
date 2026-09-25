@@ -26,15 +26,26 @@ export async function resolveIratQuestionImages(request: IratRequest): Promise<M
   for (let index = 0; index < request.questions.length; index += 1) {
     const question = request.questions[index]!;
     const sourceNumber = question.sourceQuestionNumber ?? index + 1;
-    const ownImages = sourceImages.filter((image) => image.questionNumber === sourceNumber).map(toAsset);
+    // A question that reviewed the automatic duplication below and rejected it says so with an
+    // explicit empty `images: []` (distinct from omitting the field, which accepts whatever is
+    // automatically detected) — this is the only way to suppress a duplicate the SoT's own
+    // wording does not actually call for, such as two adjacent questions pointing at one shared
+    // image via complementary "below"/"above" wording with no case narrative connecting them,
+    // where the image belongs once to the earlier question and should not also land on this one.
+    const suppressAutomatic = Array.isArray(question.images) && question.images.length === 0;
+    const ownImages = suppressAutomatic
+      ? []
+      : sourceImages.filter((image) => image.questionNumber === sourceNumber).map(toAsset);
     // A figure the SoT prints once but visually serves this question and the one before
     // it (each phrased "image above"/"image below") is reproduced here too, matching
     // how it would be captured if a reviewer duplicated it by hand: same file and
     // caption, but placed ahead of this question's own content since it was already
     // shown after the previous question's.
-    const shared = sourceImages
-      .filter((image) => image.sharedWithQuestionNumber === sourceNumber)
-      .map((image) => ({ ...toAsset(image), placement: 'before' as const }));
+    const shared = suppressAutomatic
+      ? []
+      : sourceImages
+          .filter((image) => image.sharedWithQuestionNumber === sourceNumber)
+          .map((image) => ({ ...toAsset(image), placement: 'before' as const }));
     const automatic = [...ownImages, ...shared];
     const explicit = await resolveExplicitImages(question.images ?? []);
     result.set(question.title, deduplicate([...automatic, ...explicit]));
@@ -102,14 +113,39 @@ function toAsset(image: ReturnType<typeof inspectDocxImages>[number]): QuestionI
   };
 }
 
+/**
+ * The same image bytes can be supplied twice for one question: once from automatic
+ * SoT/shared-figure detection, once from an explicit `images` entry naming the same file to add
+ * a caption, placement, or alt text the automatic pass missed — its caption heuristic only
+ * recognises a handful of conventional phrasings (a Word Caption style, a "Figure/Table/…"
+ * prefix, or a link), so a plain attribution line like "Medical gallery of Blausen Medical 2014"
+ * is invisible to it and has to be added by hand. Both call sites always build this list as
+ * `[...automatic, ...explicit]`, so the later occurrence of a duplicate is the deliberate,
+ * reviewed one: it overrides whichever fields it actually sets, and a field it leaves at its
+ * default falls back to the earlier occurrence's value. Losing that override silently — by
+ * keeping whichever copy happened to come first — previously dropped a reviewed caption without
+ * any warning; see `irat-image-placement-caption-bug` in project memory.
+ */
 function deduplicate(images: QuestionImageAsset[]): QuestionImageAsset[] {
-  const hashes = new Set<string>();
-  return images.filter((image) => {
+  const order: string[] = [];
+  const merged = new Map<string, QuestionImageAsset>();
+  for (const image of images) {
     const key = image.data.toString('base64');
-    if (hashes.has(key)) return false;
-    hashes.add(key);
-    return true;
-  });
+    const existing = merged.get(key);
+    if (!existing) {
+      order.push(key);
+      merged.set(key, image);
+      continue;
+    }
+    merged.set(key, {
+      ...existing,
+      placement: image.placement,
+      caption: image.caption !== '' ? image.caption : existing.caption,
+      altText: image.altText !== '' ? image.altText : existing.altText,
+      widthPx: image.widthPx ?? existing.widthPx
+    });
+  }
+  return order.map((key) => merged.get(key)!);
 }
 
 function contentType(extension: string): string {

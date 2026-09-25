@@ -1318,8 +1318,14 @@ export function questionBankSearchTerm(content: string): string {
   return longest.slice(0, 100).trim();
 }
 
+/**
+ * The third argument is always the literal version UID this button switches to; the first is
+ * the item index, which the live page currently computes with `getScratchieItemIndexFromEl(this)`
+ * rather than a bare literal (a LAMS UI change observed 2026-09-25 that broke a regex requiring
+ * `\d+` there — matching a non-comma expression instead tolerates either form).
+ */
 export function questionVersionUid(onclick: string): string | undefined {
-  return /changeItemQuestionVersion\(\s*\d+\s*,\s*\d+\s*,\s*(\d+)\s*\)/.exec(onclick)?.[1];
+  return /changeItemQuestionVersion\(\s*[^,]+\s*,\s*\d+\s*,\s*(\d+)\s*\)/.exec(onclick)?.[1];
 }
 
 /** Reads the exact Question Bank UID exposed by a single-version row's stats action. */
