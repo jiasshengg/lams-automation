@@ -98,9 +98,7 @@ function expectedPlan(analysis: AESOTAnalysis, plan: AEPlan): AEPlan {
   }
   try {
     // Credit is not compared, so either multiple-answer choice builds the same prompts and options.
-    // Neither credit nor answer keys are compared, so any choice builds the same prompts and
-    // options — including for an answer the document hedges.
-    return buildAEPlan({ ...draft, multipleAnswerCredit: 'split', hedgedAnswers: 'exclude' });
+    return buildAEPlan({ ...draft, multipleAnswerCredit: 'split' });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(`The AE Source-of-Truth could not be transcribed for comparison: ${reason}. Rerun with ${SKIP_SOT_CHECK_FLAG} after checking the JSON by hand.`);

@@ -29,7 +29,7 @@ export interface AEDraftQuestion {
   type: 'mcq' | 'essay';
   prompt: string;
   marks?: number;
-  options?: { text: string; correct: boolean; hedged?: boolean }[];
+  options?: { text: string; correct: boolean }[];
   TODO_answerKey?: string;
   /** Reviewed additions: pictures for this question, and whether they replace the document's own. */
   images?: { path: string; altText?: string; widthPx?: number; placement?: 'before' | 'after'; caption?: string }[];
@@ -71,10 +71,7 @@ export function buildAEDraft(
       if (question.options.length > 0) {
         draft.options = question.options.map((option) => ({
           text: option.html,
-          correct: option.correct,
-          // The document names this one without committing to it, so the reviewer decides whether
-          // it scores; until then the plan refuses to guess.
-          ...(question.hedgedAnswerLabels.includes(option.label) ? { hedged: true } : {})
+          correct: option.correct
         }));
       }
       if (draft.options && !draft.options.some((option) => option.correct)) {
@@ -91,9 +88,6 @@ export function buildAEDraft(
     beforeQuestionNumber: gate.beforeQuestionNumber
   }));
 
-  const hedged = analysis.questions
-    .filter((question) => question.hedgedAnswerLabels.length > 0)
-    .map((question) => `Q${question.number} (${question.hedgedAnswerLabels.join(', ')})`);
   const multipleAnswer = nodes
     .flatMap((node) => node.questions)
     .filter((question) => (question.options ?? []).filter((option) => option.correct).length > 1)
@@ -108,12 +102,6 @@ export function buildAEDraft(
       'DRAFT transcribed from the DOCX. Not authority for LAMS; confirm every title, answer key, and mark.',
       'Node titles follow the "AE Case <n> Q<range>" convention derived from the Case headings in the document.',
       ...(options.images ? imageSummary(options.images) : []),
-      ...(hedged.length > 0
-        ? [
-            `The document hedges its answer key for ${hedged.join(', ')}. Ask the user whether a hedged answer ` +
-              'scores like any other correct answer or not at all, then set hedgedAnswers to "include" or "exclude".'
-          ]
-        : []),
       ...(multipleAnswer.length > 0
         ? [
             `Questions with more than one correct answer: ${multipleAnswer.join(', ')}. Ask the user whether to split the credit ` +

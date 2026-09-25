@@ -516,13 +516,11 @@ test('applies a label range declared for a group of matching questions', () => {
     ${paragraph('END')}
   </w:body></w:document>`), 'Example');
 
-  expect(analysis.questions.map((question) => question.type)).toEqual(['multiple-select', 'multiple-select']);
+  // A hedged key ("possibly D") is ignored, so the second question has one answer.
+  expect(analysis.questions.map((question) => question.type)).toEqual(['multiple-select', 'single-select']);
   expect(analysis.questions[0]!.options.map((option) => option.html)).toEqual(['A', 'B', 'C', 'D']);
   expect(analysis.questions[0]!.correctAnswerLabels).toEqual(['A', 'D']);
-  // A hedged key ("possibly D") names the film without committing to it: it is kept apart, for
-  // the reviewer to decide whether it scores.
   expect(analysis.questions[1]!.correctAnswerLabels).toEqual(['C']);
-  expect(analysis.questions[1]!.hedgedAnswerLabels).toEqual(['D']);
 });
 
 const cell = (text: string) => `<w:tc>${paragraph(text)}</w:tc>`;
@@ -546,7 +544,8 @@ test('reads a matching set whose questions are the columns of a table', () => {
   expect(analysis.questionCount).toBe(4);
   const [, , third, fourth] = analysis.questions;
   expect(third).toMatchObject({ number: 3, type: 'single-select', correctAnswerLabels: ['A'] });
-  expect(fourth).toMatchObject({ number: 4, type: 'multiple-select', correctAnswerLabels: ['C', 'D'] });
+  // "C, possibly D": the hedged D is ignored.
+  expect(fourth).toMatchObject({ number: 4, type: 'single-select', correctAnswerLabels: ['C'] });
   expect(third!.options.map((option) => option.html)).toEqual(['A', 'B', 'C', 'D']);
   // Each column question shows the shared instruction and table, then names its own column.
   expect(third!.promptHtml).toContain('Q3');
@@ -701,7 +700,7 @@ test('a tabbed results line is read as the columns it lays out', () => {
   expect(paragraphs[0]!.text.replace(/\s+/g, ' ')).toBe('Hb 8.2 g/dL 13.6 – 16.6 g/dL');
 });
 
-test('an answer key that hedges is recorded as hedged, not silently counted as correct', () => {
+test('an answer the key only hedges ("possibly H") is ignored', () => {
   const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
     ${paragraph('Match the features with the films (A – H).')}
     ${paragraph('1. Increased LDH')}
@@ -715,9 +714,10 @@ test('an answer key that hedges is recorded as hedged, not silently counted as c
 
   const [first, second, third] = analysis.questions;
   expect(first!.correctAnswerLabels).toEqual(['C', 'E', 'F', 'G']);
-  expect(first!.hedgedAnswerLabels).toEqual(['H']);
+  expect(first!.options.find((option) => option.label === 'H')!.correct).toBe(false);
   expect(second!.correctAnswerLabels).toEqual(['A', 'F']);
-  expect(second!.hedgedAnswerLabels).toEqual(['C', 'G']);
-  expect(third!.hedgedAnswerLabels).toEqual([]);
-  expect(analysis.warnings.join(' ')).toContain('hedges its answer key');
+  expect(second!.options.filter((option) => option.correct).map((option) => option.label)).toEqual(['A', 'F']);
+  expect(third!.correctAnswerLabels).toEqual(['A', 'D']);
+  // Nothing is left for the reviewer to decide.
+  expect(analysis.warnings.join(' ')).not.toMatch(/hedge/i);
 });

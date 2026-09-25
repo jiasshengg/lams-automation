@@ -39,11 +39,6 @@ export interface AEQuestionObservation {
   creditLines: string[];
   optionLabels: string[];
   correctAnswerLabels: string[];
-  /**
-   * Labels the document names but will not commit to - "C, E, F, G, possibly H". Whether a hedged
-   * answer scores is the author's call, so it is recorded here rather than decided.
-   */
-  hedgedAnswerLabels: string[];
   options: AEObservedOption[];
 }
 
@@ -104,9 +99,9 @@ const INLINE_OPTION = /(?:^|\s)([A-Z])[.)]\s+\S/g;
 const ANSWER_LINE = /^Answer\s*[-:]\s*(.+)$/i;
 /** "Select from above images: A, B, C, D" — the document naming the options it prints as figures. */
 const DECLARED_LABELS = /^(?:select|choose)\b[^:]*:\s*([A-Z](?:\s*,\s*[A-Z])+)/i;
-/** "Credit for above diagrams: http://…" — the source of the figures a question shows. */
-/** "possibly H", "possible C and G": the document naming an answer it will not commit to. */
+/** "possibly H", "possible C and G": an answer the document will not commit to, which is ignored. */
 const HEDGED_ANSWER = /\bpossibl\w*\b/i;
+/** "Credit for above diagrams: http://…" — the source of the figures a question shows. */
 const CREDIT_LINE = /^Credit\b/i;
 /** The ruled line a paper answer is written on; LAMS gives the learner its own answer box. */
 const ANSWER_SPACE = /^[.…\s]+$/;
@@ -278,15 +273,6 @@ export function analyzeAESOT(
     );
   }
   warnings.push(...structuralProblems);
-  const hedgedQuestions = questions.filter((question) => question.hedgedAnswerLabels.length > 0);
-  if (hedgedQuestions.length > 0) {
-    warnings.push(
-      'The document hedges its answer key for ' +
-        hedgedQuestions.map((question) => `Q${question.number} (${question.hedgedAnswerLabels.join(', ')})`).join(', ') +
-        '. Ask the user whether a hedged answer scores like any other correct answer or not at all, ' +
-        'and set hedgedAnswers in the AE JSON to "include" or "exclude".'
-    );
-  }
   if (renumbered.length > 0) {
     warnings.push(
       `LAMS numbers AE questions 1..${questions.length} in order, but the document numbers ${renumbered.join(', ')}. ` +
@@ -709,12 +695,21 @@ function columnQuestionsAt(paragraphs: SOTParagraph[], index: number, problems: 
         stem: `${heading}: ${asked}`,
         leadInLines: [declaration.html, table.html],
         optionLabels,
-        correctAnswerLabels: unique([...(answerRow[column] ?? '').matchAll(/\b([A-Z])\b/g)].map((letter) => letter[1]!)).filter(
+        correctAnswerLabels: unique([...statedAnswer(answerRow[column] ?? '').matchAll(/\b([A-Z])\b/g)].map((letter) => letter[1]!)).filter(
           (letter) => optionLabels.includes(letter)
         )
       }
     ];
   });
+}
+
+/**
+ * "C, E, F, G, possibly H" keeps only the labels before the hedge: an answer the document will not
+ * commit to is ignored, never scored.
+ */
+function statedAnswer(answer: string): string {
+  const hedgeAt = answer.search(HEDGED_ANSWER);
+  return hedgeAt < 0 ? answer : answer.slice(0, hedgeAt);
 }
 
 function labelRange(first: string, last: string): string[] {
@@ -734,7 +729,6 @@ function columnQuestion(column: ColumnQuestion, number: number, caseNumber: numb
     blankLinesBeforeStem: 0,
     bodyLines: [],
     creditLines: [],
-    hedgedAnswerLabels: [],
     optionLabels: column.optionLabels,
     correctAnswerLabels: column.correctAnswerLabels,
     options: column.optionLabels.map((label) => ({
@@ -801,13 +795,7 @@ function observeQuestion(
   const explicitAnswer = paragraphs
     .map((paragraph) => paragraph.text.match(ANSWER_LINE)?.[1])
     .find((value) => value !== undefined);
-  // "C, E, F, G, possibly H": every label before the hedge is one the document states outright,
-  // and everything from the hedge onwards is an answer it will not commit to.
-  const hedgeAt = explicitAnswer === undefined ? -1 : explicitAnswer.search(HEDGED_ANSWER);
-  const stated = explicitAnswer === undefined ? '' : hedgeAt < 0 ? explicitAnswer : explicitAnswer.slice(0, hedgeAt);
-  const hedgedText = explicitAnswer === undefined || hedgeAt < 0 ? '' : explicitAnswer.slice(hedgeAt);
-  const explicitLabels = [...stated.matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!);
-  const hedgedLabels = [...hedgedText.matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!);
+  const explicitLabels = [...statedAnswer(explicitAnswer ?? '').matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!);
   const boldLabels = optionParagraphs
     .filter(({ paragraph, boldEligible }) => boldEligible && paragraph.bold)
     .map(({ label }) => label);
@@ -821,10 +809,7 @@ function observeQuestion(
   const bodyLines = promptLines(learnerBody(paragraphs, optionParagraphs));
   const credits = promptLines(creditLines(paragraphs));
   const marksMatch = prompt.match(/\(?\s*(\d+)\s+marks?\s*\)?/i);
-  // A hedged answer counts towards how many answers there could be: once it is included, the
-  // question takes more than one.
-  const answerCount = correctAnswerLabels.length + unique(hedgedLabels).filter((label) => optionLabels.includes(label)).length;
-  const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || answerCount > 1;
+  const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || correctAnswerLabels.length > 1;
   const type: ObservedAEQuestionType =
     optionLabels.length === 0 ? 'open-response' : multipleSelect ? 'multiple-select' : 'single-select';
   return {
@@ -840,7 +825,6 @@ function observeQuestion(
       creditLines: credits,
       optionLabels,
       correctAnswerLabels,
-      hedgedAnswerLabels: unique(hedgedLabels).filter((label) => optionLabels.includes(label)),
       options: optionParagraphs.map((entry) => ({
         label: entry.label,
         html: withoutUniformInlineTag(optionHtml(entry), 'strong'),

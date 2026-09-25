@@ -500,22 +500,16 @@ test('a tab-laid-out block is written as a table with no rules, unlike a Word ta
   expect(buildAEPlan(input).nodes[0]!.questions[0]!.promptHtml).toMatch(/<td[^>]*border:1px solid/);
 });
 
-test('a hedged answer is not scored until the reviewer says how it should be', () => {
+test('a plan saved when hedged answers needed a decision still builds, ignoring them', () => {
   const input = validInput() as Record<string, unknown>;
   const question = ((input.nodes as Array<Record<string, unknown>>)[0]!.questions as Array<Record<string, unknown>>)[0]!;
   question.options = [
     { text: 'A) Film A', correct: true },
     { text: 'B) Film B', correct: false },
-    { text: 'C) Film C', hedged: true }
+    { text: 'C) Film C', correct: false, hedged: true }
   ];
 
-  // The document will not commit to C, so neither does the plan: it asks.
-  expect(() => buildAEPlan(input)).toThrow(/hedged/i);
-
-  const included = buildAEPlan({ ...input, hedgedAnswers: 'include', multipleAnswerCredit: 'full' });
-  expect(included.nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([100, 0, 100]);
-
-  const excluded = buildAEPlan({ ...input, hedgedAnswers: 'exclude' });
-  expect(excluded.nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([100, 0, 0]);
-  expect(excluded.nodes[0]!.questions[0]!.multipleAnswersAllowed).toBe(false);
+  const plan = buildAEPlan(input);
+  expect(plan.nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([100, 0, 0]);
+  expect(plan.nodes[0]!.questions[0]!.multipleAnswersAllowed).toBe(false);
 });
