@@ -2,12 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { elentraDir, venvPython } from './python-runtime.mjs';
 
 export const root = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(new URL('../../package.json', import.meta.url));
 
-export function runCheck(label, args, hint, cwd = root) {
-  const result = spawnSync(process.execPath, args, { cwd, encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 });
+export function runCheck(label, args, hint, cwd = root, command = process.execPath) {
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 });
   const passed = !result.error && result.status === 0;
   console.log(`${passed ? 'PASS' : 'FAIL'} ${label}`);
   if (!passed) {
@@ -34,6 +35,9 @@ export function doctor() {
     try { if (!runCheck(label, args(), hint)) passed = false; }
     catch (error) { console.error(`FAIL ${label}: ${error.message}\nNext step: ${hint}`); passed = false; }
   }
+  // The Elentra steps run on the project's own Python in .venv (see python-runtime.mjs).
+  const elentraHint = 'Run npm run setup:elentra to reinstall the Elentra Python runtime, packages, and browser.';
+  if (!runCheck('Elentra Python runtime, packages, and headed browser launch', [path.join(elentraDir, 'browser_check.py')], elentraHint, elentraDir, venvPython())) passed = false;
   console.log(passed
     ? 'Local runtime checks passed. LAMS login is verified separately by the setup login step.'
     : 'Setup is incomplete. Resolve the failed checks above before running lesson automation.');

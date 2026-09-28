@@ -11,13 +11,13 @@ export function resolveCommand(args) {
   const [operation, ...input] = args;
   const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts;
   const command = scripts[operation];
-  if (typeof command !== 'string' || !/^(tsx src\/[\w-]+\.ts|node scripts\/setup\/login\.mjs)( --[\w-]+)?$/.test(command)) {
-    throw new Error('Choose a LAMS operation from package.json, e.g. run:tbl, preflight:tbl, apply:irat, login:check.');
+  if (typeof command !== 'string' || !/^(tsx src\/[\w-]+\.ts|node scripts\/setup\/login\.mjs|node scripts\/elentra\.mjs [\w-]+)( --[\w-]+)?$/.test(command)) {
+    throw new Error('Choose a LAMS operation from package.json, e.g. run:tbl, preflight:tbl, apply:irat, login:check, elentra:links.');
   }
   let logFile;
   const forwarded = [];
-  const flags = new Set(['--commit', '--dry-run', '--validate', '--source', '--json', '--keep-open', '--skip-sot-check', '--monitor-only', '--no-publish-code', '--publish-code', '--check-only', '--resume-trat-sync', '--preflight-only', '--monitor']);
-  const values = new Set(['--config', '--request-json', '--ae-json', '--repair-json', '--team-setup', '--slow-mo', '--query', '--exact-title', '--roots', '--max-expansions', '--node', '--dump-question', '--sot-docx', '--out', '--draft', '--expect-design', '--checkpoint', '--batch-size', '--question-batch-size', '--lesson', '--manifest', '--out-dir', '--title', '--gate', '--rotation-seconds', '--code', '--identifier', '--repair-question']);
+  const flags = new Set(['--commit', '--dry-run', '--validate', '--source', '--json', '--keep-open', '--skip-sot-check', '--monitor-only', '--no-publish-code', '--publish-code', '--check-only', '--resume-trat-sync', '--preflight-only', '--monitor', '--skip-download', '--skip-links', '--headless', '--no-pause', '--login', '--tabs']);
+  const values = new Set(['--config', '--request-json', '--ae-json', '--repair-json', '--team-setup', '--slow-mo', '--query', '--exact-title', '--roots', '--max-expansions', '--node', '--dump-question', '--sot-docx', '--out', '--draft', '--expect-design', '--checkpoint', '--batch-size', '--question-batch-size', '--lesson', '--manifest', '--out-dir', '--title', '--gate', '--rotation-seconds', '--code', '--identifier', '--repair-question', '--event-id', '--download-event-id', '--links-event-id', '--lesson-id', '--tab', '--details']);
   for (let i = 0; i < input.length; i++) {
     const arg = input[i];
     if (flags.has(arg)) { forwarded.push(arg); continue; }

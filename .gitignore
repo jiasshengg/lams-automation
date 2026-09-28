@@ -9,3 +9,7 @@ playwright-report/
 test-results/
 .DS_Store
 sot
+sot-docs/
+.venv/
+# Credentials; never commit
+**/service-account-key.json

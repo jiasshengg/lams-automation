@@ -2,12 +2,13 @@
 
 You do not need to know how to code, install Homebrew, or install Node.js yourself. You need the project source folder and permission to download the project's private runtime, dependencies, and browser.
 
-1. Download and unzip a clean source copy of this project, or obtain it through your organisation's approved repository access. Keep `package-lock.json` and the hidden `.agents`/`.claude` skill folders. Do not transfer someone else's `node_modules`, `.playwright`, `.env`, or `configs/local.json`; dependencies and login sessions belong to each computer/user. Git is not needed if you use a source ZIP.
+1. Download and unzip a clean source copy of this project, or obtain it through your organisation's approved repository access. Keep `package-lock.json` and the hidden `.agents`/`.claude` skill folders. Do not transfer someone else's `node_modules`, `.venv`, `.playwright`, `.env`, or `configs/local.json`; dependencies and login sessions belong to each computer/user. Git is not needed if you use a source ZIP.
 2. Open the project folder and double-click **Setup Mac.command** on Mac or **Setup Windows.cmd** on Windows. The launcher uses a compatible Node.js already on the computer when available. Otherwise, it downloads the pinned official Node.js 24 LTS archive, verifies its SHA-256 checksum, and installs it under this project's ignored `.tools` folder. It does not need Homebrew, a system-wide Node installation, or an administrator password.
 3. Wait while setup installs fresh project dependencies and Chromium. A temporary browser window opens and closes for a local runtime check. Existing local configuration is preserved. If none exists, setup creates `configs/local.json` from the example. If the computer's operating system is too old for Playwright's bundled Chromium (the install step reports something like `Playwright does not support chromium on mac13`), setup automatically tries the installed Google Chrome, then Microsoft Edge, and records the one that opens as `browser.channel` in `configs/local.json`. If neither is installed, install Google Chrome or update the operating system, then run the launcher again.
 4. If the operating system or organisation blocks the launcher, do not bypass its security controls. Ask IT, or ask your coding agent to run `bash "./Setup Mac.command"` on macOS or `powershell.exe -NoProfile -File ".\\scripts\\setup\\bootstrap-windows.ps1"` on Windows. If PowerShell, downloads, or project-local executable files are prohibited, IT must provide Node.js 24 LTS and allow the project dependencies to run.
 5. Setup then opens the default URL, `https://ilams.lamsinternational.com/lams/index.do`, in the headed persistent automation browser. Complete sign-in yourself in that browser window; never give credentials to the agent. On Windows, the sign-in window reports macOS so NTU ADFS shows its sign-in form rather than Windows Integrated Authentication, which never offers **Stay signed in?** and so cannot persist. Enter your password and MFA as usual and choose **Yes** at **Stay signed in?**; only this sign-in window is affected. Setup waits up to five minutes and verifies the authenticated course menu without opening or changing a lesson. If needed, rerun only this step with `npm run login:lams`. The configured `baseUrl` can still select another deployment.
-6. Courses are selected per job. Tell the agent the full course name or a unique partial name; it passes `workspaceCourse` in the job's `--request-json`. An exact match wins, while an ambiguous partial match safely stops for clarification. The value in `configs/local.json` is only a fallback and does not lock future jobs to one course.
+6. Setup then opens **Elentra** (`https://ntu.elentra.cloud`) in a second browser window. This is a separate sign-in from LAMS. Choose **Institutional Login (SSO)** and sign in yourself. Setup notices the finished sign-in by itself (it waits up to 10 minutes), closes the window, saves the session, and checks that it can open Elentra's admin events page (your account needs administrator access to events). If this fails, LAMS setup is still complete; run `npm run login:elentra` to try the Elentra sign-in again. Earlier, while installing, setup downloaded the project's own Python 3.13 (python.org's signed build on Windows), verified its checksum, kept it in `.tools`, and created the `.venv` virtual environment the Elentra steps use. You never need to activate that venv: every Elentra command runs it directly. A username and password in `.env` are not used.
+7. Courses are selected per job. Tell the agent the full course name or a unique partial name; it passes `workspaceCourse` in the job's `--request-json`. An exact match wins, while an ambiguous partial match safely stops for clarification. The value in `configs/local.json` is only a fallback and does not lock future jobs to one course.
 
 For example, you can tell your agent:
 
@@ -24,6 +25,9 @@ The double-click launcher bootstraps Node.js when necessary and then starts `npm
 - Execution through tsx with its transformation cache disabled.
 - The TypeScript build.
 - A real headed browser launch using a temporary context and local page (the bundled Chromium, or the `browser.channel` system browser recorded by setup).
+- The Elentra runtime: the `.venv` Python imports the Elentra packages and opens its browser headed.
+
+Already set up before the Elentra steps existed? Run `npm run setup:elentra` once. It installs only the Python runtime, `.venv`, packages, and browser, reruns the doctor, and opens the Elentra sign-in.
 
 It exits unsuccessfully if any runtime check fails. The subsequent setup login step opens the saved browser profile and verifies sign-in separately; `npm run doctor` alone does not open LAMS or check login status.
 
@@ -42,10 +46,13 @@ It exits unsuccessfully if any runtime check fails. The subsequent setup login s
 | Browser cannot launch | Use a local desktop session; have IT check OS support and executable restrictions. |
 | Download or npm install fails | Check network/proxy/organisation access. Share the error with your maintainer without credentials. |
 | Build fails | Share the compiler errors with the maintainer. Do not call setup complete. |
+| `FAIL Elentra Python runtime…` or a Python download/install error | Run `npm run setup:elentra`. It reuses a verified Python in `.tools` and rebuilds `.venv` if it was made from another Python. |
+| `An Application Control policy has blocked this file` | Windows Smart App Control blocked an unsigned Python module. Do not turn Smart App Control off; report the module named in the message to the maintainer. |
+| `FAIL Elentra sign-in was not verified` / `Elentra session missing or expired` | Run `npm run login:elentra`, and sign in with Institutional Login (SSO); the sign-in is detected automatically. The account needs Elentra administrator access to events. |
 
 A successful `npm run build` alone is insufficient: it does not execute esbuild/tsx or launch a browser. The screenshot that prompted these checks reported a quarantined esbuild executable after an earlier build had passed; without that machine's logs, that reported cause is not independently confirmed.
 
-To move the source folder to another computer, leave out `.tools`, `node_modules`, `.playwright`, `.env`, and `configs/local.json`. Each user should run setup on their own computer so native packages and login data are never copied between users.
+To move the source folder to another computer, leave out `.tools`, `.venv`, `node_modules`, `.playwright`, `.env`, and `configs/local.json`. Each user should run setup on their own computer so native packages and login data are never copied between users.
 
 References: [Node.js release archive](https://nodejs.org/en/download/archive/v24), [esbuild platform-specific installation](https://esbuild.github.io/getting-started/#simultaneous-platforms), [npm clean installation](https://docs.npmjs.com/cli/v11/commands/npm-ci/), [Playwright browser installation](https://playwright.dev/docs/browsers).
 

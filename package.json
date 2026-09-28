@@ -38,7 +38,16 @@
     "test:setup": "node --test scripts/setup/setup.test.mjs",
     "login:check": "node scripts/setup/login.mjs --check-only",
     "preflight:tbl": "tsx src/run-tbl-irat.ts --preflight-only",
-    "repair:ae-placeholder": "tsx src/repair-ae-placeholder.ts"
+    "repair:ae-placeholder": "tsx src/repair-ae-placeholder.ts",
+    "setup:elentra": "node scripts/setup/elentra-setup.mjs",
+    "login:elentra": "node scripts/elentra.mjs login",
+    "elentra:check": "node scripts/elentra.mjs check",
+    "elentra:kanban": "node scripts/elentra.mjs kanban",
+    "elentra:download": "node scripts/elentra.mjs download",
+    "elentra:links": "node scripts/elentra.mjs links",
+    "elentra:pipeline": "node scripts/elentra.mjs pipeline",
+    "elentra:sandbox-test": "node scripts/elentra.mjs sandbox-test",
+    "test:elentra": "node scripts/elentra.mjs unit-tests"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

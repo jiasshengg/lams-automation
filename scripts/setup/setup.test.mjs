@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -281,5 +281,71 @@ test('a reservation left by a process that died is taken over, not waited on for
   } finally {
     rmSync(`${profile}.automation-lock`, { recursive: true, force: true });
     rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('Elentra Python runtime is pinned and checksummed for every supported computer', async () => {
+  const { PYTHON_BUILDS, pythonBuild, basePython, venvPython } = await import('./python-runtime.mjs');
+  assert.deepEqual(Object.keys(PYTHON_BUILDS).sort(), ['darwin-arm64', 'darwin-x64', 'win32-arm64', 'win32-x64']);
+  for (const [key, build] of Object.entries(PYTHON_BUILDS)) {
+    assert.match(build.sha256, /^[a-f0-9]{64}$/, key);
+    const [platform, arch] = key.split('-');
+    const resolved = pythonBuild(platform, arch);
+    assert.ok(resolved.home.startsWith(path.join(root, '.tools')), key);
+    // Windows must use python.org's signed build: Smart App Control blocks unsigned DLLs.
+    if (platform === 'win32') assert.match(resolved.url, /^https:\/\/api\.nuget\.org\/v3-flatcontainer\/python(arm64)?\//);
+    else assert.match(resolved.url, /^https:\/\/github\.com\/astral-sh\/python-build-standalone\/releases\/download\//);
+  }
+  assert.throws(() => pythonBuild('linux', 'x64'), /No pinned Python build/);
+  assert.equal(basePython('/p', 'darwin'), path.join('/p', 'bin', 'python3'));
+  assert.equal(venvPython('/v', 'win32'), path.join('/v', 'Scripts', 'python.exe'));
+  const requirements = readFileSync(path.join(root, 'elentra/requirements.txt'), 'utf8');
+  for (const line of requirements.split('\n').filter(entry => entry.trim() && !entry.startsWith('#'))) assert.match(line, /^[\w.-]+==[\w.]+$/);
+  assert.doesNotMatch(requirements, /^pandas==/m, 'pandas is blocked by Windows Smart App Control');
+  assert.match(readFileSync(path.join(root, '.gitignore'), 'utf8'), /^\.venv\/$/m);
+});
+
+test('setup installs the Elentra runtime before the doctor and signs in to Elentra after LAMS', () => {
+  const setup = readFileSync(path.join(root, 'scripts/setup/setup.mjs'), 'utf8');
+  const order = ['installBrowser(npmCli)', 'await setupPythonRuntime()', 'if (!doctor())', 'await openLamsSignIn()', 'openElentraSignIn()'].map(step => setup.indexOf(step));
+  assert.ok(order.every(index => index > 0), `missing step: ${order}`);
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+});
+
+test('Elentra operations run through the project venv and the direct runner', async () => {
+  const { resolveElentraCommand, ELENTRA_OPERATIONS } = await import('../elentra.mjs');
+  const fakePython = process.execPath;
+  const links = resolveElentraCommand(['links', '--lesson-id', '41174', '--dry-run'], fakePython);
+  assert.equal(links.command, fakePython);
+  assert.deepEqual(links.args, [path.join(root, 'elentra', 'playwright_resource_adder.py'), '--lesson-id', '41174', '--dry-run']);
+  assert.deepEqual(resolveElentraCommand(['login'], fakePython).args.slice(1), ['--login']);
+  assert.deepEqual(resolveElentraCommand(['unit-tests'], fakePython).args.slice(0, 2), ['-m', 'unittest']);
+  assert.throws(() => resolveElentraCommand(['delete'], fakePython), /Choose an Elentra operation/);
+  assert.throws(() => resolveElentraCommand(['links'], path.join(os.tmpdir(), 'missing-python')), /setup:elentra/);
+
+  const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts;
+  for (const [name, command] of Object.entries(scripts).filter(([, command]) => command.startsWith('node scripts/elentra.mjs '))) {
+    assert.ok(ELENTRA_OPERATIONS[command.split(' ')[2]], `${name} names an unknown operation`);
+  }
+  const { resolveCommand } = await import('../run.mjs');
+  const direct = resolveCommand(['elentra:links', '--lesson-id', '41174', '--no-pause', '--dry-run']);
+  assert.deepEqual(direct.args, [path.join(root, 'scripts/elentra.mjs'), 'links', '--lesson-id', '41174', '--no-pause', '--dry-run']);
+  assert.deepEqual(resolveCommand(['elentra:pipeline', '--event-id', '27323', '--skip-download']).args.slice(1), ['pipeline', '--event-id', '27323', '--skip-download']);
+  // The Kanban tab and row text are user input and may contain spaces and slashes.
+  assert.deepEqual(resolveCommand(['elentra:kanban', '--tab', 'Some Tab 26/27', '--details', 'Row text, with words', '--json']).args.slice(1), ['kanban', '--tab', 'Some Tab 26/27', '--details', 'Row text, with words', '--json']);
+  assert.deepEqual(resolveCommand(['elentra:kanban', '--tabs']).args.slice(1), ['kanban', '--tabs']);
+});
+
+test('every canonical skill has matching Codex and Claude Code adapters', () => {
+  const canonical = readdirSync(path.join(root, 'skills')).filter(name => name.startsWith('lams-'));
+  assert.ok(canonical.includes('lams-elentra-resources'));
+  for (const name of canonical) {
+    const description = readFileSync(path.join(root, 'skills', name, 'SKILL.md'), 'utf8').match(/^name: (.+)$/m)?.[1];
+    assert.equal(description, name);
+    for (const adapterRoot of ['.agents/skills', '.claude/skills']) {
+      const adapter = readFileSync(path.join(root, adapterRoot, name, 'SKILL.md'), 'utf8');
+      assert.match(adapter, new RegExp(`^name: ${name}$`, 'm'));
+      assert.ok(adapter.includes(`skills/${name}/SKILL.md`), `${adapterRoot}/${name} must point at the canonical skill`);
+    }
   }
 });

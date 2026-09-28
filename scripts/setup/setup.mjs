@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { doctor, root, runCheck } from './doctor.mjs';
 import { SYSTEM_BROWSER_CHANNELS, readBrowserChannel, writeBrowserChannel } from './local-config.mjs';
+import { openElentraSignIn, setupPythonRuntime } from './elentra-setup.mjs';
 
 function runNpm(npmCli, args) {
   const result = spawnSync(process.execPath, [npmCli, ...args], { cwd: root, stdio: 'inherit', timeout: 600_000 });
@@ -50,6 +51,7 @@ async function main() {
     console.log('Created configs/local.json from the example with the shared LAMS URL. Supply workspaceCourse with each job when it differs from the fallback; do not put passwords in this file.');
   } catch (error) { if (error.code !== 'EEXIST') throw error; }
   installBrowser(npmCli);
+  await setupPythonRuntime();
   if (!doctor()) {
     process.exitCode = 1;
     return;
@@ -58,5 +60,12 @@ async function main() {
   // still start this bootstrap with no node_modules directory.
   const { openLamsSignIn } = await import('./login.mjs');
   await openLamsSignIn();
+  // Elentra is a separate system with its own SSO session, verified and reported on its own.
+  try {
+    openElentraSignIn();
+  } catch (error) {
+    console.error(`LAMS setup is complete, but ${error.message}`);
+    process.exitCode = 1;
+  }
 }
 try { await main(); } catch (error) { console.error(`Setup stopped: ${error.message}`); process.exitCode = 1; }

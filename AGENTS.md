@@ -21,6 +21,18 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
   from the user for that specific lesson. Never default it, and never inherit it from a
   configuration file, an example, or a previous run. Because that value can only come from
   the user, publishing can never happen without their involvement.
+- Adding the LAMS links to an Elentra event is learner-facing, like publishing. Run it only
+  when the user asks for Elentra links or as the last stage of a full/end-to-end/deploy
+  request, after the lesson code is recorded in the Kanban sheet, and limit it to that lesson
+  with `--lesson-id`. Test changes only on the sandbox event `42374`. The Kanban tab is a
+  per-run input the user names (`--tab`); never assume one or reuse a tab from configuration
+  or an earlier run. A Kanban-driven run asks whether to run every "Can start" row, one at a
+  time, or one row the user identifies by its TBL/Quiz Details.
+  The LAMS stages use the Source-of-Truth files that run just downloaded (recorded in
+  `sot-docs/latest.json`) by default; documents the user supplies in the prompt take precedence
+  per kind (iRAT or AE). Write their concrete paths into requests and AE plans. The Elentra scripts never
+  delete or edit existing Elentra resources and never edit the Kanban sheet; downloading QA
+  files is read-only in Elentra.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.
 
 ## Current implementation scope
@@ -87,6 +99,7 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - If Node.js/npm are missing or too old, run `bash "./Setup Mac.command"` on macOS or `Setup Windows.cmd` on Windows. These launchers install a pinned, checksummed Node.js 24 runtime inside the ignored `.tools/` directory, then install dependencies and Playwright Chromium and run the local doctor checks. They do not require a system-wide Node installation.
 - If Playwright's bundled Chromium is unsupported on the OS version (for example macOS 13), setup probes an installed Chrome, then Edge, and records the working one as `browser.channel` in `configs/local.json`. All entry points read launch options through `browserLaunchOptions` in `src/config.ts`, so add new browser launches through that helper rather than inlining `chromium.launchPersistentContext` options.
 - First-time setup installs and verifies the local runtime, then opens the configured LAMS URL in the headed persistent automation browser so the user can sign in. Never request or handle credentials. On Windows the interactive sign-in phase reports macOS so NTU ADFS serves its forms page (its Windows Integrated Authentication path never offers **Stay signed in?**); the restart check and automation commands keep the normal browser identity. Do not extend that override to other launches. When Microsoft offers **Stay signed in?** (or the organisation's equivalent persistence choice), tell the user to choose **Yes** if organisational policy permits; do not answer authentication prompts for them. Wait for the authenticated LAMS course-menu control, then close the Playwright context gracefully so cookies and storage are flushed to the configured profile. Do not force-kill the browser after login. On the next launch, verify that the course-menu control appears without another sign-in before declaring persistence successful. If it does not, rerun `npm run login:lams` with the same profile and report that Microsoft or organisational session policy may require reauthentication. Report runtime and login checks separately, and do not open or change any lesson during setup.
+- Setup also installs the Elentra runtime: a pinned, checksummed Python (python.org's signed NuGet build on Windows, python-build-standalone on macOS) under `.tools/`, a `.venv` made from it, the exact packages in `elentra/requirements.txt`, and Python Playwright's Chromium unless `browser.channel` is set. Elentra commands run the `.venv` interpreter directly through `scripts/elentra.mjs`, so nobody activates the venv by hand. After the LAMS sign-in, setup opens Elentra for a separate sign-in the user completes in the window (detected automatically, nothing typed in the terminal); the session is saved at `.playwright/elentra-auth.json` and verified against the admin events page. Report the Elentra sign-in separately from LAMS. `npm run setup:elentra` repeats only this part. Windows Smart App Control blocks unsigned native Python modules (it blocked pandas), so add compiled Python dependencies only after checking they load on such a machine.
 - Do not bypass operating-system or organisation security controls. If downloads, PowerShell, or project-local executables are prohibited, report that IT must provide an approved Node.js 24 installation.
 
 ## Code organization
@@ -104,8 +117,10 @@ Do not infer an exact source sequence from only a module or TBL number when mult
 - `src/lams/ae-graph.ts`: verified AE node/gate/transition reconciliation and targeted graph repair.
 - `src/docx/`: DOCX archive, embedded-media, and question-assignment handling.
 - `src/lams/diagnostics.ts`: non-mutating DOM and screenshot evidence.
+- `elentra/`: Python scripts for the Elentra event (Kanban sheet reading, QA-file download, LAMS link adding, SSO session); `settings.py` holds their paths and browser options.
+- `scripts/elentra.mjs`: runs an Elentra operation with the project `.venv`; `scripts/setup/python-runtime.mjs` installs that runtime.
 - `skills/lams-tbl-authoring/`: overall workflow skill and shared operational references.
-- `skills/lams-*/`: focused lesson-management, iRAT-editing, gate-settings, AE-preparation, and authoring-validation skills.
+- `skills/lams-*/`: focused lesson-management, iRAT-editing, gate-settings, AE-preparation, authoring-validation, and Elentra-resources skills.
 - `.agents/skills/lams-*/`: Codex discovery adapters for every canonical skill.
 - `.claude/skills/lams-*/`: Claude Code discovery adapters for every canonical skill.
 
@@ -119,6 +134,8 @@ After code changes, run:
 npm run build
 npm test
 ```
+
+After changing `elentra/` or the setup scripts, also run `npm run test:elentra` and `npm run test:setup`.
 
 For a live headed run, use:
 
