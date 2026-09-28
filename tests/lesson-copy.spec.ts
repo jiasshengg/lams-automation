@@ -145,40 +145,45 @@ test('opens a read-only source through the explicit Open a copy control', async 
   await expect(page.getByRole('heading', { name: config.sourceLessonTitle })).toBeVisible();
 });
 
-test('dry run verifies a missing final destination folder can be created without creating it', async ({ page }) => {
-  await page.setContent(`
-    <button id="saveDropButton">Save menu</button>
-    <a href="#" onclick="document.querySelector('[role=dialog]').hidden = false">Save as</a>
-    <div role="dialog" aria-label="Save design" hidden>
-      <div role="tree">
-        <div role="treeitem">Courses</div>
-        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+for (const dropdown of [false, true]) {
+  test(`dry run verifies a missing final destination folder can be created without creating it (dropdown: ${dropdown})`, async ({ page }) => {
+    await page.setContent(`
+      <button id="saveDropButton">Save menu</button>
+      <a href="#" onclick="document.querySelector('[role=dialog]').hidden = false">Save as</a>
+      <div role="dialog" aria-label="Save design" hidden>
+        <div role="tree">
+          <div role="treeitem">Courses</div>
+          <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+        </div>
+        <input aria-label="Type the learning design name to save" value="source">
+        ${dropdown ? `<button aria-expanded="false" onclick="this.setAttribute('aria-expanded', 'true'); this.nextElementSibling.hidden = false">Folder actions</button>` : ''}
+        <div ${dropdown ? 'hidden' : ''}>
+        <button id="ldStoreDialogNewFolderButton" onclick="prompt('Please enter the name for a new folder')">New</button>
+        </div>
+        <button id="ldStoreDialogSaveButton">Save</button>
       </div>
-      <input aria-label="Type the learning design name to save" value="source">
-      <button id="ldStoreDialogNewFolderButton" onclick="prompt('Please enter the name for a new folder')">New</button>
-      <button id="ldStoreDialogSaveButton">Save</button>
-    </div>
-  `);
-  const config = {
-    sourceLessonTitle: '[for interns] TEST LESSON A 280826',
-    lessonTitle: '[Nathanael]',
-    destinationFolderPath: ['Courses', 'DL Playground 2026/2027 [internal]', '![Nathanael]'],
-    createDestinationFolder: true,
-    browser: { actionTimeoutMs: 2_000 }
-  } as LamsConfig;
-  let promptCount = 0;
-  page.on('dialog', async (dialog) => {
-    promptCount += 1;
-    await dialog.dismiss();
+    `);
+    const config = {
+      sourceLessonTitle: '[for interns] TEST LESSON A 280826',
+      lessonTitle: '[Nathanael]',
+      destinationFolderPath: ['Courses', 'DL Playground 2026/2027 [internal]', '![Nathanael]'],
+      createDestinationFolder: true,
+      browser: { actionTimeoutMs: 2_000 }
+    } as LamsConfig;
+    let promptCount = 0;
+    page.on('dialog', async (dialog) => {
+      promptCount += 1;
+      await dialog.dismiss();
+    });
+
+    const result = await copyLesson(page, config, { commit: false });
+
+    expect(result.committed).toBe(false);
+    expect(result.destinationFolderCreated).toBe(false);
+    expect(promptCount).toBe(0);
+    await expect(page.getByRole('treeitem', { name: '![Nathanael]', exact: true })).toHaveCount(0);
   });
-
-  const result = await copyLesson(page, config, { commit: false });
-
-  expect(result.committed).toBe(false);
-  expect(result.destinationFolderCreated).toBe(false);
-  expect(promptCount).toBe(0);
-  await expect(page.getByRole('treeitem', { name: '![Nathanael]', exact: true })).toHaveCount(0);
-});
+}
 
 test('commit creates only the missing final folder, saves the copy, and verifies both', async ({ page }) => {
   await page.setContent(`
@@ -230,40 +235,45 @@ test('commit creates only the missing final folder, saves the copy, and verifies
   await expect(page.getByRole('dialog', { name: 'Open design' })).toBeHidden();
 });
 
-test('dry run verifies an exact destination folder rename without renaming or saving', async ({ page }) => {
-  await page.setContent(`
-    <button id="saveDropButton">Save menu</button>
-    <a href="#" onclick="document.querySelector('[role=dialog]').hidden = false">Save as</a>
-    <div role="dialog" aria-label="Save design" hidden>
-      <div role="tree">
-        <div role="treeitem">Courses</div>
-        <div role="treeitem">DL Playground 2026/2027 [internal]</div>
-        <div role="treeitem">![Nathanael]</div>
+for (const dropdown of [false, true]) {
+  test(`dry run verifies an exact destination folder rename without renaming or saving (dropdown: ${dropdown})`, async ({ page }) => {
+    await page.setContent(`
+      <button id="saveDropButton">Save menu</button>
+      <a href="#" onclick="document.querySelector('[role=dialog]').hidden = false">Save as</a>
+      <div role="dialog" aria-label="Save design" hidden>
+        <div role="tree">
+          <div role="treeitem">Courses</div>
+          <div role="treeitem">DL Playground 2026/2027 [internal]</div>
+          <div role="treeitem">![Nathanael]</div>
+        </div>
+        <input aria-label="Type the learning design name to save" value="source">
+        ${dropdown ? `<button aria-expanded="false" onclick="this.setAttribute('aria-expanded', 'true'); this.nextElementSibling.hidden = false">Folder actions</button>` : ''}
+        <div ${dropdown ? 'hidden' : ''}>
+        <button id="ldStoreDialogRenameButton">Rename</button>
+        </div>
+        <button id="ldStoreDialogSaveButton">Save</button>
       </div>
-      <input aria-label="Type the learning design name to save" value="source">
-      <button id="ldStoreDialogRenameButton">Rename</button>
-      <button id="ldStoreDialogSaveButton">Save</button>
-    </div>
-  `);
-  const config = {
-    sourceLessonTitle: 'FOM TBL01 110825 2025Y1',
-    lessonTitle: '[Nathanael] MOCK FOM TBL01 AE TEST',
-    destinationFolderPath: [
-      'Courses',
-      'DL Playground 2026/2027 [internal]',
-      '[Nathanael] MOCK FOM TBL01 AE TEST'
-    ],
-    renameDestinationFolderFrom: '![Nathanael]',
-    browser: { actionTimeoutMs: 2_000 }
-  } as LamsConfig;
+    `);
+    const config = {
+      sourceLessonTitle: 'FOM TBL01 110825 2025Y1',
+      lessonTitle: '[Nathanael] MOCK FOM TBL01 AE TEST',
+      destinationFolderPath: [
+        'Courses',
+        'DL Playground 2026/2027 [internal]',
+        '[Nathanael] MOCK FOM TBL01 AE TEST'
+      ],
+      renameDestinationFolderFrom: '![Nathanael]',
+      browser: { actionTimeoutMs: 2_000 }
+    } as LamsConfig;
 
-  const result = await copyLesson(page, config, { commit: false });
+    const result = await copyLesson(page, config, { commit: false });
 
-  expect(result.committed).toBe(false);
-  expect(result.destinationFolderRenamed).toBe(false);
-  await expect(page.getByRole('treeitem', { name: '![Nathanael]', exact: true })).toBeVisible();
-  await expect(page.getByRole('treeitem', { name: config.destinationFolderPath.at(-1)!, exact: true })).toHaveCount(0);
-});
+    expect(result.committed).toBe(false);
+    expect(result.destinationFolderRenamed).toBe(false);
+    await expect(page.getByRole('treeitem', { name: '![Nathanael]', exact: true })).toBeVisible();
+    await expect(page.getByRole('treeitem', { name: config.destinationFolderPath.at(-1)!, exact: true })).toHaveCount(0);
+  });
+}
 
 test('commit renames the exact folder, preserves its lesson, and saves the new copy', async ({ page }) => {
   await page.setContent(`

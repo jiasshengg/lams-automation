@@ -227,6 +227,18 @@ interface DestinationPreparation {
   renamed: boolean;
 }
 
+async function revealFolderAction(dialog: Locator, action: Locator, config: LamsConfig): Promise<void> {
+  // The current library places the existing action IDs inside a Folder actions
+  // dropdown. Older libraries expose them directly. Observed in the live DOM.
+  if (!(await action.isVisible())) {
+    const menu = dialog.getByRole('button', { name: 'Folder actions', exact: true });
+    if (await menu.isVisible()) {
+      if ((await menu.getAttribute('aria-expanded')) !== 'true') await menu.click();
+    }
+  }
+  await action.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+}
+
 async function prepareDestinationFolder(
   dialog: Locator,
   page: Page,
@@ -251,7 +263,7 @@ async function prepareDestinationFolder(
   }
 
   const newFolderButton = dialog.locator('#ldStoreDialogNewFolderButton');
-  await newFolderButton.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+  await revealFolderAction(dialog, newFolderButton, config);
   if (!(await newFolderButton.isEnabled())) {
     throw new Error(`Cannot create "${folderName}": the selected parent folder is read-only.`);
   }
@@ -304,7 +316,7 @@ async function prepareRenamedDestinationFolder(
   );
   await oldFolder.click();
   const renameButton = dialog.locator('#ldStoreDialogRenameButton');
-  await renameButton.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
+  await revealFolderAction(dialog, renameButton, config);
   if (!(await renameButton.isEnabled())) throw new Error(`Rename remained disabled for folder "${oldName}".`);
 
   if (!commit) {

@@ -229,6 +229,44 @@ test('never derives options from an answer or rationale paragraph', () => {
   expect(analysis.warnings.find((warning) => warning.includes('unlabelled option block'))).toContain('Q1');
 });
 
+test('stops the option list at the rationale even when the rationale is itself lettered', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. Best treatment?')}
+    ${paragraph('A. Checkpoint blockade')}
+    ${paragraph('B. Stem cell transplantation', { bold: true })}
+    ${paragraph('C. Antibiotics')}
+    ${paragraph('Rationale -')}
+    ${paragraph('A. Not the problem at hand.')}
+    ${paragraph('B. Restores a functional immune system.')}
+    ${paragraph('C. Bacteria are not the problem.')}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const question = analyzeAESOT(paragraphs, 'Example').questions[0]!;
+  expect(question.optionLabels).toEqual(['A', 'B', 'C']);
+  expect(question.correctAnswerLabels).toEqual(['B']);
+});
+
+test('reads a Roman-numbered list as prompt material, not as option letters', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. Which microbes are most susceptible?')}
+    ${paragraph('I. Vibrio cholera')}
+    ${paragraph('II. Haemophilus influenza')}
+    ${paragraph('III. Mycobacterium tuberculosis')}
+    ${paragraph('IV. Poliovirus')}
+    ${paragraph('V. Neisseria meningitides')}
+    ${paragraph('')}
+    ${paragraph('A. I, II')}
+    ${paragraph('B. II, V', { bold: true })}
+    ${paragraph('C. III, V')}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const question = analyzeAESOT(paragraphs, 'Example').questions[0]!;
+  expect(question.optionLabels).toEqual(['A', 'B', 'C']);
+  expect(question.correctAnswerLabels).toEqual(['B']);
+});
+
 test('treats a fully bold collapsed option run as having no bold-derived answer key', () => {
   const paragraphs = extractSOTParagraphs(`<w:document><w:body>
     ${paragraph('1. Pick one. (1 mark)')}
@@ -698,6 +736,15 @@ test('a tabbed results line is read as the columns it lays out', () => {
   expect(paragraphs[0]!.html).toBe('<table data-layout="tabs"><tr><td>Hb</td><td>8.2 g/dL</td><td>13.6 – 16.6 g/dL</td></tr></table>');
   // Structure still reads the line the same way, whatever holds the columns apart.
   expect(paragraphs[0]!.text.replace(/\s+/g, ' ')).toBe('Hb 8.2 g/dL 13.6 – 16.6 g/dL');
+});
+
+test('a tab after a question number is a hanging stem, not a table', () => {
+  const paragraphs = extractSOTParagraphs(
+    '<w:document><w:body><w:p><w:r><w:t>8.</w:t><w:tab/><w:t>Human nucleated cells tend to be:</w:t><w:tab/></w:r></w:p></w:body></w:document>'
+  );
+
+  expect(paragraphs[0]!.html).not.toContain('<table');
+  expect(paragraphs[0]!.text.replace(/\s+/g, ' ').trim()).toBe('8. Human nucleated cells tend to be:');
 });
 
 test('an answer the key only hedges ("possibly H") is ignored', () => {
