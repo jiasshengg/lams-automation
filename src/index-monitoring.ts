@@ -35,7 +35,7 @@ async function main(): Promise<void> {
       const monitoring = await openMonitoring(page, config.lessonTitle, config);
       console.log('\nMonitoring workflow: OK');
       console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
-      await reportLessonCode(config.lessonTitle, monitoring.lessonId, codeOptions, config);
+      await reportLessonCode(monitoring.lessonId, codeOptions, config);
       return;
     }
 

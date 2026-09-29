@@ -37,7 +37,7 @@ import re
 
 import requests
 
-SHEET_ID = "1b0DGRySZ4xPmGipBTXU73b1iDIt_o3A4ErCR37Qhtf8"
+from settings import kanban_sheet_id
 
 READY_STATUS = "can start"  # matched case-insensitively, see below
 
@@ -59,16 +59,21 @@ class KanbanError(Exception):
 
 
 def _sheet_csv_url(gid: str) -> str:
-    return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
+    return f"https://docs.google.com/spreadsheets/d/{kanban_sheet_id()}/export?format=csv&gid={gid}"
 
 
 def _normalize(text: str) -> str:
     return " ".join(str(text).split()).casefold()
 
 
+def _normalize_tab(text: str) -> str:
+    """Tab names also treat "_" as a space: "INTERNS Kanban" names "INTERNS_Kanban"."""
+    return _normalize(str(text).replace("_", " "))
+
+
 def list_tabs() -> list[tuple[str, str]]:
     """(tab name, gid) for every tab, in the sheet's order."""
-    resp = requests.get(f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/htmlview", timeout=30)
+    resp = requests.get(f"https://docs.google.com/spreadsheets/d/{kanban_sheet_id()}/htmlview", timeout=30)
     resp.raise_for_status()
     tabs = []
     for raw_name, gid in _TAB_PATTERN.findall(resp.text):
@@ -82,18 +87,19 @@ def list_tabs() -> list[tuple[str, str]]:
 
 def resolve_tab(name: str) -> tuple[str, str]:
     """
-    The (exact tab name, gid) the user meant. An exact name wins (case and spacing
-    ignored); otherwise one tab whose name contains the text. Anything else raises
-    with the candidates, so a similarly named retired tab is never picked silently.
+    The (exact tab name, gid) the user meant. An exact name wins (case, spacing, and
+    underscores-as-spaces ignored); otherwise one tab whose name contains the text.
+    Anything else raises with the candidates, so a similarly named retired tab is never
+    picked silently.
     """
     if not name or not name.strip():
         raise KanbanError("Name the Kanban tab to read with --tab. Run the kanban operation with --tabs to list them.")
     tabs = list_tabs()
-    wanted = _normalize(name)
-    exact = [tab for tab in tabs if _normalize(tab[0]) == wanted]
+    wanted = _normalize_tab(name)
+    exact = [tab for tab in tabs if _normalize_tab(tab[0]) == wanted]
     if len(exact) == 1:
         return exact[0]
-    partial = [tab for tab in tabs if wanted in _normalize(tab[0])]
+    partial = [tab for tab in tabs if wanted in _normalize_tab(tab[0])]
     if len(partial) == 1:
         return partial[0]
     names = ", ".join(f'"{tab[0]}"' for tab in (partial or tabs))

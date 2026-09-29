@@ -323,8 +323,9 @@ npx tsx src/index-monitoring.ts --monitor-only --no-publish-code --config config
 
 The 5-digit code is the LAMS lesson ID, read from the monitoring URL
 (`monitorLesson.do?lessonID=41192`). `openMonitoring` already confirms it against the URL the
-browser actually landed on, so no extra scraping is involved. The identifier sent alongside it
-is the lesson title, which matches the sheet's TBL/Quiz Details column.
+browser actually landed on, so no extra scraping is involved. The row it is written to is the
+one the run names: `kanbanTab` plus `kanbanDetails` (that row's TBL/Quiz Details text) in
+`--request-json`. The lesson title is not used to find the row.
 
 On a machine with no sheet credentials the run prints the code for manual entry instead of
 failing, since the LAMS-side work has already succeeded by then. `--publish-code` still
@@ -338,11 +339,16 @@ Sheet credentials are stable per machine, so they belong in the ignored
 ```json
 {
   "sheet": {
+    "spreadsheetId": "<the id in the sheet's /spreadsheets/d/<id>/ URL>",
     "webhookUrl": "<the Apps Script /exec URL>",
     "secret": "<the shared secret>"
   }
 }
 ```
+
+Without `kanbanTab` and `kanbanDetails` (or `--tab` and `--details` for `send:code`) the code
+is printed for manual entry. The Apps Script and the steps
+for pointing the automation at a new spreadsheet are in `apps-script/README.md`.
 
 `configs/local.json` is ignored by Git, so these never reach the repository. Put them there
 and every entry point picks them up with no further setup. `LAMS_SHEET_WEBHOOK_URL` and

@@ -15,6 +15,13 @@ from playwright_resource_adder import build_title, resource_link_exists
 LINK = "https://ilams.lamsinternational.com/lams/home/learner.do?lessonID=41170"
 
 
+def patch_sheet_id(test):
+    """Tests never depend on the machine's configured Kanban spreadsheet."""
+    patcher = mock.patch.object(kanban_reader, "kanban_sheet_id", return_value="test-sheet")
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class FakeResponse:
     def __init__(self, payload=None, *, ok=True, status=200, url="https://ntu.elentra.cloud/admin/events?x", text=None):
         self._payload = payload
@@ -86,6 +93,7 @@ SHEET_CSV = (
 
 class KanbanReaderTest(unittest.TestCase):
     def setUp(self):
+        patch_sheet_id(self)
         response = mock.Mock(content=SHEET_CSV.encode("utf-8"))
         patcher = mock.patch.object(kanban_reader.requests, "get", return_value=response)
         patcher.start()
@@ -134,6 +142,7 @@ HTMLVIEW = (
 
 class TabTest(unittest.TestCase):
     def setUp(self):
+        patch_sheet_id(self)
         patcher = mock.patch.object(kanban_reader.requests, "get", return_value=mock.Mock(text=HTMLVIEW))
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -146,6 +155,8 @@ class TabTest(unittest.TestCase):
     def test_exact_name_wins_then_a_unique_partial_name(self):
         self.assertEqual(kanban_reader.resolve_tab(" kanban  ay26/27 "), ("Kanban AY26/27", "111"))
         self.assertEqual(kanban_reader.resolve_tab("DONOTUSE"), ("DONOTUSE_Kanban AY25/26", "222"))
+        # A space typed for the underscore still names the tab exactly.
+        self.assertEqual(kanban_reader.resolve_tab("donotuse kanban AY25/26"), ("DONOTUSE_Kanban AY25/26", "222"))
 
     def test_missing_or_ambiguous_tab_names_list_the_choices(self):
         with self.assertRaisesRegex(kanban_reader.KanbanError, "several tabs.*Kanban AY26/27.*DONOTUSE"):
@@ -173,6 +184,18 @@ class SettingsTest(unittest.TestCase):
                 self.assertEqual(settings.launch_options(False), {"headless": False, "channel": "msedge"})
                 config.write_text('{"browser": {"channel": " "}}', encoding="utf-8")
                 self.assertIsNone(settings.browser_channel())
+
+    def test_kanban_sheet_id_comes_from_local_config(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "local.json"
+            with mock.patch.object(settings, "LOCAL_CONFIG_PATH", config), \
+                    mock.patch.dict(os.environ, {"KANBAN_SHEET_ID": ""}):
+                with self.assertRaises(RuntimeError):
+                    settings.kanban_sheet_id()
+                config.write_text('{"sheet": {"spreadsheetId": " abc123 "}}', encoding="utf-8")
+                self.assertEqual(settings.kanban_sheet_id(), "abc123")
+                with mock.patch.dict(os.environ, {"KANBAN_SHEET_ID": "override"}):
+                    self.assertEqual(settings.kanban_sheet_id(), "override")
 
 
 if __name__ == "__main__":

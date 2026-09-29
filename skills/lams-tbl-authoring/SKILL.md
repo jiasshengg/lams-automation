@@ -25,14 +25,15 @@ Read the relevant focused instructions directly; routing does not require a new 
 
 A full flow normally starts from the Kanban sheet. Use this start whenever the user refers to the sheet, or asks for the full flow without naming a lesson and its source documents. Nothing here edits the sheet.
 
-1. **Tab.** The user names the Kanban tab for this run (the sheet has many tabs, including retired copies with the same columns). Ask for it when it was not stated; never assume one, and never reuse a tab from configuration, an example, or an earlier run. `node scripts/run.mjs elentra:kanban --tabs` lists the names. Pass the resolved name as `--tab` to every Elentra command of the run.
+1. **Tab.** The user names the Kanban tab for this run (the sheet has many tabs, including retired copies with the same columns). Ask for it when it was not stated; never assume one, and never reuse a tab from configuration, an example, or an earlier run. `node scripts/run.mjs elentra:kanban --tabs` lists the names. A tab stated in the prompt (for example `Tab: INTERNS Kanban AY26/27`) is the named tab; resolve it with `elentra:kanban --tab '<AS_WRITTEN>'`, which ignores case, spacing, and `_` versus space, and use the exact name that command prints from then on. When it matches no tab or several, stop and show the listed names rather than choosing one. Pass the exact name as `--tab` to every Elentra command of the run, and write it into every `--request-json` of the run as `kanbanTab`, so the publishing stage records the lesson code in that same tab.
 2. **All or one.** Ask whether to run every **Can start** row or one specific row. Show the choices with `node scripts/run.mjs elentra:kanban --tab '<TAB>'`.
    - One row: the user identifies it by its TBL/Quiz Details text (full or partial). Resolve it with `node scripts/run.mjs elentra:kanban --tab '<TAB>' --details '<TEXT>' --json`. It succeeds only for exactly one **Can start** row; otherwise show the candidates or the row's status it printed and ask.
    - All rows: take the `--json` list without `--details` and run the rows one at a time, in sheet order, each through the whole flow below. List them to the user first, then collect every row's open decisions in one message (source lesson where ambiguous, missing new titles, publishing end dates, and so on) rather than stopping at each row.
 3. **What each row supplies** (from its JSON):
    - `event_id`: download that row's Source-of-Truth with `node scripts/run.mjs elentra:download --tab '<TAB>' --event-id '<EVENT_ID>'`, unless the user supplied both documents in the prompt (see step 4). A row without an event ID has nothing to download; ask for its Source-of-Truth files or whether to skip it.
    - `session`, `module`, `date`: evidence for finding the previous-year source lesson (for example with `find:lesson`). Never infer an exact source lesson when several match; ask.
-   - `lesson_title` (the second line of TBL/Quiz Details, when present): the new lesson title. The publishing stage records the code against this exact text, so when it is absent ask the user for the title rather than composing one.
+   - `session` (the TBL/Quiz Details text of the resolved row): write it, exactly as printed, into every `--request-json` of the run as `kanbanDetails`. With `kanbanTab` it is how the publishing stage finds the row for the lesson code; the LAMS lesson title plays no part in that.
+   - `lesson_title` (the second line of TBL/Quiz Details, when present): the new lesson title when the user gave none. When both are absent, ask for the title rather than composing one.
 4. **Which Source-of-Truth the LAMS stages use.** By default, the documents just downloaded for that row. The download prints them and records them in `sot-docs/latest.json` (and per event in `sot-docs/<event id>/sources.json`), each with a `kind` of `irat` or `ae` and a repository-relative `path`. Take the entry whose `eventId` is the row's `event_id`; in an all-rows run, each row uses its own event's entry. Documents the user supplies in the prompt take precedence, per kind: a supplied iRAT document replaces the downloaded iRAT file, a supplied AE document the AE file, and the other kind still comes from the download. Wire the chosen files in as:
    - iRAT file: `irat.sourceDocx` in the request JSON, and `--sot-docx` for `extract:sot-media` when importing its images.
    - AE file: `--sot-docx` for `extract:ae-sot` and `extract:sot-media`, and `sourceDocx` in the AE JSON.
@@ -100,9 +101,11 @@ A full flow normally starts from the Kanban sheet. Use this start whenever the u
    The code is sent to the sheet automatically when the sheet credentials are configured in
    the environment. When they are not, the run prints the code for manual entry rather than
    failing, so report the code to the user in that case. `--no-publish-code` skips the send.
-   The sheet matches on the lesson title exactly as it appears in its TBL/Quiz Details
-   column, so an "Identifier not found" result means the title does not match that column,
-   not that publishing failed - the lesson still exists.
+   The code goes to the row named by `kanbanTab` and `kanbanDetails` in the request (from
+   the Kanban start above); without both it is printed for manual entry. An "Identifier not
+   found" result means that TBL/Quiz Details text is not in the tab's column G, and "matches
+   rows ..." means it is in more than one row; neither means publishing failed - the lesson
+   still exists.
 
    Report the 5-digit code and repeat the end date back when reporting the result, so the
    user can catch a wrong date before learners see it.

@@ -144,6 +144,17 @@ export interface LamsConfig {
   expectedGradebookOutput?: string;
   lessonIndex?: LessonIndexSettings;
   irat?: IratRequest;
+  /**
+   * The Kanban tab the user named for this run. The lesson code is written into this tab;
+   * no tab is ever assumed, so without it the code is reported for manual entry.
+   */
+  kanbanTab?: string;
+  /**
+   * The row's "TBL/Quiz Details" (column G) text the user identified the lesson by, e.g.
+   * "TBL Session: FOM TBL 11 ...". With kanbanTab it picks the row the code is written to;
+   * the LAMS lesson title plays no part in that.
+   */
+  kanbanDetails?: string;
   browser: {
     headless: boolean;
     userDataDir: string;
@@ -166,10 +177,15 @@ export interface LamsConfig {
    * in the ignored `configs/local.json` alongside the other environment values, and never in
    * `configs/example.json` or any tracked file. The environment variables still work and
    * take precedence, so an existing .env keeps behaving as before.
+   *
+   * `spreadsheetId` is the Kanban spreadsheet the Elentra scripts read (the id in its
+   * docs.google.com/spreadsheets/d/<id>/ URL). The webhook writes to whichever spreadsheet
+   * its Apps Script is bound to, so both must name the same spreadsheet.
    */
   sheet?: {
-    webhookUrl: string;
-    secret: string;
+    webhookUrl?: string;
+    secret?: string;
+    spreadsheetId?: string;
   };
   selectors: {
     previousCohort?: LocatorSpec;
@@ -218,7 +234,9 @@ const requestOverrideKeys = [
   'expectedGateProperties',
   'expectedGradebookOutput',
   'lessonIndex',
-  'irat'
+  'irat',
+  'kanbanTab',
+  'kanbanDetails'
 ] as const;
 
 export async function loadConfig(
@@ -292,6 +310,12 @@ export async function loadConfig(
   }
   validateIratRequest(merged.irat);
   validateSheet(merged.sheet);
+  for (const key of ['kanbanTab', 'kanbanDetails'] as const) {
+    const value = merged[key];
+    if (value !== undefined && (typeof value !== 'string' || value.trim() === '')) {
+      throw new Error(`Configuration field "${key}" must be a non-empty string.`);
+    }
+  }
 
   const config = merged as unknown as LamsConfig;
   config.browser = {
@@ -537,8 +561,9 @@ function validateExpectedGateProperties(value: unknown): void {
 function validateSheet(value: unknown): void {
   if (value === undefined) return;
   if (!isRecord(value)) throw new Error('Configuration field "sheet" must be an object.');
-  for (const key of ['webhookUrl', 'secret'] as const) {
-    if (typeof value[key] !== 'string' || String(value[key]).trim() === '') {
+  // Each part is optional: a machine may only read the Kanban (spreadsheetId) or only write to it.
+  for (const key of ['webhookUrl', 'secret', 'spreadsheetId'] as const) {
+    if (value[key] !== undefined && (typeof value[key] !== 'string' || String(value[key]).trim() === '')) {
       throw new Error(`sheet.${key} must be a non-empty string.`);
     }
   }

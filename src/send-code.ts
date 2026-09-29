@@ -5,11 +5,11 @@ import { sendCodeToSheet } from './sheets/code-sink.js';
 /**
  * Publishes a 5-digit lesson code to the Kanban sheet.
  *
- *   npm run send:code -- --code 12345
- *   npm run send:code -- --code 12345 --identifier "FOM TBL06 030926 2026Y1"
+ *   npm run send:code -- --code 12345 --tab "INTERNS_Kanban AY26/27" --details "TBL Session: FOM TBL 11 ..."
  *
- * With no --identifier the lesson title from the config is used, because that is the
- * exact string the sheet keys on in "TBL/Quiz Details" (column G).
+ * The row is the tab plus its "TBL/Quiz Details" (column G) text. Without --tab/--details
+ * the request's kanbanTab/kanbanDetails are used; both are required, since no row is
+ * assumed. --identifier is the older name for --details.
  */
 loadEnvFile();
 
@@ -17,20 +17,24 @@ async function main(): Promise<void> {
   const code = readArgument('--code');
   if (!code) throw new Error('Pass --code <5 digits>.');
 
-  let identifier = readArgument('--identifier');
-  if (!identifier) {
+  let identifier = readArgument('--details') ?? readArgument('--identifier');
+  let tab = readArgument('--tab');
+  if (!identifier || !tab) {
     const config = await loadConfig(readArgument('--config') ?? 'configs/local.json', parseRequestOverrides(readArgument('--request-json')));
-    identifier = config.lessonTitle;
+    identifier ??= config.kanbanDetails;
+    tab ??= config.kanbanTab;
   }
+  if (!tab) throw new Error('Pass --tab "<Kanban tab>" (or kanbanTab in --request-json).');
+  if (!identifier) throw new Error('Pass --details "<TBL/Quiz Details>" (or kanbanDetails in --request-json).');
 
   const dryRun = process.argv.includes('--dry-run');
   if (dryRun) {
-    console.log(`DRY RUN: would send code ${code} for "${identifier}".`);
+    console.log(`DRY RUN: would send code ${code} for "${identifier}" to the Kanban tab "${tab}".`);
     return;
   }
 
-  await sendCodeToSheet(code, identifier);
-  console.log(`Sent code ${code} for "${identifier}" to the Kanban sheet.`);
+  await sendCodeToSheet(code, identifier, tab);
+  console.log(`Sent code ${code} for "${identifier}" to the Kanban tab "${tab}".`);
 }
 
 /**
