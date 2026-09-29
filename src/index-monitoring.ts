@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   // --publish-code is still accepted and additionally demands that the sheet be configured.
   const forceCode = process.argv.includes('--publish-code');
   const publishCode = !process.argv.includes('--no-publish-code');
-  const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')));
+  const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { requireWorkspaceCourse: true });
   if (config.baseUrl.includes('replace-with-your-lams-host.example')) {
     throw new Error(`Edit ${path.resolve(configPath)} and set the real LAMS baseUrl before running the index workflow.`);
   }

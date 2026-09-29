@@ -44,6 +44,22 @@ test('uses the shared iLAMS URL when baseUrl is omitted', async () => {
   }
 });
 
+test('Authoring accepts no workspace course while publishing and monitoring require it', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-config-'));
+  try {
+    const configPath = path.join(directory, 'config.json');
+    const example = JSON.parse(await readFile('configs/example.json', 'utf8')) as Record<string, unknown>;
+    delete example.workspaceCourse;
+    await writeFile(configPath, JSON.stringify(example), 'utf8');
+    expect((await loadConfig(configPath)).workspaceCourse).toBeUndefined();
+    await expect(loadConfig(configPath, {}, { requireWorkspaceCourse: true })).rejects.toThrow('require a non-empty workspaceCourse');
+    await expect(loadConfig(configPath, { workspaceCourse: '   ' }, { requireWorkspaceCourse: true })).rejects.toThrow('require a non-empty workspaceCourse');
+    await expect(loadConfig(configPath, { workspaceCourse: 'Publishing course' }, { requireWorkspaceCourse: true })).resolves.toMatchObject({ workspaceCourse: 'Publishing course' });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects attempts to override stable environment fields per run', () => {
   expect(() => parseRequestOverrides(JSON.stringify({ baseUrl: 'https://example.invalid' }))).toThrow(
     'cannot override stable environment fields'

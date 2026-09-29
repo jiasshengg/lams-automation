@@ -123,7 +123,7 @@ export interface IratRequest {
 
 export interface LamsConfig {
   baseUrl: string;
-  workspaceCourse: string;
+  workspaceCourse?: string;
   previousCohort: string;
   currentCohort: string;
   module: string;
@@ -188,7 +188,6 @@ export interface LamsConfig {
 
 const requiredStrings = [
   'baseUrl',
-  'workspaceCourse',
   'previousCohort',
   'currentCohort',
   'module',
@@ -224,7 +223,7 @@ const requestOverrideKeys = [
 export async function loadConfig(
   configPath: string,
   overrides: Partial<LamsConfig> = {},
-  options: { defaultDestinationToSource?: boolean } = {}
+  options: { defaultDestinationToSource?: boolean; requireWorkspaceCourse?: boolean } = {}
 ): Promise<LamsConfig> {
   const absolutePath = await resolveInputFile(configPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
@@ -244,6 +243,11 @@ export async function loadConfig(
     if (Array.isArray(merged.destinationFolderPath)) merged.destinationFolder = merged.destinationFolderPath.join('/');
   } else if (options.defaultDestinationToSource && Array.isArray(merged.destinationFolderPath)) {
     merged.destinationFolder = merged.destinationFolderPath.join('/');
+  }
+
+  if (options.requireWorkspaceCourse) requireWorkspaceCourse(merged);
+  if (merged.workspaceCourse !== undefined && typeof merged.workspaceCourse !== 'string') {
+    throw new Error('Configuration field "workspaceCourse" must be a string when supplied.');
   }
 
   for (const key of requiredStrings) {
@@ -592,4 +596,11 @@ function validateLocatorSpecs(selectors: LamsConfig['selectors']): void {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Course context is required only for publishing and monitoring. */
+export function requireWorkspaceCourse<T extends { workspaceCourse?: unknown }>(config: T): asserts config is T & { workspaceCourse: string } {
+  if (typeof config.workspaceCourse !== 'string' || !config.workspaceCourse.trim()) {
+    throw new Error('Publishing and monitoring require a non-empty workspaceCourse. Authoring does not require a course.');
+  }
 }
