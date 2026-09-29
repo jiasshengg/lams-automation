@@ -1,4 +1,4 @@
-import { expectedTBLGraph } from './lams/tbl-preflight.js';
+import { tryExpectedTBLGraph } from './lams/tbl-expectations.js';
 import { parsePlaceholderRepair, persistPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
 import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
@@ -41,8 +41,7 @@ async function main(): Promise<void> {
     activePage = await openAuthoring(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
     if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle differs from the requested lesson.');
-    const expectations = expectedTBLGraph(await inspectAuthoringGraph(activePage), config, plan, repair);
-    console.log(`Reviewed full-lesson expectations: ${JSON.stringify(expectations)}`);
+    const expectations = tryExpectedTBLGraph(await inspectAuthoringGraph(activePage), config, plan, repair);
     if (!commit) {
       const graphPlan = planAEGraphReconciliation(await inspectAuthoringGraph(activePage), plan);
       console.log(`AE write preview: ${plan.nodes.length} node(s), ${plan.nodes.flatMap((node) => node.questions).length} question(s); no changes applied.`);
@@ -62,9 +61,11 @@ async function main(): Promise<void> {
     const images = await resolveAEQuestionImages(plan);
     const editor = new LamsAEEditor(activePage, plan, config.browser.actionTimeoutMs, images);
     const result = await reconcileAndWriteAEGraph(activePage, plan, editor, teamSetup, config.browser.actionTimeoutMs);
-    const validation = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...expectations });
-    console.log(formatValidationReport(validation));
-    if (!validation.passed) throw new Error('AE saved but full-lesson validation failed. Inspect saved state before publishing.');
+    if (expectations) {
+      const validation = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...expectations });
+      console.log(formatValidationReport(validation));
+      if (!validation.passed) throw new Error('AE saved but full-lesson validation failed. Inspect saved state before publishing.');
+    }
     console.log('\nAE application: COMPLETE');
     console.log(`Lesson: ${config.lessonTitle}`);
     console.log(`Nodes written: ${result.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);

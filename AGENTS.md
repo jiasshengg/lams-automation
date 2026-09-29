@@ -16,11 +16,15 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
   A request for the full/end-to-end/complete TBL flow, or for the lesson to be deployed,
   published, or made ready for the cohort, is such an explicit request and includes the
   publishing stage. A request to author, copy, fix, or update a lesson is not.
-- Publishing runs as its own stage after AE, through `lesson:index` with `--commit`; it is
-  never code inside an authoring entry point. Before publishing, obtain `lessonIndex.endDate`
+- Publishing is the stage after AE. For the full flow it runs in the same browser as authoring
+  through `run:tbl --publish`, which publishes only after AE is saved and validated and only the
+  design that run just saved. `lesson:index --commit` remains the standalone way to publish an
+  already-authored lesson. Never pass `--publish` on a request that only asks to author, copy,
+  fix, or update a lesson. Before publishing, obtain `lessonIndex.endDate`
   from the user for that specific lesson. Never default it, and never inherit it from a
   configuration file, an example, or a previous run. Because that value can only come from
-  the user, publishing can never happen without their involvement.
+  the user, publishing can never happen without their involvement; `--publish` refuses to start
+  without it, before anything is copied.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.
 
 ## Current implementation scope

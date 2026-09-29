@@ -56,7 +56,7 @@ test('transcribes node titles, case context, and answer keys into a reviewable d
   ]);
 });
 
-test('the draft preflights without edits when the Source-of-Truth is unambiguous', () => {
+test('the draft builds a plan without edits when the Source-of-Truth is unambiguous', () => {
   const plan = buildAEPlan(buildAEDraft(sot()));
   expect(plan.requiredAENodes).toBe(2);
   expect(plan.nodes[0]!.questions[0]!.promptHtml).toContain('<strong><u>Case 1: A Patient');

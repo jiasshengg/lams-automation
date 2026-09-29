@@ -12,11 +12,11 @@ export function resolveCommand(args) {
   const scripts = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).scripts;
   const command = scripts[operation];
   if (typeof command !== 'string' || !/^(tsx src\/[\w-]+\.ts|node scripts\/setup\/login\.mjs)( --[\w-]+)?$/.test(command)) {
-    throw new Error('Choose a LAMS operation from package.json, e.g. run:tbl, preflight:tbl, apply:irat, login:check.');
+    throw new Error('Choose a LAMS operation from package.json, e.g. run:tbl, apply:irat, login:check.');
   }
   let logFile;
   const forwarded = [];
-  const flags = new Set(['--commit', '--dry-run', '--validate', '--source', '--json', '--keep-open', '--skip-sot-check', '--monitor-only', '--no-publish-code', '--publish-code', '--check-only', '--resume-trat-sync', '--preflight-only', '--monitor']);
+  const flags = new Set(['--commit', '--dry-run', '--validate', '--source', '--json', '--keep-open', '--skip-sot-check', '--monitor-only', '--no-publish-code', '--publish-code', '--check-only', '--resume-trat-sync', '--monitor', '--publish']);
   const values = new Set(['--config', '--request-json', '--ae-json', '--repair-json', '--team-setup', '--slow-mo', '--query', '--exact-title', '--roots', '--max-expansions', '--node', '--dump-question', '--sot-docx', '--out', '--draft', '--expect-design', '--checkpoint', '--batch-size', '--question-batch-size', '--lesson', '--manifest', '--out-dir', '--title', '--gate', '--rotation-seconds', '--code', '--identifier', '--repair-question']);
   for (let i = 0; i < input.length; i++) {
     const arg = input[i];

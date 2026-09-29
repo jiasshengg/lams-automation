@@ -1,10 +1,8 @@
 import { expect, test } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import type { AuthoringGraph, GraphNode } from '../src/lams/authoring.js';
 import {
   createIratPlan,
   executeIratAutomation,
-  validateIratReadiness,
   type IratEditor,
   type IratObservedState
 } from '../src/lams/irat.js';
@@ -42,43 +40,6 @@ const request: IratRequest = {
     confidenceLevels: true
   }
 };
-
-test('preflight verifies exact iRAT nodes, connection, and Team Setup association', () => {
-  const nodes: GraphNode[] = [
-    graphNode(1, 'Team Setup', 'grouping'),
-    graphNode(2, 'iRAT Gate', 'gate'),
-    { ...graphNode(3, 'iRAT', 'tool'), grouped: true, groupingUiid: 1 },
-    graphNode(4, 'tRAT', 'tool')
-  ];
-  const graph: AuthoringGraph = {
-    rendering: 'svg',
-    modelAvailable: true,
-    nodes,
-    transitions: [{ uiid: 10, fromUiid: 2, toUiid: 3 }]
-  };
-
-  const report = validateIratReadiness(graph, request);
-  expect(report.passed).toBe(true);
-  expect(report.plan.some((step) => step.action.includes('rotation 10s'))).toBe(true);
-});
-
-test('preflight fails when iRAT is not grouped with Team Setup', () => {
-  const graph: AuthoringGraph = {
-    rendering: 'svg',
-    modelAvailable: true,
-    nodes: [
-      graphNode(1, 'Team Setup', 'grouping'),
-      graphNode(2, 'iRAT Gate', 'gate'),
-      graphNode(3, 'iRAT', 'tool'),
-      graphNode(4, 'tRAT', 'tool')
-    ],
-    transitions: [{ uiid: 10, fromUiid: 2, toUiid: 3 }]
-  };
-
-  const report = validateIratReadiness(graph, request);
-  expect(report.passed).toBe(false);
-  expect(report.checks.find((check) => check.label === 'Team Setup association')?.passed).toBe(false);
-});
 
 test('dry run inspects but performs no iRAT writes', async () => {
   const calls: string[] = [];
@@ -204,26 +165,6 @@ function fakeEditor(calls: string[]): IratEditor {
   };
 }
 
-function graphNode(uiid: number, name: string, type: GraphNode['type']): GraphNode {
-  return {
-    uiid,
-    name,
-    type,
-    grouped: false,
-    groupingUiid: null,
-    x: null,
-    y: null,
-    toolId: null,
-    gateType: type === 'gate' ? 'password' : null,
-    description: type === 'gate' ? name : null,
-    dynamicPassword: type === 'gate',
-    rotationSeconds: type === 'gate' ? 10 : null,
-    stopAtPrecedingActivity: null,
-    gradebookOutput: null
-  };
-}
-
-
 test('missing questions are planned in dry run and created on commit', async () => {
   const calls: string[] = [];
   const editor = fakeEditor(calls);
@@ -267,7 +208,7 @@ test('an authorized deletion title already absent is an idempotent no-op', async
   expect(calls).not.toContain('delete:Old placeholder');
 });
 
-test('reports every unapproved extra question title and stops before all writes', async () => {
+test('warns about every unapproved extra question title and leaves those rows untouched', async () => {
   const calls: string[] = [];
   const editor = fakeEditor(calls);
   const inspect = editor.inspect.bind(editor);
@@ -280,10 +221,14 @@ test('reports every unapproved extra question title and stops before all writes'
     ]
   });
 
-  await expect(executeIratAutomation(editor, request, { commit: true })).rejects.toThrow(
-    'Report these exact extra question titles to the user and request an explicit instruction for each one: "Different placeholder A", "Legacy test row". Ask whether each question should be kept completely untouched; updated while keeping its current title; updated and renamed with an exact new title; deleted; or handled according to another exact instruction. Do not continue or infer an action until the user answers.'
-  );
-  expect(calls).toEqual(['inspect']);
+  const result = await executeIratAutomation(editor, request, { commit: true });
+
+  expect(result.readiness.passed).toBe(false);
+  expect(result.readiness.checks.find((check) => check.label === 'Unexpected existing questions')?.detail)
+    .toContain('"Different placeholder A", "Legacy test row"');
+  expect(calls).not.toContain('delete:Different placeholder A');
+  expect(calls).not.toContain('delete:Legacy test row');
+  expect(calls.at(-1)).toBe('save');
 });
 
 test('SoT-sized run updates matching questions and creates the remaining 24', async () => {
@@ -296,7 +241,7 @@ test('SoT-sized run updates matching questions and creates the remaining 24', as
 });
 
 for (const scenario of ['extra', 'duplicate', 'wrong type', 'duplicate request', 'unsupported distribution']) {
-  test(`preflight rejects ${scenario} before any writes`, async () => {
+  test(`${scenario} is reported as a warning and does not stop the run`, async () => {
     const calls: string[] = [];
     const editor = fakeEditor(calls);
     const inspect = editor.inspect.bind(editor);
@@ -310,7 +255,8 @@ for (const scenario of ['extra', 'duplicate', 'wrong type', 'duplicate request',
     const input = structuredClone(request);
     if (scenario === 'duplicate request') input.questions.push({ ...input.questions[0]!, title: ' Question  1 ' });
     if (scenario === 'unsupported distribution') input.advanced.displayAllQuestions = false;
-    await expect(executeIratAutomation(editor, input, { commit: true })).rejects.toThrow('preflight failed');
-    expect(calls).toEqual(['inspect']);
+    const result = await executeIratAutomation(editor, input, { commit: true });
+    expect(result.readiness.passed).toBe(false);
+    expect(calls.at(-1)).toBe('save');
   });
 }

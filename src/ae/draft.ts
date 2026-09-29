@@ -75,7 +75,7 @@ export function buildAEDraft(
         }));
       }
       if (draft.options && !draft.options.some((option) => option.correct)) {
-        draft.TODO_answerKey = 'No answer key was detected in the Source-of-Truth; mark the correct option before preflight.';
+        draft.TODO_answerKey = 'No answer key was detected in the Source-of-Truth; mark the correct option before writing.';
       }
       return draft;
     })

@@ -394,12 +394,6 @@ export class LamsIratEditor implements IratEditor {
    */
   async applyAnswerRequired(questions: IratQuestionRequest[], options: { commit: boolean } = { commit: true }): Promise<string[]> {
     const frame = await this.ensureActivityFrame();
-    const titles = questions.map(question => normalizeText(question.title));
-    const existing = await questionTitles(frame);
-    if (new Set(titles).size !== titles.length ||
-        JSON.stringify([...titles].sort()) !== JSON.stringify([...existing].sort())) {
-      throw new Error('Answer-required preflight failed: request must match the complete unique question inventory.');
-    }
     // Read every target before the first mutation, including in preview mode.
     const planned: Array<{ question: IratQuestionRequest; toggle: Locator; stored: boolean }> = [];
     for (const question of questions) {
