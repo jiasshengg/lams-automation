@@ -33,6 +33,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
   per kind (iRAT or AE). Write their concrete paths into requests and AE plans. The Elentra scripts never
   delete or edit existing Elentra resources and never edit the Kanban sheet; downloading QA
   files is read-only in Elentra.
+- Library lesson-title and folder-name matching ignores case and all whitespace (including missing spaces), while preserving letters, numbers, and punctuation. Use discovered saved names in plans and preserve requested new-title spelling. Stop on ambiguous matches; never resolve them by position.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.
 
 ## Current implementation scope
