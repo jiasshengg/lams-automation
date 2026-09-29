@@ -502,14 +502,14 @@ test('required-only dry run reports a difference without sending a toggle reques
   await expect(page.getByRole('button', { name: 'Answer required', exact: true })).toHaveClass('text-danger');
 });
 
-test('required-only preflight rejects a missing later question before toggling the first', async ({ page }) => {
+test('answer-required reads every row first, so a missing later question stops before toggling the first', async ({ page }) => {
   const editor = await fixture(page, true);
   const requests: string[] = [];
   page.on('request', request => {
     if (request.url().includes('toggleQuestionRequired.do')) requests.push(request.url());
   });
   const question = { ...request.questions[0]!, title: 'Question 1', mandatory: false };
-  await expect(editor.applyAnswerRequired([question, { ...question, title: 'Missing' }])).rejects.toThrow('preflight failed');
+  await expect(editor.applyAnswerRequired([question, { ...question, title: 'Missing' }])).rejects.toThrow();
   expect(requests).toEqual([]);
 });
 

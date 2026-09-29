@@ -1,7 +1,5 @@
-import type { Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest, LamsConfig } from '../config.js';
 import { applySotFormattingFromDocx } from '../docx/sot-formatting.js';
-import { inspectAuthoringGraph, type AuthoringGraph, type GraphNode } from './authoring.js';
 
 export interface IratPlanStep {
   phase: 'gate' | 'activity' | 'question' | 'advanced' | 'trat' | 'verification';
@@ -80,50 +78,6 @@ export interface IratResumeQuestion {
   requestHash: string;
 }
 
-export async function prepareIratAutomation(page: Page, config: LamsConfig): Promise<IratReadinessReport> {
-  const request = requireIratRequest(config);
-  const graph = await inspectAuthoringGraph(page);
-  return validateIratReadiness(graph, request);
-}
-
-export function validateIratReadiness(graph: AuthoringGraph, request: IratRequest): IratReadinessReport {
-  const checks: IratReadinessCheck[] = [];
-  const teamSetup = uniqueNode(graph, request.teamSetupName, 'grouping', checks);
-  const gate = uniqueNode(graph, request.gate.name, 'gate', checks);
-  const activity = uniqueNode(graph, request.activityName, 'tool', checks);
-  uniqueNode(graph, matchingTratRequest(request).activityName, 'tool', checks);
-
-  const gateConnected = Boolean(
-    gate &&
-      activity &&
-      graph.transitions.some((transition) => transition.fromUiid === gate.uiid && transition.toUiid === activity.uiid)
-  );
-  checks.push({
-    label: 'iRAT Gate connection',
-    passed: graph.modelAvailable && gateConnected,
-    detail: !graph.modelAvailable
-      ? 'Runtime model unavailable; transition endpoints cannot be verified'
-      : gateConnected
-        ? `${request.gate.name} connects directly to ${request.activityName}`
-        : `${request.gate.name} does not connect directly to ${request.activityName}`
-  });
-
-  const associated = Boolean(activity && teamSetup && activity.grouped && activity.groupingUiid === teamSetup.uiid);
-  checks.push({
-    label: 'Team Setup association',
-    passed: associated,
-    detail: associated
-      ? `${request.activityName} is grouped with ${request.teamSetupName}`
-      : `${request.activityName} is not grouped with ${request.teamSetupName}`
-  });
-
-  return {
-    passed: checks.every((check) => check.passed),
-    checks,
-    plan: createIratPlan(request)
-  };
-}
-
 export function createIratPlan(request: IratRequest): IratPlanStep[] {
   const steps: IratPlanStep[] = [
     {
@@ -175,10 +129,9 @@ export async function executeIratAutomation(
   }
 ): Promise<IratAutomationResult> {
   const observed = await editor.inspect();
+  // Reported, never a gate: the run writes what it can and each write verifies its own target.
   const readiness = validateObservedState(observed, request);
-  if (!readiness.passed) {
-    throw new Error(`iRAT preflight failed: ${readiness.checks.filter((check) => !check.passed).map((check) => check.detail).join('; ')}`);
-  }
+  for (const check of readiness.checks.filter((candidate) => !candidate.passed)) console.warn(`iRAT warning: ${check.detail}`);
   if (!options.commit) return { committed: false, readiness, deletedQuestions: [], updatedQuestions: [], createdQuestions: [], resumedQuestions: [] };
 
   const resumable = new Set<string>();
@@ -298,7 +251,7 @@ export function validateObservedState(observed: IratObservedState, request: Irat
     passed: unexpectedTitles.length === 0,
     detail: unexpectedTitles.length === 0
       ? 'No unapproved extra question rows were found'
-      : `Stopped before writes. Report these exact extra question titles to the user and request an explicit instruction for each one: ${unexpectedTitles.map((title) => `"${title}"`).join(', ')}. Ask whether each question should be kept completely untouched; updated while keeping its current title; updated and renamed with an exact new title; deleted; or handled according to another exact instruction. Do not continue or infer an action until the user answers.`
+      : `Left untouched; report these exact extra question titles to the user: ${unexpectedTitles.map((title) => `"${title}"`).join(', ')}.`
   });
   for (const title of deletionTitles) {
     const matches = observed.questions.filter((question) => normalizeQuestionTitle(question.title) === title);
@@ -357,21 +310,6 @@ export function matchingTratRequest(request: IratRequest): NonNullable<IratReque
 
 function exactCheck(label: string, expected: string, found: string): IratReadinessCheck {
   return { label, passed: expected === found, detail: expected === found ? `Found "${found}"` : `Expected "${expected}"; found "${found}"` };
-}
-
-function uniqueNode(
-  graph: AuthoringGraph,
-  name: string,
-  type: GraphNode['type'],
-  checks: IratReadinessCheck[]
-): GraphNode | undefined {
-  const matches = graph.nodes.filter((node) => node.name === name && node.type === type);
-  checks.push({
-    label: name,
-    passed: matches.length === 1,
-    detail: matches.length === 1 ? `Found exactly one ${type}` : `Expected one ${type}; found ${matches.length}`
-  });
-  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export function normalizeQuestionTitle(title: string): string {

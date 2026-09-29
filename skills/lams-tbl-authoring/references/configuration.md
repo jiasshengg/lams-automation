@@ -46,7 +46,7 @@ Use `sourceFolderPath` for the exact folder containing the existing lesson, `sou
 
 `expectedFlow` contains the exact node names in their expected linear order. Do not populate it from the observed graph merely to make validation pass.
 
-`expectedAENodes` and `expectedAEGates` are reviewed expectations. When an AE SOT DOCX is available, derive the initial values with `node scripts/run.mjs extract:ae-sot --sot-docx '<PATH>'`; the command returns them under `requestVariables`. Confirm the break markers before browser use. These extracted counts cover the SoT AE chain only. Use preflight:tbl to combine that chain with the reviewed template prefix; retained AE entrance gates increase the whole-lesson gate expectation. Do not copy SoT gate counts blindly into whole-lesson validation.
+`expectedAENodes` and `expectedAEGates` are reviewed expectations. When an AE SOT DOCX is available, derive the initial values with `node scripts/run.mjs extract:ae-sot --sot-docx '<PATH>'`; the command returns them under `requestVariables`. Confirm the break markers before browser use. These extracted counts cover the SoT AE chain only. `run:tbl` combines that chain with the reviewed template prefix; retained AE entrance gates increase the whole-lesson gate expectation. Do not copy SoT gate counts blindly into whole-lesson validation.
 
 Use `expectedGateProperties` for exact gate requirements:
 
@@ -127,7 +127,7 @@ Run `node scripts/run.mjs extract:ae-sot --sot-docx '<PATH>' [--out '<JSON_PATH>
 
 Do not use page boundaries as separators. Case headings are not separators either, but they do name the nodes. Rationales are not carried into executable AE JSON.
 
-`--draft` additionally writes a reviewable AE plan JSON transcribed from the document: node titles, case context, stems and options with their emphasis, detected answer keys, explicit marks, and gates. Hand transcription is where titles, emphasis, and figure order drift from the Source-of-Truth, so always generate the draft; never retype it. It is still a draft: resolve every `_review` note and `TODO_` key before `plan:ae` or `apply:ae`.
+`--draft` additionally writes a reviewable AE plan JSON transcribed from the document: node titles, case context, stems and options with their emphasis, detected answer keys, explicit marks, and gates. Hand transcription is where titles, emphasis, and figure order drift from the Source-of-Truth, so always generate the draft; never retype it. It is still a draft: resolve every `_review` note and `TODO_` key before `apply:ae` or `run:tbl`.
 
 ## AE layout follows the Source-of-Truth
 
@@ -141,7 +141,7 @@ Prompts follow the document's layout while the paragraph format (Normal) and fon
 
 ## Source-of-Truth check
 
-`plan:ae`, `apply:ae`, and `run:tbl` re-read `sourceDocx`, rebuild the plan the document produces, and stop before opening the browser when node count, node titles, question placement, question types, prompts, or option text differ. Answer keys, marks, and weights are not compared. An AE JSON without `sourceDocx` is refused. `--skip-sot-check` bypasses the check for a difference the user has confirmed is intentional.
+`apply:ae` and `run:tbl` re-read `sourceDocx`, rebuild the plan the document produces, and stop before opening the browser when node count, node titles, question placement, question types, prompts, or option text differ. Answer keys, marks, and weights are not compared. An AE JSON without `sourceDocx` is refused. `--skip-sot-check` bypasses the check for a difference the user has confirmed is intentional.
 
 ## AE node title convention
 
@@ -152,7 +152,7 @@ Prompts follow the document's layout while the paragraph format (Normal) and fon
 
 Suggested titles are still not authority for existing LAMS nodes; confirm them against the graph.
 
-## Structured AE preflight input
+## Structured AE input
 
 Pass the local path separately with `--ae-json`; do not merge AE question content into `--request-json`. Use `configs/ae-example.json` as the schema example. Required fields are:
 
@@ -161,7 +161,7 @@ Pass the local path separately with `--ae-json`; do not merge AE question conten
 - `mcq` or `essay` question type, prompt text, and MCQ options with one or more `correct: true` values;
 - exact gate title, adjacent node titles, and the first question number after each gate. A gate is named `AE Gate ` followed by the title of the node after it (`AE Gate AE Case 3 Q3-6`); its description repeats the title. That naming covers the gate the template already supplies in front of the AE chain: `apply:ae` renames it after the first AE node instead of leaving the template's own title, and it is renamed in place, never recreated. `gates` still lists only the gates the breaks create, so the counts are unchanged.
 
-Nodes carry no description by default: AE activities are identified by their title alone, and `apply:ae` clears any description the copied lesson left behind. Supply an optional `description` only when the Source-of-Truth calls for one. MCQ options may supply `weight` percentages. When a question has more than one correct option and no explicit weights, the root `multipleAnswerCredit` decides the credit: `"split"` shares 100% equally (50/50 for two), `"full"` gives every correct option 100%. It has no default: ask the user which they want, and `plan:ae` refuses a multiple-answer question until it is set. If any correct weight is explicit, every correct option needs a positive weight and those weights must total 100. Incorrect options have zero weight. More than one correct option enables LAMS's multiple-answer mode. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
+Nodes carry no description by default: AE activities are identified by their title alone, and `apply:ae` clears any description the copied lesson left behind. Supply an optional `description` only when the Source-of-Truth calls for one. MCQ options may supply `weight` percentages. When a question has more than one correct option and no explicit weights, the root `multipleAnswerCredit` decides the credit: `"split"` shares 100% equally (50/50 for two), `"full"` gives every correct option 100%. It has no default: ask the user which they want, and `apply:ae`/`run:tbl` refuse a multiple-answer question until it is set. If any correct weight is explicit, every correct option needs a positive weight and those weights must total 100. Incorrect options have zero weight. More than one correct option enables LAMS's multiple-answer mode. MCQ questions always have the sequential answer-letter prefix enabled and essays always have it disabled; neither is configurable. Optional AE media fields are `sourceDocx` at the document root, `sourceQuestionNumber` and `images` on each question, and optional question `title` (default `Question N`). Embedded images are assigned by source question number and uploaded into the active LAMS Assessment content folder during `apply:ae` or `run:tbl`.
 
 Each image records where the document printed it. A figure that follows the stem is written below it; a figure printed under a Case heading before the stem belongs to the question that follows and is written above it. The caption line directly under a figure is imported with it and rendered below the image, keeping its emphasis. A source link printed directly under a figure (a bare web address or a Word hyperlink) is its caption too and is written as a clickable link; a hyperlink whose visible text is not its address gets the address appended. Explicit `images` entries accept `placement` (`before` or `after`, default `after`) and `caption`. Print View verification fails when an imported image or its caption is missing.
 
@@ -189,20 +189,31 @@ When a copy destination is omitted, save in the resolved source lesson folder wi
 
 ## Kanban sheet endpoint
 
-Recording the lesson code completes the publishing stage. Its endpoint and shared secret are
-stable per machine, so they live in the ignored `configs/local.json`:
+Recording the lesson code completes the publishing stage. The Kanban spreadsheet, its
+endpoint, and the shared secret are stable per machine, so they live in the ignored
+`configs/local.json`:
 
 ```json
 {
   "sheet": {
+    "spreadsheetId": "<the id in the sheet's /spreadsheets/d/<id>/ URL>",
     "webhookUrl": "<the Apps Script /exec URL>",
     "secret": "<the shared secret>"
   }
 }
 ```
 
-`LAMS_SHEET_WEBHOOK_URL` and `LAMS_SHEET_SECRET` still work and take precedence over the
-file. `sheet` is deliberately not a `--request-json` field, so a secret never travels
+`spreadsheetId` is the sheet the Elentra scripts read; the webhook writes to the spreadsheet
+its Apps Script is bound to, so both must be the same spreadsheet. See `apps-script/README.md`
+for setting up a new sheet.
+
+The row is per run: pass the tab the user named as `kanbanTab` (the exact name the Kanban
+`--tab` resolved to) and the row's TBL/Quiz Details text as `kanbanDetails` in
+`--request-json`. Without both the code is printed for manual entry, never written to an
+assumed row. The lesson title is not used to find the row.
+
+`LAMS_SHEET_WEBHOOK_URL`, `LAMS_SHEET_SECRET`, and `KANBAN_SHEET_ID` still work and take
+precedence over the file. `sheet` is deliberately not a `--request-json` field, so a secret never travels
 through a shell command line. Never write these values into `configs/example.json` or any
 other tracked file; `configs/local.json` is ignored by Git and is the only place for them.
 When they are absent the publishing stage prints the lesson code for manual entry instead of

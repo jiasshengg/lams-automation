@@ -1,8 +1,8 @@
 /**
  * Publishes a lesson's 5-digit code to the Google Apps Script Web App that writes it
- * back into the Kanban sheet. The sheet matches on "TBL/Quiz Details" (column G), which
- * is the same string this automation already carries as `config.lessonTitle`
- * (for example "FOM TBL06 030926 2026Y1"), so that is what we send as `identifier`.
+ * back into the Kanban sheet. The row is the one the user named for the run: `tab` is its
+ * Kanban tab and `identifier` its "TBL/Quiz Details" (column G) text, for example
+ * "TBL Session: FOM TBL 11 ...". The script itself is kept in apps-script/kanban-code-sink.gs.
  *
  * The endpoint and the shared secret are read from the environment, never from
  * configuration, so the secret is not committed alongside the LAMS settings.
@@ -41,6 +41,13 @@ export function assertLessonCode(code: string): string {
 export function assertIdentifier(identifier: string): string {
   const trimmed = identifier.trim();
   if (trimmed.length === 0) throw new Error('Sheet identifier (TBL/Quiz Details) must not be empty.');
+  return trimmed;
+}
+
+/** The tab must be named by the user for the run; the script never picks one. */
+export function assertTab(tab: string | undefined): string {
+  const trimmed = (tab ?? '').trim();
+  if (trimmed.length === 0) throw new Error('Name the Kanban tab to write the code into.');
   return trimmed;
 }
 
@@ -133,7 +140,7 @@ function decodeEntities(text: string): string {
 class SheetRejection extends Error {}
 
 /**
- * POSTs `{ code, identifier, secret }` and fails loudly unless the Apps Script answers
+ * POSTs `{ code, identifier, tab, secret }` and fails loudly unless the Apps Script answers
  * `{"status":"ok"}`. Apps Script answers 302 to its own googleusercontent host on success,
  * which the global fetch follows by default; a non-2xx or unreadable body is treated as a
  * failure rather than silently accepted.
@@ -145,10 +152,12 @@ class SheetRejection extends Error {}
 export async function sendCodeToSheet(
   code: string,
   identifier: string,
+  tab: string,
   options: CodeSinkOptions = {}
 ): Promise<CodeSinkResult> {
   const validCode = assertLessonCode(code);
   const validIdentifier = assertIdentifier(identifier);
+  const validTab = assertTab(tab);
   const { url, secret } = resolveSinkEndpoint(options);
   const fetchImpl = options.fetchImpl ?? fetch;
   const attempts = Math.max(1, options.attempts ?? 3);
@@ -160,7 +169,7 @@ export async function sendCodeToSheet(
       const response = await fetchImpl(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: validCode, identifier: validIdentifier, secret }),
+        body: JSON.stringify({ code: validCode, identifier: validIdentifier, tab: validTab, secret }),
         signal: AbortSignal.timeout(timeoutMs)
       });
 

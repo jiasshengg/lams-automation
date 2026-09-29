@@ -54,10 +54,6 @@ It does not cover branching/merging topology or automatic correction.
 
 `node scripts/run.mjs extract:ae-sot --sot-docx '<SOT_DOCX_PATH>' [--out '<ANALYSIS_JSON_PATH>'] [--json]` is local and non-mutating. It derives the AE node/gate counts from standalone break markers, groups sequential questions, stops at `END`, and emits the `requestVariables` needed by graph validation. Review all warnings and confirm exact node/gate titles before opening LAMS; this output is evidence for preparing reviewed AE JSON, not permission to create or restructure nodes.
 
-## AE preflight
-
-`node scripts/run.mjs plan:ae --ae-json '<AE_JSON_PATH>'` is local and non-mutating. It validates break-derived node/gate counts, question numbering, marks, single- or multiple-answer MCQ correctness and weights, gate adjacency, and SoT-supported attempts/passing-mark overrides. It also emits normalized question HTML/options and the canonical activity settings when called with `--json`.
-
 ## AE settings inspection
 
 `node scripts/run.mjs inspect:ae --config configs/local.json --ae-json '<AE_JSON_PATH>' --node '<EXACT_AE_NODE_TITLE>' --request-json '<REQUEST_JSON>'` is read-only. It verifies the exact lesson, AE graph, and exact node before opening the activity and checking all required checkbox labels. It rejects `--commit` and never clicks the activity Save control.
@@ -85,17 +81,13 @@ Set `sourceDocx` in reviewed iRAT or AE input to import all images assigned to e
 
 The reconciler removes an exact direct transition that bypasses a planned gate, replaces an exact planned gate whose verified type/settings are wrong, and then creates the reviewed linear transitions. It renames the one gate in front of the AE chain after the first AE node, so every AE gate carries the title of the node it leads into; it refuses to rename that gate if it is not a permission gate. It finishes by pressing LAMS's own Arrange button, so the saved canvas reads as the reference sequence does - one column of activities with each gate beside the gap it bridges - rather than wherever each node was dropped. It does not delete extra questions, infer that unrelated nodes are extra, or resolve ambiguous/non-gate title conflicts destructively.
 
-## iRAT preflight
-
-`node scripts/run.mjs prepare:irat --config configs/local.json --request-json '<REQUEST_JSON>'` opens the exact copied lesson and verifies the existing Team Setup, iRAT Gate, iRAT node, gate-to-iRAT connection, and Team Setup association. It prints the configured gate, question, advanced-setting, Print View, and save plan. It never applies those changes and rejects `--commit`.
-
 ## Continuous copy and iRAT
 
 `node scripts/run.mjs run:tbl-irat --config configs/local.json --request-json '<REQUEST_JSON>'` keeps one Playwright context open for the full operation. It opens the global Authoring library, copies the exact source lesson, updates the iRAT Gate, Team Setup association, multiple-choice questions and answer weights, mandatory flags, advanced settings, Print View, and saves the tool and copied design.
 
 The command requires resolved copy targets and the structured `irat` request. It saves by default. `--dry-run` previews the copy and stops before iRAT editing. It stops on unsupported question/distribution types and saves diagnostics on failure. It only removes explicitly authorized question references and exact reviewed AE placeholders; it never publishes or starts a lesson.
 
-Pass `--ae-json '<AE_JSON>'` or use the `run:tbl` alias to continue in the same browser context through AE writing and verified graph reconciliation after iRAT is saved.
+Pass `--ae-json '<AE_JSON>'` or use the `run:tbl` alias to continue in the same browser context and Author window through AE writing and verified graph reconciliation after iRAT is saved. There is no separate preflight before copying; this is the only command a new copy + iRAT + AE lesson needs. Add `--publish` (with `lessonIndex.endDate` in the request) only when the user asked for the full flow or for publishing: the same browser then publishes the design the run just saved and records its 5-digit Kanban code.
 
 ## Failures
 

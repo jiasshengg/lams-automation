@@ -12,7 +12,7 @@ Use `lams-tbl-authoring` for the overall supported authoring flow. Focused skill
 | [lams-lesson-management](skills/lams-lesson-management/SKILL.md) | Locate, copy, or rename a lesson |
 | [lams-irat-editing](skills/lams-irat-editing/SKILL.md) | Inspect or update existing iRAT content and settings |
 | [lams-gate-settings](skills/lams-gate-settings/SKILL.md) | Change one dynamic-password gate's rotation interval |
-| [lams-ae-preparation](skills/lams-ae-preparation/SKILL.md) | Extract AE SoT/media, preflight data, inspect settings, or write/reconcile AE |
+| [lams-ae-preparation](skills/lams-ae-preparation/SKILL.md) | Extract AE SoT/media, inspect settings, or write/reconcile AE |
 | [lams-authoring-validation](skills/lams-authoring-validation/SKILL.md) | Check nodes, connections, grouping, and gate expectations |
 | [lams-elentra-resources](skills/lams-elentra-resources/SKILL.md) | Download a lesson's iRA/AE QA files from Elentra, add its LAMS links to the Elentra event, or check the Elentra sign-in |
 
@@ -114,13 +114,7 @@ Validate the copied lesson against the exact manually configured reference flow:
 node scripts/run.mjs validate:authoring --config configs/local.json --request-json '<REQUEST_JSON>'
 ```
 
-Prepare the iRAT work as a read-only preflight:
-
-```bash
-node scripts/run.mjs prepare:irat --config configs/local.json --request-json '<REQUEST_JSON>'
-```
-
-The request supplies a changing `irat` object with the exact gate, Team Setup, question content, answer correctness/weights, formatting, and advanced-setting expectations. The preflight opens the exact copied lesson, verifies one iRAT Gate and one iRAT node, proves the gate-to-iRAT transition and Team Setup association, and prints every planned change without writing to LAMS. Correct-answer weights must total 100 for each question; incorrect answers must have zero weight.
+The request supplies a changing `irat` object with the exact gate, Team Setup, question content, answer correctness/weights, formatting, and advanced-setting expectations. Correct-answer weights must total 100 for each question; incorrect answers must have zero weight. There is no separate iRAT preflight: mismatches the run notices (extra question rows, unexpected titles) are printed as `iRAT warning:` lines and do not stop it.
 
 Run the full copy → iRAT workflow only with exact per-run values and the requested structured iRAT data:
 
@@ -221,7 +215,7 @@ The draft follows the document's layout, while the paragraph format and font sta
 - text that follows a page break inside a node, such as the next part of a case, opens the next question's prompt;
 - tables keep their printed width, column proportions, and centred or right-aligned cells.
 
-`plan:ae`, `apply:ae`, and `run:tbl` re-read `sourceDocx` before anything reaches LAMS and refuse an AE JSON whose node titles, prompts, tables, or options differ from the document. Answer keys, marks, and weights are not compared. Pass `--skip-sot-check` only for a confirmed, intentional difference.
+`apply:ae` and `run:tbl` re-read `sourceDocx` before anything reaches LAMS and refuse an AE JSON whose node titles, prompts, tables, or options differ from the document. Answer keys, marks, and weights are not compared. Pass `--skip-sot-check` only for a confirmed, intentional difference.
 
 Extract the embedded images and inspect their question assignments:
 
@@ -231,13 +225,7 @@ node scripts/run.mjs extract:sot-media --sot-docx "AE SOT.docx"
 
 Each image records the question it belongs to, the caption line printed under it, and whether the document printed it above or below the stem. A figure under a new `Case` heading illustrates the question that follows it, not the previous one; cover art before the first section stays unassigned.
 
-Review the extraction warnings, then confirm the draft against [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, links, and question content must be confirmed before browser use. Set root-level `sourceDocx` to import embedded images by question number, or add explicit local `images` (each accepting `placement` and `caption`) to individual questions. Preflight the reviewed JSON locally:
-
-```bash
-node scripts/run.mjs plan:ae --ae-json configs/ae-example.json
-```
-
-The preflight refuses invalid data and derives a deterministic plan that:
+Review the extraction warnings, then confirm the draft against [`configs/ae-example.json`](configs/ae-example.json). Exact node/gate names, missing marks, multiple-select scoring, tables, links, and question content must be confirmed before browser use. Set root-level `sourceDocx` to import embedded images by question number, or add explicit local `images` (each accepting `placement` and `caption`) to individual questions. `apply:ae` and `run:tbl` read the reviewed JSON, refuse invalid data, and derive a deterministic plan that:
 
 - requires AE nodes = `breakMarkerCount + 1` and AE gates = `breakMarkerCount`;
 - requires question numbers to be globally sequential from 1;
@@ -271,9 +259,11 @@ Add `--dry-run` to report missing nodes, gates, connections, and gate-bypass edg
 
 Use `node scripts/run.mjs lesson:index` (or `npx tsx` directly) to avoid npm/PowerShell argument forwarding. Operational defaults use `configs/local.json`, and the direct runner rejects stray values instead of silently using defaults.
 
-This is the stage that runs **after** AE, as its own command, and only when publishing has
-been explicitly requested: `AGENTS.md` forbids making a copied lesson learner-facing
-otherwise, and the authoring entry points contain no publishing code.
+This is the stage that runs **after** AE, and only when publishing has been explicitly
+requested: `AGENTS.md` forbids making a copied lesson learner-facing otherwise. For the full
+flow, pass `--publish` to `run:tbl` so it runs in the same browser straight after AE; it needs
+`lessonIndex.endDate` and refuses to start without it. The standalone command below is for a
+lesson that is already authored.
 
 Create the lesson from the design the authoring workflow just saved, then read back its
 monitoring ID. The end time defaults to `23:59`, matching the TBL convention.
@@ -333,8 +323,9 @@ npx tsx src/index-monitoring.ts --monitor-only --no-publish-code --config config
 
 The 5-digit code is the LAMS lesson ID, read from the monitoring URL
 (`monitorLesson.do?lessonID=41192`). `openMonitoring` already confirms it against the URL the
-browser actually landed on, so no extra scraping is involved. The identifier sent alongside it
-is the lesson title, which matches the sheet's TBL/Quiz Details column.
+browser actually landed on, so no extra scraping is involved. The row it is written to is the
+one the run names: `kanbanTab` plus `kanbanDetails` (that row's TBL/Quiz Details text) in
+`--request-json`. The lesson title is not used to find the row.
 
 On a machine with no sheet credentials the run prints the code for manual entry instead of
 failing, since the LAMS-side work has already succeeded by then. `--publish-code` still
@@ -348,11 +339,16 @@ Sheet credentials are stable per machine, so they belong in the ignored
 ```json
 {
   "sheet": {
+    "spreadsheetId": "<the id in the sheet's /spreadsheets/d/<id>/ URL>",
     "webhookUrl": "<the Apps Script /exec URL>",
     "secret": "<the shared secret>"
   }
 }
 ```
+
+Without `kanbanTab` and `kanbanDetails` (or `--tab` and `--details` for `send:code`) the code
+is printed for manual entry. The Apps Script and the steps
+for pointing the automation at a new spreadsheet are in `apps-script/README.md`.
 
 `configs/local.json` is ignored by Git, so these never reach the repository. Put them there
 and every entry point picks them up with no further setup. `LAMS_SHEET_WEBHOOK_URL` and
@@ -416,7 +412,7 @@ The final block is only a schema example. Replace it with evidence from the DOM 
 
 ```bash
 node scripts/run.mjs extract:ae-sot --sot-docx 'FOM TBL01'
-node scripts/run.mjs plan:ae --ae-json 'ae-example'
+node scripts/run.mjs apply:ae --ae-json 'ae-example' --request-json request.json
 ```
 
 Lookup searches the current project, Documents, Downloads, and Desktop recursively. Hidden and generated directories and symlink entries are skipped. Exact filenames take priority; multiple remaining matches are listed for selection. In conversation, choose a candidate by number or distinguishing name and the agent passes its resolved path. Outputs such as `--out` still use literal paths.
@@ -425,7 +421,7 @@ Only publishing and monitoring require `workspaceCourse` in `--request-json` (or
 
 Copies default to the source lesson folder when `destinationFolderPath` is omitted from the per-run request, even if local configuration has another destination. Supply `destinationFolderPath` only to save elsewhere. Existing-lesson edits and renames save in place.
 
-## Reliable runs and preflight
+## Reliable runs
 
 All operational entry points default to `configs/local.json`; `configs/example.json`
 is only a template. Configuration and resolved browser/profile paths are printed at
@@ -438,15 +434,14 @@ that accidentally replace a failing exit code with a successful `tee`/`tail` res
 
 ```bash
 node scripts/run.mjs login:check
-node scripts/run.mjs preflight:tbl --request-json request.json --ae-json ae-plan.json --log-file preflight.log
 node scripts/run.mjs run:tbl --request-json request.json --ae-json ae-plan.json --repair-json repair.json --log-file authoring.log
 ```
 
 Omit `--repair-json` when no exact placeholder removal is authorized. Read
-[template preflight and repair](skills/lams-tbl-authoring/references/template-repair.md)
-for the repair schema and existing-lesson command. Preflight inspects source questions
-and AE placeholders before copying, reports decisions together, and emits full-lesson
-validation expectations including retained entrance gates. It does not save anything.
+[placeholder repair](skills/lams-tbl-authoring/references/template-repair.md)
+for the repair schema and existing-lesson command. `run:tbl` runs copy, iRAT/tRAT, and AE
+in one Chromium session with no separate preflight, then validates full-lesson
+expectations (including retained entrance gates) derived from the copy.
 Authoring still cannot infer deletion of unexpected content or publish without an end date.
 
 `login:check` opens the existing profile without an interactive sign-in phase; manual

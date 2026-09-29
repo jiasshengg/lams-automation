@@ -63,7 +63,7 @@ function gateNode(graph: Awaited<ReturnType<typeof inspectAuthoringGraph>>, gate
   return matches[0]!;
 }
 
-/** Resolve and preflight configured rotations before copying or changing any gate. */
+/** Resolve the configured rotations, refusing any gate that is not a dynamic-password gate. */
 export async function plannedGateRotations(page: Page, config: LamsConfig): Promise<Array<{ name: string; seconds: number }>> {
   const requests = (config.expectedGateProperties ?? [])
     .filter(rule => rule.rotationSeconds !== undefined)

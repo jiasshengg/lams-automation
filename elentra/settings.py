@@ -28,6 +28,17 @@ DOWNLOAD_DIR = Path(os.environ.get("DOWNLOAD_DIR") or REPO_ROOT / "sot-docs")
 LOCAL_CONFIG_PATH = REPO_ROOT / "configs" / "local.json"
 
 
+def _local_config_value(section: str, key: str) -> str | None:
+    """A non-empty string at configs/local.json[section][key], or None."""
+    try:
+        parsed = json.loads(LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    block = parsed.get(section) if isinstance(parsed, dict) else None
+    value = block.get(key) if isinstance(block, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def browser_channel() -> str | None:
     """
     The installed Chrome/Edge that setup recorded as browser.channel in
@@ -35,12 +46,23 @@ def browser_channel() -> str | None:
     this OS. None means the bundled Chromium. Mirrors readBrowserChannel()
     in scripts/setup/local-config.mjs so both runtimes drive the same browser.
     """
-    try:
-        parsed = json.loads(LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    channel = parsed.get("browser", {}).get("channel") if isinstance(parsed, dict) else None
-    return channel.strip() if isinstance(channel, str) and channel.strip() else None
+    return _local_config_value("browser", "channel")
+
+
+def kanban_sheet_id() -> str:
+    """
+    The Kanban spreadsheet to read: sheet.spreadsheetId in configs/local.json, the id in
+    its docs.google.com/spreadsheets/d/<id>/ URL. KANBAN_SHEET_ID overrides it. The code
+    webhook writes to the spreadsheet its Apps Script is bound to, so keep both on the
+    same spreadsheet when switching sheets.
+    """
+    sheet_id = os.environ.get("KANBAN_SHEET_ID", "").strip() or _local_config_value("sheet", "spreadsheetId")
+    if not sheet_id:
+        raise RuntimeError(
+            'Set sheet.spreadsheetId in configs/local.json to the Kanban spreadsheet id '
+            '(the part after /spreadsheets/d/ in its URL).'
+        )
+    return sheet_id
 
 
 def launch_options(headless: bool) -> dict:

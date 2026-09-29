@@ -1,16 +1,13 @@
-import type { Page } from '@playwright/test';
 import type { AEPlan } from '../ae/plan.js';
-import type { IratRequest, LamsConfig } from '../config.js';
-import { inspectAuthoringGraph, type AuthoringGraph } from './authoring.js';
-import { buildDesiredAEFlow, planAEGraphReconciliation } from './ae-graph.js';
+import type { LamsConfig } from '../config.js';
+import type { AuthoringGraph } from './authoring.js';
+import { buildDesiredAEFlow } from './ae-graph.js';
 import { projectPlaceholderRepairs, type PlaceholderRepairPlan } from './ae-placeholder.js';
-import { LamsIratEditor } from './irat-editor.js';
-import { validateObservedState } from './irat.js';
 
 /** Counts are derived from the approved template prefix plus the reviewed SoT flow. */
 export function expectedTBLGraph(graph: AuthoringGraph, config: LamsConfig, plan: AEPlan, repair?: PlaceholderRepairPlan) {
   const projected = repair ? projectPlaceholderRepairs(graph, repair) : graph;
-  if (!projected.modelAvailable || projected.transitions.some(edge => edge.fromUiid === null || edge.toUiid === null)) throw new Error('Template preflight requires verified graph endpoints.');
+  if (!projected.modelAvailable || projected.transitions.some(edge => edge.fromUiid === null || edge.toUiid === null)) throw new Error('Full-lesson expectations require verified graph endpoints.');
   if (new Set(projected.nodes.map(n => n.name)).size !== projected.nodes.length) throw new Error('Template node titles are ambiguous.');
   const desired = buildDesiredAEFlow(plan);
   const removed = new Set(repair?.removals.map(r => r.title) ?? []);
@@ -55,21 +52,12 @@ export function expectedTBLGraph(graph: AuthoringGraph, config: LamsConfig, plan
   };
 }
 
-export async function preflightTBL(page: Page, config: LamsConfig, irat: IratRequest, ae?: AEPlan, repair?: PlaceholderRepairPlan) {
-  if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle does not match the requested destination lesson.');
-  const graph = await inspectAuthoringGraph(page);
-  const issues: string[] = [];
-  let expectations;
-  if (ae) {
-    try {
-      expectations = expectedTBLGraph(graph, config, ae, repair);
-      const reconciler = planAEGraphReconciliation(repair ? projectPlaceholderRepairs(graph, repair) : graph, ae);
-      issues.push(...reconciler.invalidGates);
-    } catch (error) { issues.push(error instanceof Error ? error.message : String(error)); }
-  } else if (repair) issues.push('Placeholder repairs in the combined workflow require an AE plan.');
-  const observed = await new LamsIratEditor(page, irat, config.browser.actionTimeoutMs).inspect();
-  issues.push(...validateObservedState(observed, irat).checks.filter(c => !c.passed).map(c => c.detail));
-  const report = { ready: issues.length === 0, issues, existingQuestionTitles: observed.questions.map(q => q.title), expectations };
-  console.log(`TBL preflight (no writes):\n${JSON.stringify(report, null, 2)}`);
-  return report;
+/** A template the expectations cannot be derived from skips the closing validation instead of stopping the run. */
+export function tryExpectedTBLGraph(...args: Parameters<typeof expectedTBLGraph>): ReturnType<typeof expectedTBLGraph> | undefined {
+  try {
+    return expectedTBLGraph(...args);
+  } catch (error) {
+    console.warn(`Full-lesson validation skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
 }

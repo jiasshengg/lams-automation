@@ -1,4 +1,4 @@
-import { preflightTBL } from './lams/tbl-preflight.js';
+import { tryExpectedTBLGraph } from './lams/tbl-expectations.js';
 import { parsePlaceholderRepair, persistPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
 import { inspectAuthoringGraph } from './lams/authoring.js';
 import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
@@ -18,14 +18,22 @@ import { buildAEPlan } from './ae/plan.js';
 import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
 import { reconcileAndWriteAEGraph } from './lams/ae-graph.js';
+import { publishLesson, requirePublishSettings } from './lams/publish.js';
 
 loadEnvFile();
 
 async function main(): Promise<void> {
-  const preflightOnly = process.argv.includes('--preflight-only');
-  const commit = !process.argv.includes('--dry-run') && !preflightOnly;
+  const commit = !process.argv.includes('--dry-run');
+  // --publish continues into the publishing stage in this same browser once AE is saved and
+  // validated. It is only ever passed on an explicit request for the full flow or to publish.
+  const publish = process.argv.includes('--publish');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { defaultDestinationToSource: true });
+  if (publish) {
+    if (!readArgument('--ae-json')) throw new Error('--publish runs after AE, so it needs --ae-json.');
+    // The end date can only come from the user; without it nothing is copied or published.
+    requirePublishSettings(config);
+  }
   const irat = await resolveIratRequest(config);
   const repairJson = readArgument('--repair-json');
   const repair = repairJson ? parsePlaceholderRepair(JSON.parse(await readFile(await resolveInputFile(repairJson, '.json'), 'utf8'))) : undefined;
@@ -54,14 +62,15 @@ async function main(): Promise<void> {
   try {
     activePage = await openAuthoringLibrary(page, config);
     await openSourceLesson(activePage, config);
-    const preflight = await preflightTBL(activePage, config, irat, aePlan, repair);
-    if (!preflight.ready) throw new Error('Source preflight requires decisions; no copy or content changes were made. See all issues above.');
-    if (preflightOnly) return;
+    if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle does not match the requested destination lesson.');
     const copy = await copyLesson(activePage, config, { commit });
     if (!commit) {
       console.log('Copy dry run complete; iRAT changes were not applied.');
       return;
     }
+    // iRAT and AE each verify their own targets as they write. The full-lesson expectations for the closing validation come from an in-page read of the
+    // copy, which opens no activity and costs no navigation.
+    const expectations = aePlan ? tryExpectedTBLGraph(await inspectAuthoringGraph(activePage), config, aePlan, repair) : undefined;
     if (repair) {
       const repaired = await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
       await persistPlaceholderRepairs(activePage, repaired, () =>
@@ -80,17 +89,26 @@ async function main(): Promise<void> {
           config.browser.actionTimeoutMs
         )
       : undefined;
-    if (preflight.expectations) {
-      const report = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...preflight.expectations });
+    if (expectations) {
+      const report = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...expectations });
       console.log(formatValidationReport(report));
-      if (!report.passed) throw new Error('Completed authoring does not match the preflight expectations. Inspect saved state before publishing.');
+      if (!report.passed) throw new Error('Completed authoring does not match the reviewed full-lesson expectations. Inspect saved state before publishing.');
     }
     // Step 81 closes the Author screen once the design is saved. Publishing (steps 82-92)
-    // is deliberately NOT done here: AGENTS.md requires a learner-facing lesson to be an
-    // explicitly requested operation, so it lives in its own `lesson:index` entry point
-    // that the skill runs after this one when the user asks for it.
+    // follows in this same browser only with --publish, which the skill passes solely when the
+    // user asked for the full flow or for publishing and supplied this lesson's end date.
     await closeAuthoring(activePage, page, config);
     activePage = page;
+
+    const published = publish
+      ? await publishLesson(page, config, {
+          commit: true,
+          // Only the design this run just saved may be published.
+          expectedDesignTitle: copy.newTitle,
+          forceCode: process.argv.includes('--publish-code'),
+          publishCode: !process.argv.includes('--no-publish-code')
+        })
+      : undefined;
 
     console.log('\nContinuous TBL workflow: COMPLETE');
     console.log(`Copied: ${copy.sourceTitle} → ${copy.newTitle}`);
@@ -107,7 +125,11 @@ async function main(): Promise<void> {
       console.log(`AE transitions removed: ${aeResult.removedTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
       console.log(`AE images imported: ${aeResult.writtenNodes.reduce((sum, node) => sum + node.importedImages, 0)}`);
     }
-    console.log(`Authoring complete. To publish this lesson to a cohort, run lesson:index with --commit.`);
+    if (published) {
+      console.log(`Published: ${published.lesson.lessonTitle}, ends ${published.lesson.endDateTime}, code ${published.lessonId ?? 'unknown'}`);
+    } else {
+      console.log('Authoring complete. To publish this lesson to a cohort, rerun with --publish or run lesson:index with --commit.');
+    }
     console.log(
       aeResult
         ? 'Verified: configured course, copy destination, iRAT content/Print View, AE content/Print View, and post-save AE graph.'

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { assertIdentifier, assertLessonCode, parseSinkBody, resolveSinkEndpoint, sendCodeToSheet } from '../src/sheets/code-sink.js';
+import { assertIdentifier, assertLessonCode, assertTab, parseSinkBody, resolveSinkEndpoint, sendCodeToSheet } from '../src/sheets/code-sink.js';
 
 const endpoint = { url: 'https://script.example/exec', secret: 'test-secret' };
 
@@ -13,6 +13,9 @@ test('rejects codes that are not exactly five digits', () => {
   expect(() => assertLessonCode('12345 ')).toThrow(/5-digit/);
   expect(() => assertIdentifier('   ')).toThrow(/must not be empty/);
   expect(assertIdentifier(' FOM TBL06 030926 2026Y1 ')).toBe('FOM TBL06 030926 2026Y1');
+  expect(() => assertTab('  ')).toThrow(/Kanban tab/);
+  expect(() => assertTab(undefined)).toThrow(/Kanban tab/);
+  expect(assertTab(' Kanban AY26/27 ')).toBe('Kanban AY26/27');
 });
 
 test('requires the endpoint and secret to be configured', () => {
@@ -40,13 +43,13 @@ test('posts the agreed payload and accepts an ok status', async () => {
     return jsonResponse({ status: 'ok' });
   }) as unknown as typeof fetch;
 
-  const result = await sendCodeToSheet('12345', 'FOM TBL06 030926 2026Y1', { ...endpoint, fetchImpl });
+  const result = await sendCodeToSheet('12345', 'FOM TBL06 030926 2026Y1', 'Kanban AY26/27', { ...endpoint, fetchImpl });
 
   expect(result.status).toBe('ok');
   expect(seen).toHaveLength(1);
   expect(seen[0]!.url).toBe(endpoint.url);
   expect(seen[0]!.contentType).toBe('application/json');
-  expect(seen[0]!.body).toEqual({ code: '12345', identifier: 'FOM TBL06 030926 2026Y1', secret: 'test-secret' });
+  expect(seen[0]!.body).toEqual({ code: '12345', identifier: 'FOM TBL06 030926 2026Y1', tab: 'Kanban AY26/27', secret: 'test-secret' });
 });
 
 test('retries a transient failure and then succeeds', async () => {
@@ -57,13 +60,13 @@ test('retries a transient failure and then succeeds', async () => {
     return jsonResponse({ status: 'ok' });
   }) as unknown as typeof fetch;
 
-  await sendCodeToSheet('12345', 'FOM TBL06 030926 2026Y1', { ...endpoint, fetchImpl, attempts: 2 });
+  await sendCodeToSheet('12345', 'FOM TBL06 030926 2026Y1', 'Kanban AY26/27', { ...endpoint, fetchImpl, attempts: 2 });
   expect(calls).toBe(2);
 });
 
 test('fails loudly on a rejected status, an HTTP error, and a non-JSON body', async () => {
   const withBody = (response: () => Response) =>
-    sendCodeToSheet('12345', 'FOM TBL06 030926 2026Y1', {
+    sendCodeToSheet('12345', 'FOM TBL06 030926 2026Y1', 'Kanban AY26/27', {
       ...endpoint,
       attempts: 1,
       fetchImpl: (async () => response()) as unknown as typeof fetch
@@ -100,7 +103,7 @@ test('reads the answer out of the HTML interstitial the redirect sometimes serve
   expect(parseSinkBody('<html><body>Sign in to continue</body></html>')).toBeUndefined();
 
   await expect(
-    sendCodeToSheet('12345', 'A [B] C', {
+    sendCodeToSheet('12345', 'A [B] C', 'Kanban AY26/27', {
       ...endpoint,
       attempts: 3,
       fetchImpl: (async () => new Response(wrapped, { headers: { 'Content-Type': 'text/html' } })) as unknown as typeof fetch
@@ -116,7 +119,7 @@ test('does not replay a request the script already answered', async () => {
     return jsonResponse({ status: 'error', message: 'Identifier not found: A' });
   }) as unknown as typeof fetch;
 
-  await expect(sendCodeToSheet('12345', 'A', { ...endpoint, fetchImpl, attempts: 3 })).rejects.toThrow(
+  await expect(sendCodeToSheet('12345', 'A', 'Kanban AY26/27', { ...endpoint, fetchImpl, attempts: 3 })).rejects.toThrow(
     /Identifier not found: A/
   );
   expect(calls).toBe(1);
