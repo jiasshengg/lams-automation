@@ -189,20 +189,31 @@ When a copy destination is omitted, save in the resolved source lesson folder wi
 
 ## Kanban sheet endpoint
 
-Recording the lesson code completes the publishing stage. Its endpoint and shared secret are
-stable per machine, so they live in the ignored `configs/local.json`:
+Recording the lesson code completes the publishing stage. The Kanban spreadsheet, its
+endpoint, and the shared secret are stable per machine, so they live in the ignored
+`configs/local.json`:
 
 ```json
 {
   "sheet": {
+    "spreadsheetId": "<the id in the sheet's /spreadsheets/d/<id>/ URL>",
     "webhookUrl": "<the Apps Script /exec URL>",
     "secret": "<the shared secret>"
   }
 }
 ```
 
-`LAMS_SHEET_WEBHOOK_URL` and `LAMS_SHEET_SECRET` still work and take precedence over the
-file. `sheet` is deliberately not a `--request-json` field, so a secret never travels
+`spreadsheetId` is the sheet the Elentra scripts read; the webhook writes to the spreadsheet
+its Apps Script is bound to, so both must be the same spreadsheet. See `apps-script/README.md`
+for setting up a new sheet.
+
+The row is per run: pass the tab the user named as `kanbanTab` (the exact name the Kanban
+`--tab` resolved to) and the row's TBL/Quiz Details text as `kanbanDetails` in
+`--request-json`. Without both the code is printed for manual entry, never written to an
+assumed row. The lesson title is not used to find the row.
+
+`LAMS_SHEET_WEBHOOK_URL`, `LAMS_SHEET_SECRET`, and `KANBAN_SHEET_ID` still work and take
+precedence over the file. `sheet` is deliberately not a `--request-json` field, so a secret never travels
 through a shell command line. Never write these values into `configs/example.json` or any
 other tracked file; `configs/local.json` is ignored by Git and is the only place for them.
 When they are absent the publishing stage prints the lesson code for manual entry instead of

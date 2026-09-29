@@ -50,7 +50,7 @@ export async function publishLesson(page: Page, config: LamsConfig, options: Pub
   const monitoring = await openMonitoring(page, lesson.lessonTitle, config);
   console.log('\nMonitoring workflow: OK');
   console.log(`Lesson ID (the 5-digit code): ${monitoring.lessonId}`);
-  await reportLessonCode(lesson.lessonTitle, monitoring.lessonId, options, config);
+  await reportLessonCode(monitoring.lessonId, options, config);
   return { lesson, lessonId: monitoring.lessonId };
 }
 
@@ -70,9 +70,11 @@ export function requirePublishSettings(config: LamsConfig): void {
  * Recording it completes the publishing stage, so it is sent by default. A machine with no
  * sheet credentials simply reports the code for manual entry rather than failing a run whose
  * LAMS-side work already succeeded, unless --publish-code asked for the send explicitly.
+ *
+ * The row is the one the user named for the run: kanbanTab plus its TBL/Quiz Details text
+ * (kanbanDetails). Without both, the code is printed for manual entry, never guessed.
  */
 export async function reportLessonCode(
-  identifier: string,
   code: string,
   options: Pick<PublishOptions, 'publishCode' | 'forceCode'>,
   config: LamsConfig
@@ -85,12 +87,17 @@ export async function reportLessonCode(
     console.log('Kanban sheet not configured (add a "sheet" block to configs/local.json); record this code manually.');
     return;
   }
+  if (!options.forceCode && (!config.kanbanTab || !config.kanbanDetails)) {
+    console.log('Kanban sheet not updated: kanbanTab and kanbanDetails were not both given in --request-json. Record this code manually.');
+    return;
+  }
 
   // The lesson exists by this point, so a sheet that is unreachable or rejects the
-  // identifier is reported rather than allowed to fail the whole run.
+  // row is reported rather than allowed to fail the whole run.
+  const details = config.kanbanDetails ?? '';
   try {
-    await sendCodeToSheet(code, identifier, sinkOptions(config));
-    console.log(`Sent code ${code} for "${identifier}" to the Kanban sheet.`);
+    await sendCodeToSheet(code, details, config.kanbanTab ?? '', sinkOptions(config));
+    console.log(`Sent code ${code} for "${details}" to the Kanban tab "${config.kanbanTab}".`);
   } catch (error) {
     console.error(`Kanban sheet not updated: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
