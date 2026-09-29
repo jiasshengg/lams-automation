@@ -13,6 +13,8 @@ Do not ask for `workspaceCourse` for any Authoring operation, including copying 
 
 Resolve the source lesson and folder, requested new title, and copy destination from the user's request and available evidence. An existing-lesson rename uses `sourceFolderPath`, `sourceLessonTitle`, and `lessonTitle` and stays in the same folder. Local filename lookup is separate from LAMS library folder resolution.
 
+Discovery (`discover:lessons` and `find:lesson`) accepts a machine-only local config: URL, browser/profile settings, and selectors. It does not require saved course, lesson, folder, cohort, or graph-expectation values. Authoring commands still require their per-run target/content inputs.
+
 If the exact lesson title or folder is unknown, use read-only discovery. Users may supply module, TBL number, and academic year rather than exact internal fields:
 
 ```bash
