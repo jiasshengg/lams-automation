@@ -1,3 +1,4 @@
+import { libraryNamePattern, normaliseLibraryName } from './library-names.js';
 import type { Locator, Page } from '@playwright/test';
 import type { LamsConfig } from '../config.js';
 import { inspectAuthoringGraph, waitForAuthoringReady } from './authoring.js';
@@ -51,7 +52,9 @@ export async function openLessonFromLibrary(
   await traverseFolderPath(dialog, folderPath, page, config);
   if (options.absentTitle) await assertTitleAbsent(dialog, options.absentTitle);
   const lesson = await exactLessonTreeItem(dialog, lessonTitle);
-  await (await waitForVisibleTarget(lesson, page, config, `lesson: ${lessonTitle}`, false)).click();
+  const selectedLesson = await waitForVisibleTarget(lesson, page, config, `lesson: ${lessonTitle}`, false);
+  const resolvedTitle = (await selectedLesson.innerText()).replace(/\s+/g, ' ').trim();
+  await selectedLesson.click();
 
   // Read-only library designs expose a distinct stable control that opens an
   // unsaved writable clone. No library copy exists until Save As completes.
@@ -64,11 +67,11 @@ export async function openLessonFromLibrary(
   }
   await openButton.click();
   await dialog.waitFor({ state: 'hidden', timeout: config.browser.actionTimeoutMs });
-  await page.getByText(lessonTitle, { exact: true }).filter({ visible: true }).first().waitFor({
+  await page.getByText(resolvedTitle, { exact: true }).filter({ visible: true }).first().waitFor({
     state: 'visible',
     timeout: config.browser.actionTimeoutMs
   });
-  console.log(`Verified opened ${config.openSourceAsCopy ? 'a writable source copy' : 'lesson'}: ${lessonTitle}`);
+  console.log(`Verified opened ${config.openSourceAsCopy ? 'a writable source copy' : 'lesson'}: ${resolvedTitle}`);
 }
 
 export async function renameLesson(
@@ -81,7 +84,7 @@ export async function renameLesson(
   const titleField = page.locator('#ldDescriptionFieldTitle');
   const visibleTitle = await waitForVisibleTarget(titleField, page, config, 'authoring title', false);
   const currentTitle = (await visibleTitle.innerText()).trim();
-  if (currentTitle !== config.sourceLessonTitle) {
+  if (normaliseLibraryName(currentTitle) !== normaliseLibraryName(config.sourceLessonTitle)) {
     throw new Error(`Refusing to rename: opened title is "${currentTitle}", expected "${config.sourceLessonTitle}".`);
   }
 
@@ -95,7 +98,7 @@ export async function renameLesson(
 
   if (!options.commit) {
     await (await waitForVisibleTarget(cancelButton, page, config, 'inline title cancel', false)).click();
-    await waitForExactTitle(titleField, config.sourceLessonTitle, config);
+    await waitForExactTitle(titleField, currentTitle, config);
     console.log('Rename dry run complete: inline title controls were verified and cancelled; no title was changed.');
     return {
       sourceTitle: config.sourceLessonTitle,
@@ -425,20 +428,29 @@ export async function traverseFolderPath(
 async function exactFolderTreeItem(dialog: Locator, name: string): Promise<Locator> {
   const typed = dialog
     .locator('[role="treeitem"].tree-parent')
-    .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(name)}\\s*$`) });
-  return (await visibleCount(typed)) > 0 ? typed : exactTreeItem(dialog, name);
+    .filter({ hasText: libraryNamePattern(name) });
+  return uniqueLibraryItem((await visibleCount(typed)) > 0 ? typed : exactTreeItem(dialog, name), name);
 }
 
 async function exactLessonTreeItem(dialog: Locator, name: string): Promise<Locator> {
   const typed = dialog
     .locator('[role="treeitem"]:not(.tree-parent)')
-    .filter({ hasText: new RegExp(`^\\s*${escapeRegExp(name)}\\s*$`) });
+    .filter({ hasText: libraryNamePattern(name) });
   const treeDistinguishesFolders = (await dialog.locator('[role="treeitem"].tree-parent').count()) > 0;
-  return treeDistinguishesFolders ? typed : exactTreeItem(dialog, name);
+  return uniqueLibraryItem(treeDistinguishesFolders ? typed : exactTreeItem(dialog, name), name);
 }
 
 function exactTreeItem(dialog: Locator, name: string): Locator {
-  return dialog.getByRole('treeitem').filter({ hasText: new RegExp(`^\\s*${escapeRegExp(name)}\\s*$`) });
+  return dialog.getByRole('treeitem').filter({ hasText: libraryNamePattern(name) });
+}
+
+async function uniqueLibraryItem(locator: Locator, name: string): Promise<Locator> {
+  const matches = locator.filter({ visible: true });
+  const labels = await matches.allTextContents();
+  if (labels.length > 1) {
+    throw new Error(`Ambiguous library name "${name}": ${labels.map(label => JSON.stringify(label.trim())).join(', ')}. Supply a more specific folder path or rename the conflicting items.`);
+  }
+  return locator;
 }
 
 function escapeRegExp(value: string): string {
@@ -446,7 +458,7 @@ function escapeRegExp(value: string): string {
 }
 
 function assertCommitValues(config: LamsConfig): void {
-  if (config.lessonTitle === config.sourceLessonTitle) {
+  if (normaliseLibraryName(config.lessonTitle) === normaliseLibraryName(config.sourceLessonTitle)) {
     throw new Error('Refusing to commit: lessonTitle must differ from sourceLessonTitle.');
   }
   if (/replace|example/i.test(config.lessonTitle)) {

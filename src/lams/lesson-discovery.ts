@@ -1,3 +1,4 @@
+import { normaliseLibraryName } from './library-names.js';
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export interface DiscoveryOptions {
@@ -71,13 +72,13 @@ function isVisiblyExpanded(rows: TreeRow[], index: number): boolean {
 }
 
 function queryTerms(query: string | undefined): string[] {
-  return (query ?? '').toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  return (query ?? '').split(/\s+/u).filter(Boolean).map(normaliseLibraryName);
 }
 
 function matchesCandidate(candidate: LessonCandidate, terms: string[], exactTitle: string | undefined): boolean {
-  const searchable = [...candidate.sourceFolderPath, candidate.sourceLessonTitle].join(' ').toLocaleLowerCase();
+  const searchable = [...candidate.sourceFolderPath, candidate.sourceLessonTitle].map(normaliseLibraryName).join(' ');
   return terms.every(term => searchable.includes(term)) &&
-    (exactTitle === undefined || candidate.sourceLessonTitle.toLocaleLowerCase() === exactTitle);
+    (exactTitle === undefined || normaliseLibraryName(candidate.sourceLessonTitle) === exactTitle);
 }
 
 /**
@@ -161,9 +162,9 @@ async function discoverWithFolderApi(
     if (!courseContents) return undefined;
     queue = [];
     for (const root of options.roots) {
-      const matches = courseContents.folders!.filter(folder => folder.name === root);
+      const matches = courseContents.folders!.filter(folder => normaliseLibraryName(folder.name) === normaliseLibraryName(root));
       if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
-      queue.push({ id: matches[0]!.folderID, path: ['Courses', root] });
+      queue.push({ id: matches[0]!.folderID, path: ['Courses', matches[0]!.name] });
     }
   }
 
@@ -203,7 +204,7 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: options.timeoutMs });
   const terms = queryTerms(options.query);
-  const exactTitle = options.exactTitle?.toLocaleLowerCase();
+  const exactTitle = options.exactTitle === undefined ? undefined : normaliseLibraryName(options.exactTitle);
   const apiResults = await discoverWithFolderApi(page, options, terms, exactTitle);
   if (apiResults) return apiResults;
   options.onProgress?.('Folder endpoint did not return JSON; continuing with rendered-tree discovery.');
@@ -252,11 +253,11 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
     throw new Error('Courses rendered as empty after the folder API failed. Discovery is incomplete; verify access/session with login:check and retry. No complete results were returned.');
   }
   for (const root of options.roots ?? []) {
-    const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && row.text === root);
+    const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && normaliseLibraryName(row.text) === normaliseLibraryName(root));
     if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
   }
   const inScope = (row: TreeRow): boolean => row.path[0] === 'Courses' &&
-    (!options.roots?.length || options.roots.includes(row.path[1] ?? ''));
+    (!options.roots?.length || options.roots.some(root => normaliseLibraryName(root) === normaliseLibraryName(row.path[1] ?? '')));
   while (true) {
     rows = await readTree(dialog);
     const index = rows.findIndex((row, index) => inScope(row) && row.folder && !row.empty && !isVisiblyExpanded(rows, index));

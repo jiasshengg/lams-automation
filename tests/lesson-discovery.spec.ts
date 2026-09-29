@@ -60,7 +60,7 @@ test('searches non-playground folders, returns duplicate titles with distinct pa
 
 test('matches an exact title without accepting a folder or title substring', async ({ page }) => {
   await library(page);
-  expect(await discoverLessons(page, { exactTitle: 'TBL06 revision', timeoutMs: 2000 })).toEqual([
+  expect(await discoverLessons(page, { exactTitle: '  tbl06REVISION  ', timeoutMs: 2000 })).toEqual([
     { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2025', 'FOM'] },
     { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2026', 'FOM'] }
   ]);
@@ -93,7 +93,7 @@ test('reads the folder endpoint sequentially and matches exact titles', async ({
     active -= 1;
   });
   await page.goto('https://lams.test/authoring');
-  expect(await discoverLessons(page, { exactTitle: '[Jss-Demo-Test]', timeoutMs: 2000 })).toEqual([
+  expect(await discoverLessons(page, { roots: [' one '], exactTitle: ' [jss-demo-test] ', timeoutMs: 2000 })).toEqual([
     { sourceLessonTitle: '[Jss-Demo-Test]', sourceFolderPath: ['Courses', 'One'] }
   ]);
   expect(maxActive).toBe(1);
@@ -113,7 +113,7 @@ test('falls back to the rendered tree when the folder endpoint returns HTML', as
 
 test('limits traversal to requested roots and matches year in folder ancestry', async ({ page }) => {
   await library(page);
-  const results = await discoverLessons(page, { roots: ['Medicine 2026'], query: '2026 FOM TBL06', timeoutMs: 2000 });
+  const results = await discoverLessons(page, { roots: [' medicine2026 '], query: ' 2026  fom   tbl06 ', timeoutMs: 2000 });
   expect(results).toHaveLength(1);
   expect(results[0]!.sourceFolderPath).toEqual(['Courses', 'Medicine 2026', 'FOM']);
   await expect(page.getByRole('treeitem', { name: 'Medicine 2025', exact: true })).toHaveAttribute('aria-expanded', 'false');
@@ -122,6 +122,14 @@ test('limits traversal to requested roots and matches year in folder ancestry', 
 test('reports no matches without falling back to an unrelated lesson', async ({ page }) => {
   await library(page);
   expect(await discoverLessons(page, { roots: ['Empty'], query: 'TBL06', timeoutMs: 2000 })).toEqual([]);
+});
+
+test('searches compact names without spaces and preserves saved folder and title spelling', async ({ page }) => {
+  await library(page);
+  expect(await discoverLessons(page, { roots: ['medicine2026'], query: 'tbl06revision', timeoutMs: 2000 })).toEqual([
+    { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2026', 'FOM'] }
+  ]);
+  expect(await discoverLessons(page, { roots: ['medicine2026'], query: 'tbl07revision', timeoutMs: 2000 })).toEqual([]);
 });
 
 test('refuses missing roots and incomplete traversal', async ({ page }) => {
