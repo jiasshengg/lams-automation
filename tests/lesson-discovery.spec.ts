@@ -119,6 +119,50 @@ test('limits traversal to requested roots and matches year in folder ancestry', 
   await expect(page.getByRole('treeitem', { name: 'Medicine 2025', exact: true })).toHaveAttribute('aria-expanded', 'false');
 });
 
+test('limits rendered-tree traversal to a nested root path', async ({ page }) => {
+  await library(page);
+  expect(await discoverLessons(page, { roots: ['Courses > medicine 2025 > fom'], query: 'tbl06', timeoutMs: 2000 })).toEqual([
+    { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2025', 'FOM'] }
+  ]);
+  await expect(page.getByRole('treeitem', { name: 'Archive', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('treeitem', { name: 'Medicine 2026', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await library(page);
+  await expect(discoverLessons(page, { roots: ['Medicine 2025 > Missing'], timeoutMs: 2000 }))
+    .rejects.toThrow('Expected one folder Courses > Medicine 2025 > Missing; found 0.');
+});
+
+test('resolves nested root paths through the folder endpoint without reading sibling folders', async ({ page }) => {
+  const children = new Map<number | null, { folders: Array<{ name: string; folderID: number; isRunSequencesFolder?: boolean }>; designs: Array<{ name: string; learningDesignId: number }> }>([
+    [null, { folders: [{ name: 'Courses', folderID: -2 }], designs: [] }],
+    [-2, { folders: [{ name: '! My Courses', folderID: 1 }, { name: 'Other', folderID: 9 }], designs: [] }],
+    [1, { folders: [{ name: '2_Foundations of Medicine_FOM', folderID: 2 }, { name: 'Sibling', folderID: 8 }], designs: [] }],
+    [2, { folders: [{ name: 'ignored', folderID: 3, isRunSequencesFolder: true }], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 20 }] }],
+    [3, { folders: [], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 21 }] }],
+    [8, { folders: [], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 22 }] }],
+    [9, { folders: [], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 23 }] }]
+  ]);
+  const requested: string[] = [];
+  await page.route('https://lams.test/authoring', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<button id="openButton">Open</button><div role="dialog" aria-label="Open design">Open design</div><script>window.LAMS_URL="https://lams.test/lams/"</script>'
+  }));
+  await page.route('https://lams.test/lams/home/getFolderContents.do*', async route => {
+    const rawID = new URL(route.request().url()).searchParams.get('folderID')!;
+    requested.push(rawID);
+    const content = children.get(rawID === '' ? null : Number(rawID))!;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ folders: content.folders, learningDesigns: content.designs }) });
+  });
+  await page.goto('https://lams.test/authoring');
+  expect(await discoverLessons(page, {
+    roots: ['! my courses > 2_Foundations of Medicine_FOM > run sequences'], query: 'tbl11', timeoutMs: 2000
+  })).toEqual([
+    { sourceLessonTitle: 'FOM TBL11 051026 2026Y1', sourceFolderPath: ['Courses', '! My Courses', '2_Foundations of Medicine_FOM', 'Run sequences'] }
+  ]);
+  expect(requested).toEqual(['', '-2', '1', '2', '3']);
+  await expect(discoverLessons(page, { roots: ['! My Courses > Missing'], timeoutMs: 2000 }))
+    .rejects.toThrow('Expected one folder Courses > ! My Courses > Missing; found 0.');
+});
+
 test('reports no matches without falling back to an unrelated lesson', async ({ page }) => {
   await library(page);
   expect(await discoverLessons(page, { roots: ['Empty'], query: 'TBL06', timeoutMs: 2000 })).toEqual([]);

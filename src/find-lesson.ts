@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const title = readArgument('--title');
   if (!title) throw new Error('find:lesson requires an exact --title.');
   const roots = (readArgument('--roots') ?? '').split('|').map((part) => part.trim()).filter(Boolean);
-  if (roots.length === 0) throw new Error('find:lesson requires --roots as a "|"-separated list of top-level folder names.');
+  if (roots.length === 0) throw new Error('find:lesson requires --roots as a "|"-separated list of folder names or " > " paths under Courses.');
 
   const config = await loadConfig(configPath, {}, { libraryDiscovery: true });
   const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));

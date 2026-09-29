@@ -2,7 +2,10 @@ import { normaliseLibraryName } from './library-names.js';
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export interface DiscoveryOptions {
-  /** Exact direct child folder names under Courses; omitted searches all of Courses. */
+  /**
+   * Folders under Courses to search, each a direct child name or a " > "-separated path
+   * (a leading "Courses" is optional); omitted searches all of Courses.
+   */
   roots?: string[];
   /** Every whitespace-separated term must occur in the title or folder path. */
   query?: string;
@@ -69,6 +72,18 @@ function isVisiblyExpanded(rows: TreeRow[], index: number): boolean {
   // LAMS normally updates aria-expanded, but some populated folders have been
   // observed leaving it false after their descendant rows are rendered.
   return row.expanded === 'true' || (rows[index + 1]?.level ?? -1) > row.level;
+}
+
+/** Split a root into folder names below Courses, e.g. "A > B" or "Courses > A > B". */
+export function rootPath(root: string): string[] {
+  const segments = root.split('>').map(segment => segment.trim()).filter(Boolean);
+  if (segments.length > 1 && normaliseLibraryName(segments[0]!) === 'courses') segments.shift();
+  if (!segments.length) throw new Error(`Invalid --roots entry "${root}"; expected a folder name or path under Courses.`);
+  return segments;
+}
+
+function sameLibraryPath(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((name, index) => normaliseLibraryName(name) === normaliseLibraryName(b[index]!));
 }
 
 function queryTerms(query: string | undefined): string[] {
@@ -158,13 +173,24 @@ async function discoverWithFolderApi(
   const coursesEntry = { id: courses[0]!.folderID, path: ['Courses'] };
   let queue: Array<{ id: number; path: string[] }> = [coursesEntry];
   if (options.roots?.length) {
-    const courseContents = await getFolder(coursesEntry.id);
-    if (!courseContents) return undefined;
+    // Resolve each root one level at a time; shared prefixes are only fetched once.
+    const contents = new Map<number, FolderContentsResponse>();
     queue = [];
     for (const root of options.roots) {
-      const matches = courseContents.folders!.filter(folder => normaliseLibraryName(folder.name) === normaliseLibraryName(root));
-      if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
-      queue.push({ id: matches[0]!.folderID, path: ['Courses', matches[0]!.name] });
+      let current = coursesEntry;
+      for (const segment of rootPath(root)) {
+        let content = contents.get(current.id);
+        if (!content) {
+          content = await getFolder(current.id);
+          if (!content) return undefined;
+          contents.set(current.id, content);
+        }
+        const displayName = (folder: FolderEntry): string => folder.isRunSequencesFolder ? 'Run sequences' : folder.name;
+        const matches = content.folders!.filter(folder => normaliseLibraryName(displayName(folder)) === normaliseLibraryName(segment));
+        if (matches.length !== 1) throw new Error(`Expected one folder ${[...current.path, segment].join(' > ')}; found ${matches.length}.`);
+        current = { id: matches[0]!.folderID, path: [...current.path, displayName(matches[0]!)] };
+      }
+      queue.push(current);
     }
   }
 
@@ -252,17 +278,21 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   if (loadedCourses?.empty) {
     throw new Error('Courses rendered as empty after the folder API failed. Discovery is incomplete; verify access/session with login:check and retry. No complete results were returned.');
   }
-  for (const root of options.roots ?? []) {
-    const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && normaliseLibraryName(row.text) === normaliseLibraryName(root));
-    if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
-  }
+  const rootPaths = (options.roots ?? []).map(root => ['Courses', ...rootPath(root)]);
   const inScope = (row: TreeRow): boolean => row.path[0] === 'Courses' &&
-    (!options.roots?.length || options.roots.some(root => normaliseLibraryName(root) === normaliseLibraryName(row.path[1] ?? '')));
+    (!rootPaths.length || rootPaths.some(root => row.path.length >= root.length && sameLibraryPath(row.path.slice(0, root.length), root)));
+  // Folders on the way to a nested root must be opened, but their other contents are out of scope.
+  const leadsToRoot = (row: TreeRow): boolean =>
+    rootPaths.some(root => row.path.length < root.length && sameLibraryPath(row.path, root.slice(0, row.path.length)));
   while (true) {
     rows = await readTree(dialog);
-    const index = rows.findIndex((row, index) => inScope(row) && row.folder && !row.empty && !isVisiblyExpanded(rows, index));
+    const index = rows.findIndex((row, index) => (inScope(row) || leadsToRoot(row)) && row.folder && !row.empty && !isVisiblyExpanded(rows, index));
     if (index < 0) break;
     await expand(index, rows);
+  }
+  for (const root of rootPaths) {
+    const matches = rows.filter(row => row.folder && sameLibraryPath(row.path, root));
+    if (matches.length !== 1) throw new Error(`Expected one folder ${root.join(' > ')}; found ${matches.length}.`);
   }
   return rows.filter(row => !row.folder && inScope(row) &&
       matchesCandidate({ sourceLessonTitle: row.text, sourceFolderPath: row.path.slice(0, -1) }, terms, exactTitle))
