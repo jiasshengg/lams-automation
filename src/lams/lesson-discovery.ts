@@ -12,6 +12,8 @@ export interface DiscoveryOptions {
   /** When supplied, return only lessons whose title exactly matches this value. */
   exactTitle?: string;
   maxExpansions?: number;
+  /** Folder endpoint reads in flight at once; drops to 1 after a non-JSON response. Defaults to 4. */
+  concurrency?: number;
   timeoutMs: number;
   onProgress?: (message: string) => void;
 }
@@ -97,10 +99,11 @@ function matchesCandidate(candidate: LessonCandidate, terms: string[], exactTitl
 }
 
 /**
- * Traverse LAMS's observed lazy-folder endpoint one request at a time. The server
- * has returned HTML under burst traffic, so this deliberately avoids Promise.all.
- * Any non-JSON response abandons the shortcut before returning results and lets
- * the verified DOM traversal take over.
+ * Traverse LAMS's observed lazy-folder endpoint with a small bounded pool. The server
+ * has returned HTML under unbounded burst traffic, so the pool never exceeds
+ * `concurrency` and drops to one request at a time after any non-JSON response.
+ * A non-JSON response that survives the retry abandons the shortcut before
+ * returning results and lets the verified DOM traversal take over.
  */
 async function discoverWithFolderApi(
   page: Page,
@@ -113,6 +116,7 @@ async function discoverWithFolderApi(
   const baseUrl = new URL(lamsUrl, page.url());
   if (baseUrl.origin !== new URL(page.url()).origin) return undefined;
   const limit = options.maxExpansions ?? 1000;
+  let concurrency = options.concurrency ?? 4;
   let requests = 0;
 
   async function getFolder(folderID: number | null, retry = true): Promise<FolderContentsResponse | undefined> {
@@ -142,6 +146,10 @@ async function discoverWithFolderApi(
     if (!response.ok || !response.contentType.toLocaleLowerCase().includes('json')) {
       const detail = `Folder ${folderID ?? 'root'}: HTTP ${response.status}, type ${response.contentType || 'missing'}, final URL ${response.location}, redirected=${response.redirected}`;
       options.onProgress?.(detail);
+      if (concurrency > 1) {
+        concurrency = 1;
+        options.onProgress?.('Slowing folder reads to one at a time after a non-JSON response.');
+      }
       if (response.redirected && /login|signin|saml|authorize/i.test(response.location)) {
         throw new Error(`Discovery reached authentication instead of folder data. ${detail}. Run npm run login:check with the same profile; no complete results were returned.`);
       }
@@ -196,12 +204,9 @@ async function discoverWithFolderApi(
 
   const candidates = new Map<number, LessonCandidate>();
   const visited = new Set<number>();
-  while (queue.length > 0) {
-    const entry = queue.shift()!;
-    if (visited.has(entry.id)) continue;
-    visited.add(entry.id);
+  async function read(entry: { id: number; path: string[] }): Promise<boolean> {
     const content = await getFolder(entry.id);
-    if (!content) return undefined;
+    if (!content) return false;
     for (const design of content.learningDesigns!) {
       if (typeof design.name !== 'string' || !Number.isInteger(design.learningDesignId)) {
         throw new Error('LAMS folder discovery returned an invalid design entry.');
@@ -215,8 +220,31 @@ async function discoverWithFolderApi(
       }
       queue.push({ id: folder.folderID, path: [...entry.path, folder.isRunSequencesFolder ? 'Run sequences' : folder.name] });
     }
-    if (visited.size % 50 === 0) options.onProgress?.(`Scanned ${visited.size} Authoring folders; ${queue.length} queued.`);
+    scanned += 1;
+    if (scanned % 50 === 0) options.onProgress?.(`Scanned ${scanned} Authoring folders; ${queue.length} queued.`);
+    return true;
   }
+
+  // Failures are recorded rather than rejected so in-flight reads settle before returning.
+  const inFlight = new Set<Promise<void>>();
+  let scanned = 0;
+  let failure: unknown;
+  let unsupported = false;
+  while ((queue.length > 0 || inFlight.size > 0) && failure === undefined && !unsupported) {
+    while (queue.length > 0 && inFlight.size < concurrency) {
+      const entry = queue.shift()!;
+      if (visited.has(entry.id)) continue;
+      visited.add(entry.id);
+      const task: Promise<void> = read(entry)
+        .then(ok => { if (!ok) unsupported = true; }, (error: unknown) => { failure ??= error; })
+        .finally(() => inFlight.delete(task));
+      inFlight.add(task);
+    }
+    if (inFlight.size > 0) await Promise.race(inFlight);
+  }
+  await Promise.all(inFlight);
+  if (failure !== undefined) throw failure;
+  if (unsupported) return undefined;
   options.onProgress?.(`Completed Authoring scan across ${visited.size} folders.`);
   return [...candidates.values()].sort((a, b) =>
     [...a.sourceFolderPath, a.sourceLessonTitle].join('\u0000').localeCompare([...b.sourceFolderPath, b.sourceLessonTitle].join('\u0000'))
@@ -226,6 +254,9 @@ async function discoverWithFolderApi(
 export async function discoverLessons(page: Page, options: DiscoveryOptions): Promise<LessonCandidate[]> {
   const limit = options.maxExpansions ?? 1000;
   if (!Number.isInteger(limit) || limit < 1) throw new Error('maxExpansions must be a positive integer.');
+  if (options.concurrency !== undefined && (!Number.isInteger(options.concurrency) || options.concurrency < 1)) {
+    throw new Error('concurrency must be a positive integer.');
+  }
   await page.locator('#openButton').click();
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: options.timeoutMs });

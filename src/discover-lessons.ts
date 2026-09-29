@@ -9,6 +9,8 @@ async function main(): Promise<void> {
   const config = await loadConfig(readArgument('--config') ?? 'configs/local.json', parseRequestOverrides(readArgument('--request-json')), { libraryDiscovery: true });
   const maxExpansions = Number(readArgument('--max-expansions') ?? 1000);
   if (!Number.isInteger(maxExpansions) || maxExpansions < 1) throw new Error('--max-expansions must be a positive integer.');
+  const concurrency = Number(readArgument('--concurrency') ?? 4);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('--concurrency must be an integer from 1 to 8.');
   const roots = readArgument('--roots')?.split('|').map(root => root.trim()).filter(Boolean);
   if (roots && !roots.length) throw new Error('--roots must contain at least one folder name.');
   const query = readArgument('--query');
@@ -25,6 +27,7 @@ async function main(): Promise<void> {
       query: query ?? '',
       ...(exactTitle !== undefined ? { exactTitle } : {}),
       maxExpansions,
+      concurrency,
       timeoutMs: config.browser.actionTimeoutMs,
       onProgress: message => console.log(message)
     });
