@@ -1,6 +1,6 @@
 # LAMS automation
 
-This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It selects and verifies the configured course, copies or renames exact designs, writes iRAT and AE Assessment questions, imports embedded DOCX images into CKEditor, applies activity settings and Team Setup associations, and reconciles AE Assessment nodes, permission gates, and reviewed linear transitions. It can remove an exact transition that bypasses a planned gate and replace an exact planned gate with verified incorrect settings. It does not infer that unrelated nodes are extra, delete arbitrary nodes/questions, or publish learner lessons.
+This project contains the reusable Playwright layer for the LAMS TBL authoring workflow. It opens the global Authoring library without requiring a course, copies or renames exact designs, writes iRAT and AE Assessment questions, imports embedded DOCX images into CKEditor, applies activity settings and Team Setup associations, and reconciles AE Assessment nodes, permission gates, and reviewed linear transitions. It can remove an exact transition that bypasses a planned gate and replace an exact planned gate with verified incorrect settings. It does not infer that unrelated nodes are extra, delete arbitrary nodes/questions, or publish learner lessons.
 
 ## Agent skills
 
@@ -251,13 +251,13 @@ The preflight refuses invalid data and derives a deterministic plan that:
 - fixes all video-specified AE activity settings, with optional SoT overrides only for attempts and passing mark;
 - checks every gate against its adjacent AE nodes and following question number.
 
-To inspect one exact AE activity in the configured course without saving, first add an evidence-backed `selectors.aeOpenActivity` to ignored `configs/local.json`. Then run:
+To inspect one exact AE activity in the Authoring library without saving, first add an evidence-backed `selectors.aeOpenActivity` to ignored `configs/local.json`. Then run:
 
 ```bash
 node scripts/run.mjs inspect:ae --config configs/local.json --ae-json <AE_JSON> --node "<EXACT_AE_NODE_TITLE>" --request-json '<REQUEST_JSON>'
 ```
 
-The command verifies the configured course heading, destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
+The command verifies the destination lesson, complete AE graph, and exact node title before opening the activity. It compares all 14 required checkbox settings and exits with code 2 on a content mismatch. The command rejects `--commit`; no AE settings are saved. If a node, selector, or checkbox is missing or ambiguous, it stops and saves diagnostics under `artifacts/`.
 
 Write the reviewed AE plan to an existing lesson, creating missing Assessment nodes, permission gates, questions, and linear transitions when required:
 
@@ -421,7 +421,7 @@ node scripts/run.mjs plan:ae --ae-json 'ae-example'
 
 Lookup searches the current project, Documents, Downloads, and Desktop recursively. Hidden and generated directories and symlink entries are skipped. Exact filenames take priority; multiple remaining matches are listed for selection. In conversation, choose a candidate by number or distinguishing name and the agent passes its resolved path. Outputs such as `--out` still use literal paths.
 
-The course is configurable through `workspaceCourse` in `--request-json`; there is no playground allowlist. An exact course match wins, otherwise navigation accepts one unique case-insensitive partial match and stops on ambiguity. The global Authoring library may expose folders outside the selected course. The shared navigation helper uses the first visible matching control in DOM order for non-course navigation. Content-specific lesson and graph checks remain. Learner-facing `lesson:index` retains its separate `--commit` requirement.
+Only publishing and monitoring require `workspaceCourse` in `--request-json` (or its local fallback). All Authoring work skips course selection and must not ask for this field. There is no playground allowlist. An exact course match wins, otherwise navigation accepts one unique case-insensitive partial match and stops on ambiguity. The Authoring library is global; use exact folder paths and design titles to resolve targets. The shared navigation helper uses the first visible matching control in DOM order for non-course navigation. Content-specific lesson and graph checks remain. Learner-facing `lesson:index` retains its separate `--commit` requirement.
 
 Copies default to the source lesson folder when `destinationFolderPath` is omitted from the per-run request, even if local configuration has another destination. Supply `destinationFolderPath` only to save elsewhere. Existing-lesson edits and renames save in place.
 

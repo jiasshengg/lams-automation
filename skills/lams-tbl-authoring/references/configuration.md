@@ -21,7 +21,7 @@ Users need not supply an exact source title or folder if they can be resolved fr
 | Field | Meaning |
 |---|---|
 | `baseUrl` | Stable LAMS entry URL; keep in local configuration |
-| `workspaceCourse` | Course search to open; an exact match wins, otherwise one unique case-insensitive partial match is accepted |
+| `workspaceCourse` | Required only for publishing/monitoring; never required or selected for Authoring. An exact course match wins, otherwise one unique case-insensitive partial match is accepted |
 | `sourceFolderPath` | Ordered folder names leading to the source lesson |
 | `sourceLessonTitle` | Exact existing lesson title |
 | `openSourceAsCopy` | Optional explicit instruction to use LAMS's **Open a copy** control for a read-only source |

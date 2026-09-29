@@ -7,6 +7,8 @@ description: Locate, copy with Save As, or rename a LAMS authoring lesson, inclu
 
 Read [shared operating rules](../lams-tbl-authoring/references/shared.md) and the copy/rename fields in [configuration](../lams-tbl-authoring/references/configuration.md).
 
+Do not ask for `workspaceCourse` for any Authoring operation, including copying and renaming. Only publishing and monitoring require it.
+
 Resolve the source lesson and folder, requested new title, and copy destination from the user's request and available evidence. An existing-lesson rename uses `sourceFolderPath`, `sourceLessonTitle`, and `lessonTitle` and stays in the same folder. Local filename lookup is separate from LAMS library folder resolution.
 
 If the exact lesson title or folder is unknown, use read-only discovery. Users may supply module, TBL number, and academic year rather than exact internal fields:
@@ -26,7 +28,7 @@ The older exact-title locator remains available when the title and candidate roo
 node scripts/run.mjs find:lesson --config configs/local.json --title '<EXACT_TITLE>' --roots '<ROOT_A>|<ROOT_B>'
 ```
 
-Unlike `discover:lessons`, `find:lesson` uses only the course in local configuration and returns the first exact title found. It does not prove uniqueness across the library.
+Like `discover:lessons`, `find:lesson` opens the global Authoring library without selecting a workspace course. It returns the first exact title found under the supplied roots and does not prove uniqueness across the library.
 
 ```bash
 node scripts/run.mjs copy:lesson --config configs/local.json --request-json '<REQUEST_JSON>'
