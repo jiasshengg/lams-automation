@@ -60,6 +60,23 @@ test('Authoring accepts no workspace course while publishing and monitoring requ
   }
 });
 
+test('library discovery accepts a fresh machine-only config without weakening authoring validation', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lams-discovery-config-'));
+  try {
+    const configPath = path.join(directory, 'config.json');
+    await writeFile(configPath, JSON.stringify({ browser: { userDataDir: '.playwright/lams-profile' } }));
+    const config = await loadConfig(configPath, {}, { libraryDiscovery: true });
+    expect(config.baseUrl).toBe(DEFAULT_LAMS_BASE_URL);
+    expect(config.browser.userDataDir).toBe('.playwright/lams-profile');
+    expect(config.workspaceCourse).toBeUndefined();
+    expect(config.sourceLessonTitle).toBeUndefined();
+    expect(config.sourceFolderPath).toBeUndefined();
+    await expect(loadConfig(configPath)).rejects.toThrow('must be a non-empty string');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('rejects attempts to override stable environment fields per run', () => {
   expect(() => parseRequestOverrides(JSON.stringify({ baseUrl: 'https://example.invalid' }))).toThrow(
     'cannot override stable environment fields'

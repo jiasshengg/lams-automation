@@ -223,7 +223,7 @@ const requestOverrideKeys = [
 export async function loadConfig(
   configPath: string,
   overrides: Partial<LamsConfig> = {},
-  options: { defaultDestinationToSource?: boolean; requireWorkspaceCourse?: boolean } = {}
+  options: { defaultDestinationToSource?: boolean; requireWorkspaceCourse?: boolean; libraryDiscovery?: boolean } = {}
 ): Promise<LamsConfig> {
   const absolutePath = await resolveInputFile(configPath, '.json');
   const parsed: unknown = JSON.parse(await readFile(absolutePath, 'utf8'));
@@ -250,23 +250,25 @@ export async function loadConfig(
     throw new Error('Configuration field "workspaceCourse" must be a string when supplied.');
   }
 
-  for (const key of requiredStrings) {
+  for (const key of options.libraryDiscovery ? ['baseUrl'] as const : requiredStrings) {
     if (typeof merged[key] !== 'string' || merged[key].trim() === '') {
       throw new Error(`Configuration field "${key}" must be a non-empty string.`);
     }
   }
-  for (const key of ['expectedAENodes', 'expectedAEGates'] as const) {
-    if (!Number.isInteger(merged[key]) || Number(merged[key]) < 0) {
-      throw new Error(`Configuration field "${key}" must be a non-negative integer.`);
+  if (!options.libraryDiscovery) {
+    for (const key of ['expectedAENodes', 'expectedAEGates'] as const) {
+      if (!Number.isInteger(merged[key]) || Number(merged[key]) < 0) {
+        throw new Error(`Configuration field "${key}" must be a non-negative integer.`);
+      }
     }
-  }
-  for (const key of ['sourceFolderPath', 'destinationFolderPath'] as const) {
-    if (!Array.isArray(merged[key]) || merged[key].length === 0 || merged[key].some((part) => typeof part !== 'string' || part.trim() === '')) {
-      throw new Error(`Configuration field "${key}" must be a non-empty array of folder names.`);
+    for (const key of ['sourceFolderPath', 'destinationFolderPath'] as const) {
+      if (!Array.isArray(merged[key]) || merged[key].length === 0 || merged[key].some((part) => typeof part !== 'string' || part.trim() === '')) {
+        throw new Error(`Configuration field "${key}" must be a non-empty array of folder names.`);
+      }
     }
-  }
-  if (!Array.isArray(merged.expectedFlow) || merged.expectedFlow.length === 0 || merged.expectedFlow.some((name) => typeof name !== 'string' || name.trim() === '')) {
-    throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
+    if (!Array.isArray(merged.expectedFlow) || merged.expectedFlow.length === 0 || merged.expectedFlow.some((name) => typeof name !== 'string' || name.trim() === '')) {
+      throw new Error('Configuration field "expectedFlow" must be a non-empty array of exact node names.');
+    }
   }
   validateExpectedGateProperties(merged.expectedGateProperties);
   validateLessonIndex(merged.lessonIndex);

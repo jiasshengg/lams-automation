@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   const roots = (readArgument('--roots') ?? '').split('|').map((part) => part.trim()).filter(Boolean);
   if (roots.length === 0) throw new Error('find:lesson requires --roots as a "|"-separated list of top-level folder names.');
 
-  const config = await loadConfig(configPath);
+  const config = await loadConfig(configPath, {}, { libraryDiscovery: true });
   const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());

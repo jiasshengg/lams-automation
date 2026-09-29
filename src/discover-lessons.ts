@@ -6,7 +6,7 @@ import { discoverLessons } from './lams/lesson-discovery.js';
 
 async function main(): Promise<void> {
   if (process.argv.includes('--commit')) throw new Error('discover:lessons is read-only and does not accept --commit.');
-  const config = await loadConfig(readArgument('--config') ?? 'configs/local.json', parseRequestOverrides(readArgument('--request-json')));
+  const config = await loadConfig(readArgument('--config') ?? 'configs/local.json', parseRequestOverrides(readArgument('--request-json')), { libraryDiscovery: true });
   const maxExpansions = Number(readArgument('--max-expansions') ?? 1000);
   if (!Number.isInteger(maxExpansions) || maxExpansions < 1) throw new Error('--max-expansions must be a positive integer.');
   const roots = readArgument('--roots')?.split('|').map(root => root.trim()).filter(Boolean);
