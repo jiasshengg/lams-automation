@@ -1,13 +1,19 @@
+import { normaliseLibraryName } from './library-names.js';
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export interface DiscoveryOptions {
-  /** Exact direct child folder names under Courses; omitted searches all of Courses. */
+  /**
+   * Folders under Courses to search, each a direct child name or a " > "-separated path
+   * (a leading "Courses" is optional); omitted searches all of Courses.
+   */
   roots?: string[];
   /** Every whitespace-separated term must occur in the title or folder path. */
   query?: string;
   /** When supplied, return only lessons whose title exactly matches this value. */
   exactTitle?: string;
   maxExpansions?: number;
+  /** Folder endpoint reads in flight at once; drops to 1 after a non-JSON response. Defaults to 4. */
+  concurrency?: number;
   timeoutMs: number;
   onProgress?: (message: string) => void;
 }
@@ -70,21 +76,34 @@ function isVisiblyExpanded(rows: TreeRow[], index: number): boolean {
   return row.expanded === 'true' || (rows[index + 1]?.level ?? -1) > row.level;
 }
 
+/** Split a root into folder names below Courses, e.g. "A > B" or "Courses > A > B". */
+export function rootPath(root: string): string[] {
+  const segments = root.split('>').map(segment => segment.trim()).filter(Boolean);
+  if (segments.length > 1 && normaliseLibraryName(segments[0]!) === 'courses') segments.shift();
+  if (!segments.length) throw new Error(`Invalid --roots entry "${root}"; expected a folder name or path under Courses.`);
+  return segments;
+}
+
+function sameLibraryPath(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((name, index) => normaliseLibraryName(name) === normaliseLibraryName(b[index]!));
+}
+
 function queryTerms(query: string | undefined): string[] {
-  return (query ?? '').toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  return (query ?? '').split(/\s+/u).filter(Boolean).map(normaliseLibraryName);
 }
 
 function matchesCandidate(candidate: LessonCandidate, terms: string[], exactTitle: string | undefined): boolean {
-  const searchable = [...candidate.sourceFolderPath, candidate.sourceLessonTitle].join(' ').toLocaleLowerCase();
+  const searchable = [...candidate.sourceFolderPath, candidate.sourceLessonTitle].map(normaliseLibraryName).join(' ');
   return terms.every(term => searchable.includes(term)) &&
-    (exactTitle === undefined || candidate.sourceLessonTitle.toLocaleLowerCase() === exactTitle);
+    (exactTitle === undefined || normaliseLibraryName(candidate.sourceLessonTitle) === exactTitle);
 }
 
 /**
- * Traverse LAMS's observed lazy-folder endpoint one request at a time. The server
- * has returned HTML under burst traffic, so this deliberately avoids Promise.all.
- * Any non-JSON response abandons the shortcut before returning results and lets
- * the verified DOM traversal take over.
+ * Traverse LAMS's observed lazy-folder endpoint with a small bounded pool. The server
+ * has returned HTML under unbounded burst traffic, so the pool never exceeds
+ * `concurrency` and drops to one request at a time after any non-JSON response.
+ * A non-JSON response that survives the retry abandons the shortcut before
+ * returning results and lets the verified DOM traversal take over.
  */
 async function discoverWithFolderApi(
   page: Page,
@@ -97,6 +116,7 @@ async function discoverWithFolderApi(
   const baseUrl = new URL(lamsUrl, page.url());
   if (baseUrl.origin !== new URL(page.url()).origin) return undefined;
   const limit = options.maxExpansions ?? 1000;
+  let concurrency = options.concurrency ?? 4;
   let requests = 0;
 
   async function getFolder(folderID: number | null, retry = true): Promise<FolderContentsResponse | undefined> {
@@ -126,6 +146,10 @@ async function discoverWithFolderApi(
     if (!response.ok || !response.contentType.toLocaleLowerCase().includes('json')) {
       const detail = `Folder ${folderID ?? 'root'}: HTTP ${response.status}, type ${response.contentType || 'missing'}, final URL ${response.location}, redirected=${response.redirected}`;
       options.onProgress?.(detail);
+      if (concurrency > 1) {
+        concurrency = 1;
+        options.onProgress?.('Slowing folder reads to one at a time after a non-JSON response.');
+      }
       if (response.redirected && /login|signin|saml|authorize/i.test(response.location)) {
         throw new Error(`Discovery reached authentication instead of folder data. ${detail}. Run npm run login:check with the same profile; no complete results were returned.`);
       }
@@ -157,24 +181,32 @@ async function discoverWithFolderApi(
   const coursesEntry = { id: courses[0]!.folderID, path: ['Courses'] };
   let queue: Array<{ id: number; path: string[] }> = [coursesEntry];
   if (options.roots?.length) {
-    const courseContents = await getFolder(coursesEntry.id);
-    if (!courseContents) return undefined;
+    // Resolve each root one level at a time; shared prefixes are only fetched once.
+    const contents = new Map<number, FolderContentsResponse>();
     queue = [];
     for (const root of options.roots) {
-      const matches = courseContents.folders!.filter(folder => folder.name === root);
-      if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
-      queue.push({ id: matches[0]!.folderID, path: ['Courses', root] });
+      let current = coursesEntry;
+      for (const segment of rootPath(root)) {
+        let content = contents.get(current.id);
+        if (!content) {
+          content = await getFolder(current.id);
+          if (!content) return undefined;
+          contents.set(current.id, content);
+        }
+        const displayName = (folder: FolderEntry): string => folder.isRunSequencesFolder ? 'Run sequences' : folder.name;
+        const matches = content.folders!.filter(folder => normaliseLibraryName(displayName(folder)) === normaliseLibraryName(segment));
+        if (matches.length !== 1) throw new Error(`Expected one folder ${[...current.path, segment].join(' > ')}; found ${matches.length}.`);
+        current = { id: matches[0]!.folderID, path: [...current.path, displayName(matches[0]!)] };
+      }
+      queue.push(current);
     }
   }
 
   const candidates = new Map<number, LessonCandidate>();
   const visited = new Set<number>();
-  while (queue.length > 0) {
-    const entry = queue.shift()!;
-    if (visited.has(entry.id)) continue;
-    visited.add(entry.id);
+  async function read(entry: { id: number; path: string[] }): Promise<boolean> {
     const content = await getFolder(entry.id);
-    if (!content) return undefined;
+    if (!content) return false;
     for (const design of content.learningDesigns!) {
       if (typeof design.name !== 'string' || !Number.isInteger(design.learningDesignId)) {
         throw new Error('LAMS folder discovery returned an invalid design entry.');
@@ -188,8 +220,31 @@ async function discoverWithFolderApi(
       }
       queue.push({ id: folder.folderID, path: [...entry.path, folder.isRunSequencesFolder ? 'Run sequences' : folder.name] });
     }
-    if (visited.size % 50 === 0) options.onProgress?.(`Scanned ${visited.size} Authoring folders; ${queue.length} queued.`);
+    scanned += 1;
+    if (scanned % 50 === 0) options.onProgress?.(`Scanned ${scanned} Authoring folders; ${queue.length} queued.`);
+    return true;
   }
+
+  // Failures are recorded rather than rejected so in-flight reads settle before returning.
+  const inFlight = new Set<Promise<void>>();
+  let scanned = 0;
+  let failure: unknown;
+  let unsupported = false;
+  while ((queue.length > 0 || inFlight.size > 0) && failure === undefined && !unsupported) {
+    while (queue.length > 0 && inFlight.size < concurrency) {
+      const entry = queue.shift()!;
+      if (visited.has(entry.id)) continue;
+      visited.add(entry.id);
+      const task: Promise<void> = read(entry)
+        .then(ok => { if (!ok) unsupported = true; }, (error: unknown) => { failure ??= error; })
+        .finally(() => inFlight.delete(task));
+      inFlight.add(task);
+    }
+    if (inFlight.size > 0) await Promise.race(inFlight);
+  }
+  await Promise.all(inFlight);
+  if (failure !== undefined) throw failure;
+  if (unsupported) return undefined;
   options.onProgress?.(`Completed Authoring scan across ${visited.size} folders.`);
   return [...candidates.values()].sort((a, b) =>
     [...a.sourceFolderPath, a.sourceLessonTitle].join('\u0000').localeCompare([...b.sourceFolderPath, b.sourceLessonTitle].join('\u0000'))
@@ -199,11 +254,14 @@ async function discoverWithFolderApi(
 export async function discoverLessons(page: Page, options: DiscoveryOptions): Promise<LessonCandidate[]> {
   const limit = options.maxExpansions ?? 1000;
   if (!Number.isInteger(limit) || limit < 1) throw new Error('maxExpansions must be a positive integer.');
+  if (options.concurrency !== undefined && (!Number.isInteger(options.concurrency) || options.concurrency < 1)) {
+    throw new Error('concurrency must be a positive integer.');
+  }
   await page.locator('#openButton').click();
   const dialog = page.getByRole('dialog', { name: 'Open design', exact: true });
   await dialog.waitFor({ state: 'visible', timeout: options.timeoutMs });
   const terms = queryTerms(options.query);
-  const exactTitle = options.exactTitle?.toLocaleLowerCase();
+  const exactTitle = options.exactTitle === undefined ? undefined : normaliseLibraryName(options.exactTitle);
   const apiResults = await discoverWithFolderApi(page, options, terms, exactTitle);
   if (apiResults) return apiResults;
   options.onProgress?.('Folder endpoint did not return JSON; continuing with rendered-tree discovery.');
@@ -251,17 +309,21 @@ export async function discoverLessons(page: Page, options: DiscoveryOptions): Pr
   if (loadedCourses?.empty) {
     throw new Error('Courses rendered as empty after the folder API failed. Discovery is incomplete; verify access/session with login:check and retry. No complete results were returned.');
   }
-  for (const root of options.roots ?? []) {
-    const matches = rows.filter(row => row.folder && row.path.length === 2 && row.path[0] === 'Courses' && row.text === root);
-    if (matches.length !== 1) throw new Error(`Expected one folder Courses > ${root}; found ${matches.length}.`);
-  }
+  const rootPaths = (options.roots ?? []).map(root => ['Courses', ...rootPath(root)]);
   const inScope = (row: TreeRow): boolean => row.path[0] === 'Courses' &&
-    (!options.roots?.length || options.roots.includes(row.path[1] ?? ''));
+    (!rootPaths.length || rootPaths.some(root => row.path.length >= root.length && sameLibraryPath(row.path.slice(0, root.length), root)));
+  // Folders on the way to a nested root must be opened, but their other contents are out of scope.
+  const leadsToRoot = (row: TreeRow): boolean =>
+    rootPaths.some(root => row.path.length < root.length && sameLibraryPath(row.path, root.slice(0, row.path.length)));
   while (true) {
     rows = await readTree(dialog);
-    const index = rows.findIndex((row, index) => inScope(row) && row.folder && !row.empty && !isVisiblyExpanded(rows, index));
+    const index = rows.findIndex((row, index) => (inScope(row) || leadsToRoot(row)) && row.folder && !row.empty && !isVisiblyExpanded(rows, index));
     if (index < 0) break;
     await expand(index, rows);
+  }
+  for (const root of rootPaths) {
+    const matches = rows.filter(row => row.folder && sameLibraryPath(row.path, root));
+    if (matches.length !== 1) throw new Error(`Expected one folder ${root.join(' > ')}; found ${matches.length}.`);
   }
   return rows.filter(row => !row.folder && inScope(row) &&
       matchesCandidate({ sourceLessonTitle: row.text, sourceFolderPath: row.path.slice(0, -1) }, terms, exactTitle))

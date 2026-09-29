@@ -10,7 +10,7 @@ import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
  */
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
-  const config = await loadConfig(configPath);
+  const config = await loadConfig(configPath, {}, { requireWorkspaceCourse: process.argv.includes('--monitor') });
   const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config, { headless: false }));
 
   const seen = new Set<string>();

@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import type { LamsConfig, LocatorSpec } from '../config.js';
+import { requireWorkspaceCourse, type LamsConfig, type LocatorSpec } from '../config.js';
 import { saveDiagnostics } from './diagnostics.js';
 import { fromSpec } from './locators.js';
 
@@ -22,6 +22,7 @@ export async function openLams(page: Page, config: LamsConfig): Promise<void> {
 }
 
 export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Promise<void> {
+  requireWorkspaceCourse(config);
   const exactHeading = page.getByRole('heading', { name: config.workspaceCourse, exact: true });
   const partialHeading = page.getByRole('heading', { name: config.workspaceCourse, exact: false });
   const toggle = page.getByRole('button', { name: 'Toggle course menu', exact: true });
@@ -81,6 +82,7 @@ export async function selectWorkspaceCourse(page: Page, config: LamsConfig): Pro
  * different course's lesson rows.
  */
 export async function openCoursePage(page: Page, config: LamsConfig): Promise<void> {
+  requireWorkspaceCourse(config);
   await openLams(page, config);
   await selectWorkspaceCourse(page, config);
 }

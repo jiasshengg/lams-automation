@@ -9,12 +9,11 @@ import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './confi
 import { resolveAEQuestionImages } from './docx/question-images.js';
 import { resolveInputFile } from './input-file.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
-import { openAuthoring } from './lams/authoring.js';
+import { openAuthoringLibrary } from './lams/authoring.js';
 import { inspectAuthoringGraph } from './lams/authoring.js';
 import { planAEGraphReconciliation, reconcileAndWriteAEGraph } from './lams/ae-graph.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const repairJson = readArgument('--repair-json');
@@ -36,9 +35,7 @@ async function main(): Promise<void> {
   const page = context.pages()[0] ?? await context.newPage();
   let activePage = page;
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
     if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle differs from the requested lesson.');
     const expectations = tryExpectedTBLGraph(await inspectAuthoringGraph(activePage), config, plan, repair);

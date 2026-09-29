@@ -1,10 +1,9 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import path from 'node:path';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
-import { openAuthoring } from './lams/authoring.js';
+import { openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary, renameLesson } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
@@ -20,9 +19,7 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await openLessonFromLibrary(activePage, config.sourceFolderPath, config.sourceLessonTitle, config, {
       absentTitle: config.lessonTitle
     });

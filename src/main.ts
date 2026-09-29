@@ -1,10 +1,10 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import path from 'node:path';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
-import { openAuthoring } from './lams/authoring.js';
+import { openAuthoringLibrary } from './lams/authoring.js';
 import { inspectPageSurface, saveDiagnostics } from './lams/diagnostics.js';
 import { copyLesson, openSourceLesson } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse, SelectorRequiredError } from './lams/navigation.js';
+import { SelectorRequiredError } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
@@ -20,9 +20,7 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    const authoringPage = await openAuthoring(page, config);
+    const authoringPage = await openAuthoringLibrary(page, config);
     activePage = authoringPage;
     await openSourceLesson(authoringPage, config);
     const result = await copyLesson(authoringPage, config, { commit });

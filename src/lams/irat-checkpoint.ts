@@ -14,7 +14,6 @@ export interface IratCheckpointData {
   schemaVersion: 1;
   requestHash: string;
   lesson: {
-    workspaceCourse: string;
     folderPath: string[];
     title: string;
   };
@@ -43,7 +42,6 @@ export class IratCheckpointStore {
   ): Promise<IratCheckpointStore> {
     const requestHash = hashIratRequest(config, request, questionImages);
     const identity = {
-      workspaceCourse: config.workspaceCourse,
       folderPath: [...config.destinationFolderPath],
       title: config.lessonTitle
     };
@@ -112,7 +110,6 @@ export function hashIratRequest(
   questionImages: Map<string, QuestionImageAsset[]> = new Map()
 ): string {
   return sha256(stableJson({
-    workspaceCourse: config.workspaceCourse,
     destinationFolderPath: config.destinationFolderPath,
     lessonTitle: config.lessonTitle,
     request,

@@ -7,7 +7,13 @@ description: Locate, copy with Save As, or rename a LAMS authoring lesson, inclu
 
 Read [shared operating rules](../lams-tbl-authoring/references/shared.md) and the copy/rename fields in [configuration](../lams-tbl-authoring/references/configuration.md).
 
+Library title and folder matching ignores case, all whitespace (including missing spaces). Full-title matching still requires the same letters, numbers, and punctuation. Use the saved spelling returned by discovery in subsequent plans; new titles are saved as supplied. Ambiguous matches must be resolved, never selected by position.
+
+Do not ask for `workspaceCourse` for any Authoring operation, including copying and renaming. Only publishing and monitoring require it.
+
 Resolve the source lesson and folder, requested new title, and copy destination from the user's request and available evidence. An existing-lesson rename uses `sourceFolderPath`, `sourceLessonTitle`, and `lessonTitle` and stays in the same folder. Local filename lookup is separate from LAMS library folder resolution.
+
+Discovery (`discover:lessons` and `find:lesson`) accepts a machine-only local config: URL, browser/profile settings, and selectors. It does not require saved course, lesson, folder, cohort, or graph-expectation values. Authoring commands still require their per-run target/content inputs.
 
 If the exact lesson title or folder is unknown, use read-only discovery. Users may supply module, TBL number, and academic year rather than exact internal fields:
 
@@ -16,17 +22,17 @@ node scripts/run.mjs discover:lessons --config configs/local.json --query 'FOM T
 node scripts/run.mjs discover:lessons --config configs/local.json --exact-title '[Jss-Demo-Test]'
 ```
 
-This opens the global Authoring library directly and searches all accessible folders under `Courses`; selecting a workspace course would not scope that library. Every whitespace-separated lesson-query term must occur somewhere in the combined title and folder path, case-insensitively. Use `--exact-title '<TITLE>'` instead of `--query` when title equality is required. Do not invent a calendar year for an ambiguous “last year”; resolve it from context or ask. Omit both search options to list all lessons. Optional `--roots '<ROOT_A>|<ROOT_B>'` limits traversal to exact direct child folders under `Courses`; these folder names need not equal the course name. Discovery reads the observed lazy-folder endpoint sequentially because burst traffic has produced non-JSON responses. A non-JSON response falls back to verified DOM traversal: `treeview-empty` proves an unexpandable folder is empty, and rendered descendants prove a folder is open when `aria-expanded` remains false; other expansion failures still stop discovery. `--max-expansions` defaults to 1000 folder reads or expansions; hitting the limit fails rather than presenting partial results as complete.
+This opens the global Authoring library directly and searches all accessible folders under `Courses`; selecting a workspace course would not scope that library. Every whitespace-separated lesson-query term must occur somewhere in the combined title and folder path, case-insensitively. Use `--exact-title '<TITLE>'` instead of `--query` when title equality is required. Do not invent a calendar year for an ambiguous “last year”; resolve it from context or ask. Omit both search options to list all lessons. Optional `--roots '<ROOT_A>|<ROOT_B>'` limits traversal to those folders under `Courses`; each root is a direct child name or a ` > `-separated path such as `'! My Courses > Year 1 - Cohort2026 NEW !!! > 2_Foundations of Medicine_FOM'` (a leading `Courses >` is optional). A bare name is only matched directly under `Courses`, so give nested folders as a path. Folder names need not equal the course name. Narrow roots make discovery much faster than scanning all of `Courses`. Discovery reads the observed lazy-folder endpoint through a bounded pool (`--concurrency`, default 4, maximum 8) because unbounded burst traffic has produced non-JSON responses; after any non-JSON response it drops to one read at a time for the rest of the run. A non-JSON response falls back to verified DOM traversal: `treeview-empty` proves an unexpandable folder is empty, and rendered descendants prove a folder is open when `aria-expanded` remains false; other expansion failures still stop discovery. `--max-expansions` defaults to 1000 folder reads or expansions; hitting the limit fails rather than presenting partial results as complete.
 
 The output lists every matching candidate with `sourceLessonTitle` and `sourceFolderPath`. Resolve the intended candidate from the request and evidence; ask the user to choose when several plausible matches remain. Pass the resolved fields to the write command. Never choose the first match automatically or claim that discovery itself copies a lesson.
 
-The older exact-title locator remains available when the title and candidate roots are already known:
+The full-title locator is also available when the title and candidate roots are already known:
 
 ```bash
 node scripts/run.mjs find:lesson --config configs/local.json --title '<EXACT_TITLE>' --roots '<ROOT_A>|<ROOT_B>'
 ```
 
-Unlike `discover:lessons`, `find:lesson` uses only the course in local configuration and returns the first exact title found. It does not prove uniqueness across the library.
+Like `discover:lessons`, `find:lesson` opens the global Authoring library without selecting a workspace course. It uses the same discovery engine to scan all supplied roots and requires one matching lesson; duplicate matches are reported with their paths.
 
 ```bash
 node scripts/run.mjs copy:lesson --config configs/local.json --request-json '<REQUEST_JSON>'

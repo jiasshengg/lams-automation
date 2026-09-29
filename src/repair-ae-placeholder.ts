@@ -2,10 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { resolveInputFile } from './input-file.js';
-import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
+import { inspectAuthoringGraph, openAuthoringLibrary } from './lams/authoring.js';
 import { parsePlaceholderRepair, persistPlaceholderRepairs, projectPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 
 function argument(name: string) {
@@ -24,9 +23,7 @@ async function main() {
   const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   let active = context.pages()[0] ?? await context.newPage();
   try {
-    await openLams(active, config);
-    await selectWorkspaceCourse(active, config);
-    active = await openAuthoring(active, config);
+    active = await openAuthoringLibrary(active, config);
     await openLessonFromLibrary(active, config.destinationFolderPath, config.lessonTitle, config);
     const expected = projectPlaceholderRepairs(await inspectAuthoringGraph(active), plan);
     if (process.argv.includes('--dry-run')) { console.log('Exact placeholder topology verified; no changes made.'); return; }

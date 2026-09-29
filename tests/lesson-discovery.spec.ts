@@ -60,7 +60,7 @@ test('searches non-playground folders, returns duplicate titles with distinct pa
 
 test('matches an exact title without accepting a folder or title substring', async ({ page }) => {
   await library(page);
-  expect(await discoverLessons(page, { exactTitle: 'TBL06 revision', timeoutMs: 2000 })).toEqual([
+  expect(await discoverLessons(page, { exactTitle: '  tbl06REVISION  ', timeoutMs: 2000 })).toEqual([
     { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2025', 'FOM'] },
     { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2026', 'FOM'] }
   ]);
@@ -68,7 +68,7 @@ test('matches an exact title without accepting a folder or title substring', asy
   expect(await discoverLessons(page, { exactTitle: 'TBL06', timeoutMs: 2000 })).toEqual([]);
 });
 
-test('reads the folder endpoint sequentially and matches exact titles', async ({ page }) => {
+test('reads the folder endpoint one at a time when concurrency is 1 and matches exact titles', async ({ page }) => {
   const children = new Map<number | null, { folders: Array<{ name: string; folderID: number }>; designs: Array<{ name: string; learningDesignId: number }> }>([
     [null, { folders: [{ name: 'Courses', folderID: -2 }], designs: [] }],
     [-2, { folders: [{ name: 'One', folderID: 1 }, { name: 'Two', folderID: 2 }], designs: [] }],
@@ -93,10 +93,64 @@ test('reads the folder endpoint sequentially and matches exact titles', async ({
     active -= 1;
   });
   await page.goto('https://lams.test/authoring');
-  expect(await discoverLessons(page, { exactTitle: '[Jss-Demo-Test]', timeoutMs: 2000 })).toEqual([
+  expect(await discoverLessons(page, { roots: [' one '], exactTitle: ' [jss-demo-test] ', concurrency: 1, timeoutMs: 2000 })).toEqual([
     { sourceLessonTitle: '[Jss-Demo-Test]', sourceFolderPath: ['Courses', 'One'] }
   ]);
   expect(maxActive).toBe(1);
+});
+
+async function wideLibrary(page: Page, htmlOnFirstLeaf = false): Promise<{ maxActive: () => number; activeAfterHtml: () => number }> {
+  // Courses holds 12 folders, each holding one lesson.
+  let active = 0;
+  let maxActive = 0;
+  let htmlSent = false;
+  let maxActiveAfterHtml = 0;
+  await page.route('https://lams.test/authoring', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<button id="openButton">Open</button><div role="dialog" aria-label="Open design">Open design</div><script>window.LAMS_URL="https://lams.test/lams/"</script>'
+  }));
+  await page.route('https://lams.test/lams/home/getFolderContents.do*', async route => {
+    const rawID = new URL(route.request().url()).searchParams.get('folderID')!;
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    if (htmlSent) maxActiveAfterHtml = Math.max(maxActiveAfterHtml, active);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    active -= 1;
+    const id = rawID === '' ? null : Number(rawID);
+    if (htmlOnFirstLeaf && id === 1 && !htmlSent) {
+      htmlSent = true;
+      return route.fulfill({ contentType: 'text/html', body: 'busy' });
+    }
+    const body = id === null ? { folders: [{ name: 'Courses', folderID: -2 }], learningDesigns: [] }
+      : id === -2 ? { folders: Array.from({ length: 12 }, (_, index) => ({ name: `Module ${index + 1}`, folderID: index + 1 })), learningDesigns: [] }
+      : { folders: [], learningDesigns: [{ name: `TBL ${id}`, learningDesignId: 100 + id }] };
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.goto('https://lams.test/authoring');
+  return { maxActive: () => maxActive, activeAfterHtml: () => maxActiveAfterHtml };
+}
+
+test('reads folders through a bounded pool and returns every lesson', async ({ page }) => {
+  const stats = await wideLibrary(page);
+  const results = await discoverLessons(page, { query: 'tbl', concurrency: 3, timeoutMs: 2000 });
+  expect(results).toHaveLength(12);
+  expect(results.map(result => result.sourceLessonTitle)).toContain('TBL 12');
+  expect(stats.maxActive()).toBe(3);
+});
+
+test('drops to one folder read at a time after a non-JSON response', async ({ page }) => {
+  const messages: string[] = [];
+  const stats = await wideLibrary(page, true);
+  expect(await discoverLessons(page, { query: 'tbl', concurrency: 4, timeoutMs: 2000, onProgress: m => messages.push(m) })).toHaveLength(12);
+  expect(messages).toContain('Slowing folder reads to one at a time after a non-JSON response.');
+  expect(stats.maxActive()).toBe(4);
+  // Reads already in flight may finish, but every read started afterwards runs alone.
+  expect(stats.activeAfterHtml()).toBe(1);
+});
+
+test('rejects a non-positive concurrency before reading folders', async ({ page }) => {
+  await wideLibrary(page);
+  await expect(discoverLessons(page, { concurrency: 0, timeoutMs: 2000 })).rejects.toThrow('concurrency must be a positive integer');
 });
 
 test('falls back to the rendered tree when the folder endpoint returns HTML', async ({ page }) => {
@@ -113,15 +167,67 @@ test('falls back to the rendered tree when the folder endpoint returns HTML', as
 
 test('limits traversal to requested roots and matches year in folder ancestry', async ({ page }) => {
   await library(page);
-  const results = await discoverLessons(page, { roots: ['Medicine 2026'], query: '2026 FOM TBL06', timeoutMs: 2000 });
+  const results = await discoverLessons(page, { roots: [' medicine2026 '], query: ' 2026  fom   tbl06 ', timeoutMs: 2000 });
   expect(results).toHaveLength(1);
   expect(results[0]!.sourceFolderPath).toEqual(['Courses', 'Medicine 2026', 'FOM']);
   await expect(page.getByRole('treeitem', { name: 'Medicine 2025', exact: true })).toHaveAttribute('aria-expanded', 'false');
 });
 
+test('limits rendered-tree traversal to a nested root path', async ({ page }) => {
+  await library(page);
+  expect(await discoverLessons(page, { roots: ['Courses > medicine 2025 > fom'], query: 'tbl06', timeoutMs: 2000 })).toEqual([
+    { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2025', 'FOM'] }
+  ]);
+  await expect(page.getByRole('treeitem', { name: 'Archive', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('treeitem', { name: 'Medicine 2026', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await library(page);
+  await expect(discoverLessons(page, { roots: ['Medicine 2025 > Missing'], timeoutMs: 2000 }))
+    .rejects.toThrow('Expected one folder Courses > Medicine 2025 > Missing; found 0.');
+});
+
+test('resolves nested root paths through the folder endpoint without reading sibling folders', async ({ page }) => {
+  const children = new Map<number | null, { folders: Array<{ name: string; folderID: number; isRunSequencesFolder?: boolean }>; designs: Array<{ name: string; learningDesignId: number }> }>([
+    [null, { folders: [{ name: 'Courses', folderID: -2 }], designs: [] }],
+    [-2, { folders: [{ name: '! My Courses', folderID: 1 }, { name: 'Other', folderID: 9 }], designs: [] }],
+    [1, { folders: [{ name: '2_Foundations of Medicine_FOM', folderID: 2 }, { name: 'Sibling', folderID: 8 }], designs: [] }],
+    [2, { folders: [{ name: 'ignored', folderID: 3, isRunSequencesFolder: true }], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 20 }] }],
+    [3, { folders: [], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 21 }] }],
+    [8, { folders: [], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 22 }] }],
+    [9, { folders: [], designs: [{ name: 'FOM TBL11 051026 2026Y1', learningDesignId: 23 }] }]
+  ]);
+  const requested: string[] = [];
+  await page.route('https://lams.test/authoring', route => route.fulfill({
+    contentType: 'text/html',
+    body: '<button id="openButton">Open</button><div role="dialog" aria-label="Open design">Open design</div><script>window.LAMS_URL="https://lams.test/lams/"</script>'
+  }));
+  await page.route('https://lams.test/lams/home/getFolderContents.do*', async route => {
+    const rawID = new URL(route.request().url()).searchParams.get('folderID')!;
+    requested.push(rawID);
+    const content = children.get(rawID === '' ? null : Number(rawID))!;
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ folders: content.folders, learningDesigns: content.designs }) });
+  });
+  await page.goto('https://lams.test/authoring');
+  expect(await discoverLessons(page, {
+    roots: ['! my courses > 2_Foundations of Medicine_FOM > run sequences'], query: 'tbl11', timeoutMs: 2000
+  })).toEqual([
+    { sourceLessonTitle: 'FOM TBL11 051026 2026Y1', sourceFolderPath: ['Courses', '! My Courses', '2_Foundations of Medicine_FOM', 'Run sequences'] }
+  ]);
+  expect(requested).toEqual(['', '-2', '1', '2', '3']);
+  await expect(discoverLessons(page, { roots: ['! My Courses > Missing'], timeoutMs: 2000 }))
+    .rejects.toThrow('Expected one folder Courses > ! My Courses > Missing; found 0.');
+});
+
 test('reports no matches without falling back to an unrelated lesson', async ({ page }) => {
   await library(page);
   expect(await discoverLessons(page, { roots: ['Empty'], query: 'TBL06', timeoutMs: 2000 })).toEqual([]);
+});
+
+test('searches compact names without spaces and preserves saved folder and title spelling', async ({ page }) => {
+  await library(page);
+  expect(await discoverLessons(page, { roots: ['medicine2026'], query: 'tbl06revision', timeoutMs: 2000 })).toEqual([
+    { sourceLessonTitle: 'TBL06 revision', sourceFolderPath: ['Courses', 'Medicine 2026', 'FOM'] }
+  ]);
+  expect(await discoverLessons(page, { roots: ['medicine2026'], query: 'tbl07revision', timeoutMs: 2000 })).toEqual([]);
 });
 
 test('refuses missing roots and incomplete traversal', async ({ page }) => {

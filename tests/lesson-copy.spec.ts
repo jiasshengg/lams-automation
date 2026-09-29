@@ -2,6 +2,37 @@ import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
 import { copyLesson, openLessonFromLibrary, openSourceLesson, renameLesson } from '../src/lams/lesson-copy.js';
 
+test('opens a uniquely matching lesson despite case and missing whitespace', async ({ page }) => {
+  await page.setContent(`
+    <button id="openButton" onclick="document.querySelector('[role=dialog]').hidden=false">Open</button>
+    <div role="dialog" aria-label="Open design" hidden>
+      <div role="treeitem">Courses</div>
+      <div role="treeitem">Medicine 2026</div>
+      <div role="treeitem">FOM   TBL06</div>
+      <button id="ldStoreDialogOpenButton" onclick="this.closest('[role=dialog]').hidden=true; document.querySelector('h1').hidden=false">Open</button>
+    </div><h1 hidden>FOM   TBL06</h1>`);
+  await openLessonFromLibrary(page, [' courses ', 'medicine2026'], ' fomtbl06 ', {
+    browser: { actionTimeoutMs: 2000 }
+  } as LamsConfig);
+  await expect(page.getByRole('heading', { name: 'FOM TBL06' })).toBeVisible();
+});
+
+for (const collision of ['lesson', 'folder']) {
+  test(`refuses ambiguous ${collision} names after case/whitespace normalisation`, async ({ page }) => {
+    await page.setContent(`
+      <button id="openButton">Open</button>
+      <div role="dialog" aria-label="Open design">
+        <div role="treeitem">Courses</div>
+        <div role="treeitem" onclick="document.body.dataset.selected='true'">FOM TBL06</div>
+        <div role="treeitem" onclick="document.body.dataset.selected='true'">fomtbl06</div>
+        <button id="ldStoreDialogOpenButton">Open</button>
+      </div>`);
+    await expect(openLessonFromLibrary(page, collision === 'folder' ? ['Courses', 'fom tbl06'] : ['Courses'],
+      'fom tbl06', { browser: { actionTimeoutMs: 2000 } } as LamsConfig)).rejects.toThrow('Ambiguous library name');
+    await expect(page.locator('body')).not.toHaveAttribute('data-selected');
+  });
+}
+
 test('opens an exact lesson through a configurable folder path', async ({ page }) => {
   await page.setContent(`
     <button id="openButton" onclick="document.querySelector('[role=dialog]').hidden = false">Open</button>

@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import type { LamsConfig } from '../config.js';
 import { saveDiagnostics } from './diagnostics.js';
 import { fromSpec } from './locators.js';
-import { clickConfigured, SelectorRequiredError } from './navigation.js';
+import { clickConfigured, openLams, SelectorRequiredError, waitForVisibleTarget } from './navigation.js';
 
 export interface AuthoringNode {
   name: string;
@@ -40,6 +40,13 @@ export interface AuthoringGraph {
   modelAvailable: boolean;
   nodes: GraphNode[];
   transitions: GraphTransition[];
+}
+
+/** All Authoring work uses the global library, independent of workspace course. */
+export async function openAuthoringLibrary(page: Page, config: LamsConfig): Promise<Page> {
+  await openLams(page, config);
+  await waitForVisibleTarget(page.getByRole('link', { name: 'Author', exact: true }), page, config, 'Author', true);
+  return openAuthoring(page, config);
 }
 
 export async function openAuthoring(page: Page, config: LamsConfig): Promise<Page> {

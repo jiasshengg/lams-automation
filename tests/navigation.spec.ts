@@ -4,6 +4,12 @@ import { openCoursePage, selectWorkspaceCourse } from '../src/lams/navigation.js
 
 const workspaceCourse = 'User-selected course';
 
+test('course navigation rejects a missing course before opening any page', async ({ page }) => {
+  const { workspaceCourse: omitted, ...withoutCourse } = config();
+  await expect(openCoursePage(page, withoutCourse)).rejects.toThrow('require a non-empty workspaceCourse');
+  expect(page.url()).toBe('about:blank');
+});
+
 test('keeps the already-selected configured course', async ({ page }) => {
   await page.setContent(`
     <button aria-label="Toggle course menu" onclick="document.body.dataset.menuOpened = 'true'">Menu</button>

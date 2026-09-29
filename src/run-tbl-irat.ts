@@ -5,12 +5,11 @@ import { validateAuthoringGraph, formatValidationReport } from './lams/validatio
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { loadEnvFile } from './load-env.js';
-import { closeAuthoring, openAuthoring } from './lams/authoring.js';
+import { closeAuthoring, openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { executeIratAutomation, resolveIratRequest } from './lams/irat.js';
 import { LamsIratEditor } from './lams/irat-editor.js';
 import { copyLesson, openLessonFromLibrary, openSourceLesson } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { resolveIratQuestionImages } from './docx/question-images.js';
 import { resolveAEQuestionImages } from './docx/question-images.js';
 import { readFile } from 'node:fs/promises';
@@ -61,9 +60,7 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await openSourceLesson(activePage, config);
     if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle does not match the requested destination lesson.');
     const copy = await copyLesson(activePage, config, { commit });

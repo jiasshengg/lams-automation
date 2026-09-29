@@ -6,7 +6,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
 
 ## LAMS safety boundary
 
-- Before lesson-specific inspection or mutation, find, open, and verify the course specified by `workspaceCourse` before opening the Author interface. Global read-only Authoring-library discovery may open Author directly because selecting a course does not scope that library.
+- All Authoring work opens the global Author interface directly: discovery, copying, renaming, inspection, validation, iRAT/AE editing, and graph/gate repair neither require nor select `workspaceCourse`. Never ask for a course for Authoring work. Resolve targets by verified library folder path and exact design title. Require and verify `workspaceCourse` only for publishing and monitoring.
 - Treat navigation and DOM inspection as read-only.
 - When a lesson is in scope for a requested workflow, automatically fix any supported, verified issues found within that lesson; the user does not need to request the fixes separately. Resolve the source lesson and any requested new title from the request or verified context. If no destination is stated, save in the source lesson's current folder; do not ask the user to restate that folder. An explicitly requested destination takes precedence. Existing-lesson edits and renames stay in place by default.
 - Automatically remove exact gate-bypass transitions and replace exact planned AE gates whose verified type/settings are wrong. Delete or rewire only elements that the reviewed plan proves must change; never infer that unrelated nodes are extra.
@@ -37,6 +37,7 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
   per kind (iRAT or AE). Write their concrete paths into requests and AE plans. The Elentra scripts never
   delete or edit existing Elentra resources and never edit the Kanban sheet; downloading QA
   files is read-only in Elentra.
+- Library lesson-title and folder-name matching ignores case and all whitespace (including missing spaces), while preserving letters, numbers, and punctuation. Use discovered saved names in plans and preserve requested new-title spelling. Stop on ambiguous matches; never resolve them by position.
 - Stop before a consequential action if the target is ambiguous or the UI state cannot be verified.
 
 ## Current implementation scope
@@ -45,7 +46,7 @@ Work incrementally.
 
 ### First box: lesson copy workflow
 
-1. Open the configured course.
+1. Open LAMS without selecting a course.
 2. Open the global LAMS **Author** interface.
 3. Find the configured previous-academic-year TBL sequence in the Authoring library.
 4. Open the exact sequence.

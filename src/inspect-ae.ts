@@ -5,10 +5,9 @@ import { buildAEPlan } from './ae/plan.js';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
 import { openExactAEActivity } from './lams/ae.js';
 import { applyAEActivitySettings } from './lams/ae-settings.js';
-import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
+import { inspectAuthoringGraph, openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { formatValidationReport, validateAEPlanGraph } from './lams/validation.js';
 
 async function main(): Promise<void> {
@@ -31,9 +30,7 @@ async function main(): Promise<void> {
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
 
     const graphReport = validateAEPlanGraph(await inspectAuthoringGraph(activePage), plan);
