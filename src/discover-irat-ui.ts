@@ -1,10 +1,10 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { type Locator, type Page } from '@playwright/test';
 import { browserLaunchOptions, loadConfig, type LamsConfig } from './config.js';
-import { inspectAuthoringGraph, openActivityProperties, openAuthoring } from './lams/authoring.js';
+import { inspectAuthoringGraph, openActivityProperties, openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { traverseFolderPath } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse, waitForVisibleTarget } from './lams/navigation.js';
+import { waitForVisibleTarget } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
@@ -15,19 +15,17 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await activePage.locator('#openButton').click();
     const dialog = activePage.getByRole('dialog', { name: 'Open design', exact: true });
     await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
-    await traverseFolderPath(dialog, ['Courses', config.workspaceCourse], activePage, config);
+    await traverseFolderPath(dialog, config.sourceFolderPath, activePage, config);
 
-    const candidates = await directLessonCandidates(dialog, config.workspaceCourse);
+    const candidates = await directLessonCandidates(dialog, config.sourceFolderPath.at(-1)!);
     const tblCandidates = candidates.filter((candidate) => /\bTBL/i.test(candidate));
     if (tblCandidates.length !== 1) {
       const directory = await saveDiagnostics(activePage, 'irat-representative-ambiguous');
-      throw new Error(`Expected one TBL representative in the playground; found ${tblCandidates.length}: ${tblCandidates.join(', ') || 'none'}. Diagnostics: ${directory}`);
+      throw new Error(`Expected one TBL representative in the source folder; found ${tblCandidates.length}: ${tblCandidates.join(', ') || 'none'}. Diagnostics: ${directory}`);
     }
     const lessonTitle = tblCandidates[0]!;
     const lesson = dialog.getByRole('treeitem').filter({ hasText: new RegExp(`^\\s*${escapeRegExp(lessonTitle)}\\s*$`) });

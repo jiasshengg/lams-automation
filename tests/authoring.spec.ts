@@ -1,7 +1,23 @@
 import { expect, test } from '@playwright/test';
 import type { LamsConfig } from '../src/config.js';
-import { inspectAuthoringGraph, listAuthoringNodes, openActivityProperties, waitForAuthoringReady } from '../src/lams/authoring.js';
+import { inspectAuthoringGraph, listAuthoringNodes, openActivityProperties, openAuthoringLibrary, waitForAuthoringReady } from '../src/lams/authoring.js';
 import { openExactAEActivity } from '../src/lams/ae.js';
+
+test('global library discovery opens Author without a course menu or matching course', async ({ page, context }) => {
+  await context.route('https://lams.test/**', async route => {
+    await route.fulfill({ contentType: 'text/html', body: route.request().url().endsWith('/home')
+      ? '<h2>Another course</h2><a href="/authoring" target="_blank">Author</a>'
+      : '<button id="openButton">Open</button>' });
+  });
+  const authoringPage = await openAuthoringLibrary(page, {
+    baseUrl: 'https://lams.test/home',
+    browser: { actionTimeoutMs: 2000, manualLoginTimeoutMs: 2000 }
+  } as LamsConfig);
+  expect(authoringPage).not.toBe(page);
+  await expect(authoringPage).toHaveURL('https://lams.test/authoring');
+  await expect(authoringPage.getByRole('button', { name: 'Open', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Another course' })).toBeVisible();
+});
 
 test('lists visible authoring node names and types from a configured DOM shape', async ({ page }) => {
   await page.setContent(`

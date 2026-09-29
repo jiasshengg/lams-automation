@@ -1,9 +1,8 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
-import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
+import { inspectAuthoringGraph, openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 import { formatValidationReport, validateAuthoringGraph } from './lams/validation.js';
 
 async function main(): Promise<void> {
@@ -15,9 +14,7 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     const source = process.argv.includes('--source');
     await openLessonFromLibrary(activePage, source ? config.sourceFolderPath : config.destinationFolderPath, source ? config.sourceLessonTitle : config.lessonTitle, config);
     const graph = await inspectAuthoringGraph(activePage);

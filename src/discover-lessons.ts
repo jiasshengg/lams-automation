@@ -1,9 +1,8 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
-import { openAuthoring } from './lams/authoring.js';
+import { openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { discoverLessons } from './lams/lesson-discovery.js';
-import { openCoursePage } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   if (process.argv.includes('--commit')) throw new Error('discover:lessons is read-only and does not accept --commit.');
@@ -20,8 +19,7 @@ async function main(): Promise<void> {
   const page = context.pages()[0] ?? (await context.newPage());
   let activePage = page;
   try {
-    await openCoursePage(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     const candidates = await discoverLessons(activePage, {
       ...(roots ? { roots } : {}),
       query: query ?? '',

@@ -1,10 +1,9 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig, parseRequestOverrides } from './config.js';
-import { inspectAuthoringGraph, openAuthoring } from './lams/authoring.js';
+import { inspectAuthoringGraph, openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
 import { setGateRotationSeconds } from './lams/gate-properties.js';
 import { openLessonFromLibrary } from './lams/lesson-copy.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 async function main(): Promise<void> {
   const configPath = readArgument('--config') ?? 'configs/local.json';
@@ -22,9 +21,7 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
 
     const before = gate(await inspectAuthoringGraph(activePage), gateName);

@@ -1,8 +1,7 @@
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { browserLaunchOptions, loadConfig } from './config.js';
-import { openAuthoring } from './lams/authoring.js';
+import { openAuthoringLibrary } from './lams/authoring.js';
 import { saveDiagnostics } from './lams/diagnostics.js';
-import { openLams, selectWorkspaceCourse } from './lams/navigation.js';
 
 interface TreeItem {
   text: string;
@@ -31,9 +30,7 @@ async function main(): Promise<void> {
   let activePage = page;
 
   try {
-    await openLams(page, config);
-    await selectWorkspaceCourse(page, config);
-    activePage = await openAuthoring(page, config);
+    activePage = await openAuthoringLibrary(page, config);
     await activePage.locator('#openButton').click();
     const dialog = activePage.getByRole('dialog', { name: 'Open design', exact: true });
     await dialog.waitFor({ state: 'visible', timeout: config.browser.actionTimeoutMs });
