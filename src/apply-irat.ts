@@ -111,7 +111,7 @@ async function main(): Promise<void> {
     });
 
     if (!commit) {
-      console.log('iRAT preflight passed; no changes applied.');
+      console.log('iRAT dry run complete; no changes applied.');
       return;
     }
     console.log('\niRAT application: COMPLETE');

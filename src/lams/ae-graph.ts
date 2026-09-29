@@ -94,7 +94,6 @@ export async function reconcileAndWriteAEGraph(
   if (initial.invalidGates.length > 0) {
     throw new Error(`Existing AE gates do not match required settings: ${initial.invalidGates.join('; ')}. No AE changes applied.`);
   }
-  await preflightGraphRepairs(page, initial);
 
   const writtenNodes: AEWriteResult[] = [];
   const createdNodes: string[] = [];
@@ -261,42 +260,6 @@ export function buildDesiredAEFlow(plan: AEPlan): string[] {
     flow.push(gate.title);
   });
   return flow;
-}
-
-async function preflightGraphRepairs(page: Page, plan: AEGraphReconciliationPlan): Promise<void> {
-  if (plan.bypassTransitions.length === 0 && plan.gatesToReplace.length === 0) return;
-  const runtimeAvailable = await page.evaluate(() => {
-    const runtime = window as typeof window & {
-      ActivityLib?: { removeActivity?: unknown; removeTransition?: unknown };
-    };
-    return {
-      removeActivity: typeof runtime.ActivityLib?.removeActivity === 'function',
-      removeTransition: typeof runtime.ActivityLib?.removeTransition === 'function'
-    };
-  });
-  if (plan.bypassTransitions.length > 0 && !runtimeAvailable.removeTransition) {
-    throw new Error('AE graph repair requires ActivityLib.removeTransition, but the verified LAMS runtime API is unavailable. No AE changes applied.');
-  }
-  if (plan.gatesToReplace.length > 0 && !runtimeAvailable.removeActivity) {
-    throw new Error('AE graph repair requires ActivityLib.removeActivity, but the verified LAMS runtime API is unavailable. No AE changes applied.');
-  }
-  const graph = await inspectAuthoringGraph(page);
-  for (const edge of plan.bypassTransitions) {
-    const from = uniqueByName(graph, edge.from);
-    const to = uniqueByName(graph, edge.to);
-    const matches = graph.transitions.filter((transition) => transition.fromUiid === from.uiid && transition.toUiid === to.uiid);
-    if (matches.length !== 1) {
-      throw new Error(`Expected one transition ${edge.from} -> ${edge.to}; found ${matches.length}. No AE changes applied.`);
-    }
-  }
-  for (const title of plan.gatesToReplace) {
-    const gate = uniqueByName(graph, title);
-    if (gate.type !== 'gate') throw new Error(`Refusing to replace non-gate node "${title}". No AE changes applied.`);
-    const topologyErrors = replacementGateTopologyErrors(graph, plan.desiredFlow, gate);
-    if (topologyErrors.length > 0) {
-      throw new Error(`Refusing to replace gate "${title}": ${topologyErrors.join('; ')}. No AE changes applied.`);
-    }
-  }
 }
 
 function replacementGateTopologyErrors(graph: AuthoringGraph, desiredFlow: string[], gate: GraphNode): string[] {

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { parsePlaceholderRepair, projectPlaceholderRepairs, verifyRepairResult } from '../src/lams/ae-placeholder.js';
-import { expectedTBLGraph } from '../src/lams/tbl-preflight.js';
+import { expectedTBLGraph } from '../src/lams/tbl-expectations.js';
 import { buildAEPlan } from '../src/ae/plan.js';
 import type { AuthoringGraph, GraphNode } from '../src/lams/authoring.js';
 import type { LamsConfig } from '../src/config.js';

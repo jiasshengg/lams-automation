@@ -1,14 +1,8 @@
-# Template preflight and exact placeholder repair
+# Exact placeholder repair
 
-Run preflight before copying. It opens the specified course and exact source lesson,
-inspects the iRAT inventory and authoring graph, closes unchanged activity editors, and
-reports all supported checks without saving. `expectedFlow` must describe the reviewed
-template prefix (or the final reviewed flow), not arbitrary nodes copied from a failing
-validation result.
-
-```bash
-node scripts/run.mjs preflight:tbl --request-json request.json --ae-json ae-plan.json --log-file preflight.log
-```
+There is no separate preflight run. `expectedFlow` must describe the reviewed template
+prefix (or the final reviewed flow), not arbitrary nodes copied from a failing validation
+result.
 
 Ask for each unexpected iRAT reference's disposition, as required by the shared rules.
 Put authorized exact deletions in `irat.deleteQuestionTitles`. Missing marks (4) are a
@@ -35,8 +29,7 @@ For example, after the user has authorized this exact removal:
 }
 ```
 
-Pass `--repair-json repair.json` to `preflight:tbl` and `run:tbl` to verify on the source
-and remove only from the copy. For existing-lesson AE writing, pass it to `apply:ae`.
+Pass `--repair-json repair.json` to `run:tbl` to remove it only from the copy. For existing-lesson AE writing, pass it to `apply:ae`.
 For an existing placeholder between two nodes, use the exact following node title as
 `successor` instead of `null`.
 
@@ -54,7 +47,6 @@ only when its approved resulting topology still matches. If a later stage added 
 nodes, inspect that current state and update the reviewed request; do not replay a stale
 terminal-removal plan. On any failure, report partial saved state and diagnostics.
 
-The preflight report contains full-lesson `expectations`: preserve them for later
-`validate:authoring`, including retained template gates. The combined writer and AE
-writer also validate those expectations before reporting completion. This operation
+The combined writer and AE writer derive full-lesson expectations from the lesson they
+write, including retained template gates, and validate them before reporting completion. This operation
 does not authorize arbitrary node deletion, shared Question Bank edits, or publishing.
