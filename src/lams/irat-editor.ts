@@ -1,3 +1,4 @@
+import { requestNewVersionCheck, waitForQuestionFormIdle } from './question-form.js';
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, letClicksThroughDecorations, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
@@ -339,6 +340,7 @@ export class LamsIratEditor implements IratEditor {
     // in place, which would also change the source lesson this copy came from, so the run
     // stops rather than falling back to it.
     const saveQuestion = questionFrame.locator(existing ? '#saveAsButton' : '#saveButton');
+    if (existing) await requestNewVersionCheck(questionFrame, this.timeoutMs);
     try {
       await saveQuestion.waitFor({ state: 'visible', timeout: this.timeoutMs });
     } catch {
@@ -350,6 +352,7 @@ export class LamsIratEditor implements IratEditor {
     // version is saved, while others defer it until the activity Save below. Keep the
     // affirmative handler around every question save so neither variant silently chooses
     // the browser's default "No" response.
+    await waitForQuestionFormIdle(questionFrame, this.timeoutMs);
     await this.acceptSaveDialogs(async () => {
       await saveQuestion.click();
       if (existing) {
@@ -359,10 +362,20 @@ export class LamsIratEditor implements IratEditor {
       }
     });
     const expectedTitles = existing ? previousTitles : [...previousTitles, normalizeText(question.title)];
-    await frame.waitForFunction(({ titles, selector }) => {
-      const actual = Array.from(document.querySelectorAll(selector)).map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim());
-      return JSON.stringify(actual) === JSON.stringify(titles);
-    }, { titles: expectedTitles, selector: `#referencesTable tbody tr ${QUESTION_TITLE}` }, { timeout: this.timeoutMs });
+    try {
+      await frame.waitForFunction(({ titles, selector }) => {
+        const actual = Array.from(document.querySelectorAll(selector)).map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim());
+        return JSON.stringify(actual) === JSON.stringify(titles);
+      }, { titles: expectedTitles, selector: `#referencesTable tbody tr ${QUESTION_TITLE}` }, { timeout: this.timeoutMs });
+    } catch (error) {
+      // Say what the list held instead, so a failed save can be told apart from a slow reload.
+      const actual = await questionTitles(frame).catch(() => [] as string[]);
+      throw new Error(
+        `After saving "${question.title}", the question list did not settle on the expected ${expectedTitles.length} titles ` +
+          `within ${this.timeoutMs}ms; it shows ${actual.length}: ${JSON.stringify(actual.slice(0, 40))}. ` +
+          `${error instanceof Error ? error.message : String(error)}`
+      );
+    }
     const updatedRow = await exactQuestionRow(frame, question.title);
 
     // The visible "Mark" column is the assessment reference's own maxMark input, which is

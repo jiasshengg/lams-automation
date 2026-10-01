@@ -267,7 +267,7 @@
 # def main() -> None:
 #     parser = argparse.ArgumentParser()
 #     parser.add_argument(
-#         "--login", action="store_true", help="Force a fresh login even if a saved session already exists"
+#         "--login", action="store_true", help="Open the sign-in window first, even if the profile is already signed in"
 #     )
 #     parser.add_argument("--headless", action="store_true", help="Run headless (defeats the QC-visibility point, but available)")
 #     args = parser.parse_args()
@@ -347,15 +347,17 @@ the existing requests/BeautifulSoup approach for the iRA/AE fetch step).
 It has its own login handling since Playwright automating the SSO login
 itself was already tried and abandoned for this codebase — instead, you
 log in manually ONCE in a real browser window Playwright opens, and the
-session is saved and reused on later runs.
+persistent Elentra browser profile keeps that sign-in for later runs.
 
 Usage (from the repository root; npm run setup installs the Python runtime):
     npm run elentra:links -- --tab "<tab>" --event-id 42374 --dry-run
     npm run elentra:links -- --tab "<tab>" --event-id 42374
 
-    The saved session comes from npm run login:elentra (or setup). With no
-    saved session this script opens the sign-in window first; an expired one
-    stops the run instead of adding anything. --dry-run reports which links
+    The sign-in comes from npm run login:elentra (or setup) and lives in the
+    persistent profile. With no sign-in on this computer yet this script opens
+    the sign-in window first; a lapsed Elentra session is renewed silently
+    through Microsoft, and one Microsoft will not renew stops the run instead
+    of adding anything. --dry-run reports which links
     are missing without opening the wizard.
 """
 
@@ -366,8 +368,8 @@ from playwright.sync_api import sync_playwright, Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from kanban_reader import get_resource_ready_lessons
-from session import login_interactive, session_ok
-from settings import AUTH_STATE_PATH, BASE_URL, launch_options
+from session import login_interactive, signed_in_profile
+from settings import BASE_URL, LEGACY_AUTH_STATE_PATH, PROFILE_DIR
 
 # Pause between visible actions so a QC reviewer watching the screen can
 # actually follow what's happening, rather than it flashing past.
@@ -629,12 +631,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Report which links would be added without adding them")
     args = parser.parse_args()
 
-    if args.login or not AUTH_STATE_PATH.exists():
-        if not AUTH_STATE_PATH.exists():
-            print("No saved session found — opening browser for login...")
+    if args.login or not (PROFILE_DIR.exists() or LEGACY_AUTH_STATE_PATH.exists()):
+        if not args.login:
+            print("No Elentra sign-in on this computer yet — opening browser for login...")
         login_interactive()
-    elif not session_ok():
-        raise SystemExit("Elentra session missing or expired. Run: npm run login:elentra")
 
     lessons = get_resource_ready_lessons(args.tab)
     if args.event_id:
@@ -655,10 +655,8 @@ def main() -> None:
             "and an Elentra Event ID in column P."
         )
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(**launch_options(headless=args.headless))
-        context = browser.new_context(storage_state=str(AUTH_STATE_PATH))
-        page = context.new_page()
+    with sync_playwright() as p, signed_in_profile(p, headless=args.headless) as context:
+        page = context.pages[0] if context.pages else context.new_page()
 
         # --- debug listeners ---
         # These fire on ANY close/disconnect, including the perfectly normal
@@ -673,10 +671,6 @@ def main() -> None:
         context.on(
             "close",
             lambda: None if closing_intentionally else print("  [DEBUG] Context was closed unexpectedly"),
-        )
-        browser.on(
-            "disconnected",
-            lambda: None if closing_intentionally else print("  [DEBUG] Browser disconnected"),
         )
         # --- end debug listeners ---
 
@@ -701,8 +695,8 @@ def main() -> None:
         elif not lessons:
             print("\nNothing to do — closing browser.")
 
+        # signed_in_profile closes the profile normally, which saves its cookies.
         closing_intentionally = True
-        browser.close()
 
     print("\nDone.")
 

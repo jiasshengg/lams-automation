@@ -1,3 +1,4 @@
+import { requestNewVersionCheck, waitForQuestionFormIdle } from './question-form.js';
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import { inlineHtmlToText, sanitizeInlineHtml } from '../ae/inline-html.js';
 import type { AENodePlan, AEPlan, AEQuestionPlan } from '../ae/plan.js';
@@ -89,9 +90,15 @@ export class LamsAEEditor {
     await activityFrame.locator('#saveButton').click();
     await this.page.locator(ACTIVITY_DIALOG).waitFor({ state: 'hidden', timeout: this.timeoutMs });
 
-    const saved = (await inspectAuthoringGraph(this.page)).nodes.filter(
-      (candidate) => candidate.type === 'tool' && candidate.name === nodePlan.title
-    );
+    // LAMS refreshes the canvas label a moment after the dialog closes, so the title is polled.
+    let saved: GraphNode[] = [];
+    for (const deadline = Date.now() + this.timeoutMs; ; ) {
+      saved = (await inspectAuthoringGraph(this.page)).nodes.filter(
+        (candidate) => candidate.type === 'tool' && candidate.name === nodePlan.title
+      );
+      if (saved.length === 1 || Date.now() > deadline) break;
+      await this.page.waitForTimeout(250);
+    }
     if (saved.length !== 1) throw new Error(`Saved AE node title "${nodePlan.title}" was not found exactly once on the graph.`);
     return { nodeTitle: nodePlan.title, updatedQuestions, createdQuestions, importedImages };
   }
@@ -204,7 +211,9 @@ export class LamsAEEditor {
     }
 
     const save = existing ? frame.locator('#saveAsButton') : frame.locator('#saveButton');
+    if (existing) await requestNewVersionCheck(frame, this.timeoutMs);
     await save.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    await waitForQuestionFormIdle(frame, this.timeoutMs);
     await save.click();
     return uploaded;
   }

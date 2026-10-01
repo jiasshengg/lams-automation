@@ -23,10 +23,10 @@ Without `--details` it lists every **Can start** row. With it, it matches the TB
 
 | Need | Command |
 |---|---|
-| Unattended check that the saved session still works | `node scripts/run.mjs elentra:check` |
+| Unattended check that the sign-in still works | `node scripts/run.mjs elentra:check` |
 | Sign in again (the user types their own credentials) | `npm run login:elentra` |
 
-The session is saved at `.playwright/elentra-auth.json`; never copy, print, or commit it. `login:elentra` opens a browser window, detects the finished sign-in automatically (up to 10 minutes), saves the session, and verifies it can open Elentra's admin events page. The agent can run it, including in the background; the user only signs in in the window. Tell the user to sign in with **Institutional Login (SSO)**; never enter credentials for them. An `elentra:check` failure means the next step is `login:elentra`, not a retry of the failed operation. The Elentra account needs administrator access to events.
+The sign-in lives in the persistent browser profile `.playwright/elentra-profile/`, reused by every Elentra command exactly as `.playwright/lams-profile/` is for LAMS; never copy, print, or commit it. Elentra's own session cookies end with each browser, so every command renews that session silently through Institutional Login using Microsoft's "Stay signed in" cookie in the profile, and stops with the `login:elentra` message only when Microsoft shows a sign-in form. It never types into that form. `login:elentra` opens the profile in a window, returns at once if it is already signed in, otherwise detects the finished sign-in automatically (up to 10 minutes), closes the window normally so the profile is saved, and verifies after a restart that it can open Elentra's admin events page. The agent can run it, including in the background; the user only signs in in the window. Tell the user to sign in with **Institutional Login (SSO)**; never enter credentials for them. An `elentra:check` failure means the next step is `login:elentra`, not a retry of the failed operation. The Elentra account needs administrator access to events.
 
 ## Download iRA/AE QA files (read-only in Elentra)
 
@@ -42,8 +42,10 @@ For each ready row the links step adds two Link resources to the Elentra event:
 
 | Link | Title | Settings |
 |---|---|---|
-| Monitoring | `LAMS <Module> - <TBL/Quiz Details> (Facilitator/CE)` | Optional, hidden from learners, published, no timeframe |
-| Learner | `LAMS <Module> - <TBL/Quiz Details>` | Required, visible to learners, published, no timeframe |
+| Monitoring | `LAMS <lesson title> (Facilitator/CE)` | Optional, hidden from learners, published, no timeframe |
+| Learner | `LAMS <lesson title>` | Required, visible to learners, published, no timeframe |
+
+`<lesson title>` is the TBL/Quiz Details lesson title (its second line when present). It is prefixed with `<Module> - ` only when it does not already start with the module code, so `ANPA CS 1.2.1T …` gives `LAMS ANPA CS 1.2.1T …`, never `LAMS ANPA - ANPA CS …`.
 
 The learner link is visible to students, so treat this step like publishing:
 

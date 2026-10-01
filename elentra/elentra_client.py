@@ -138,8 +138,8 @@ SESSION_EXPIRED = "Elentra SSO session expired; run: npm run login:elentra"
 
 class ElentraClient:
     def __init__(self, request: APIRequestContext):
-        # This request context belongs to the browser context loaded from the saved session,
-        # so it shares the cookies created by the user's interactive SSO login.
+        # This request context belongs to the persistent Elentra browser profile, so it shares
+        # the cookies of the user's SSO sign-in.
         self.request = request
         self._logged_in = False
 

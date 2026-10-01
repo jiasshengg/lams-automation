@@ -66,8 +66,10 @@ export function extractStyledParagraphs(documentXml: string, parts: SOTLayoutPar
     paragraphs.push({ runs });
   }
   // Numbered from the text as printed, list labels included, so questions match the image rule.
+  const read = readParagraphsWithListLabels(documentXml, parts);
   const questions = questionNumbersForParagraphs(
-    readParagraphsWithListLabels(documentXml, parts).map((paragraph) => paragraph.structureText)
+    read.map((paragraph) => paragraph.structureText),
+    read.map((paragraph) => paragraph.content.listItem)
   );
   return paragraphs.map((paragraph, index) => ({ questionNumber: questions[index] ?? null, runs: paragraph.runs }));
 }

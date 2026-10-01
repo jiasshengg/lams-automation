@@ -12,12 +12,26 @@ export interface UploadedImage {
   source: string;
 }
 
+const UPLOAD_CONFIG_TIMEOUT_MS = 15000;
+
 export async function uploadCkEditorImages(
   frame: Frame,
   editorId: string,
   images: QuestionImageAsset[]
 ): Promise<UploadedImage[]> {
   if (images.length === 0) return [];
+  // LAMS creates each inline editor with its upload URLs in the configuration, but CKEditor merges
+  // that configuration only once the instance has loaded, so the URL is read after it appears.
+  await frame
+    .waitForFunction(
+      (id) =>
+        Boolean((window as typeof window & {
+          CKEDITOR?: { instances?: Record<string, { config?: { filebrowserImageUploadUrl?: string } }> };
+        }).CKEDITOR?.instances?.[id]?.config?.filebrowserImageUploadUrl),
+      editorId,
+      { timeout: UPLOAD_CONFIG_TIMEOUT_MS }
+    )
+    .catch(() => undefined);
   const uploadValue = await frame.evaluate((id) => {
     const editor = (window as typeof window & {
       CKEDITOR?: { instances?: Record<string, { config?: { filebrowserImageUploadUrl?: string } }> };

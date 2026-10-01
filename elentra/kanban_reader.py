@@ -194,7 +194,18 @@ def _build_title(row) -> str:
     if not isinstance(module, str):
         module = ""
     details = _resolve_title(row.get(DETAILS_COL, ""))
+    # A lesson title usually starts with its module code already ("ANPA CS 1.2.1T ..."), so
+    # prefixing the module again would repeat it ("ANPA - ANPA CS ...").
+    if _starts_with_module(details, module):
+        return details
     return f"{module.strip()} - {details}".strip(" -")
+
+
+def _starts_with_module(details: str, module: str) -> bool:
+    """True when the title's first word is the module or one of its names ("Skin (SKIN)")."""
+    words = details.split()
+    names = {name.lower() for name in re.findall(r"[A-Za-z0-9]+", module)}
+    return bool(words) and bool(names) and re.sub(r"[^A-Za-z0-9]", "", words[0]).lower() in names
 
 
 def describe_row(tab_name: str, idx: int, row: dict) -> dict:

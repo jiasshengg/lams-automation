@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import kanban_reader
+import session
 import settings
 from playwright_resource_adder import build_title, resource_link_exists
 
@@ -80,6 +81,20 @@ class TitleTest(unittest.TestCase):
         row = {"Module": "Skin (SKIN)", "TBL/Quiz Details": "TBL 1"}
         self.assertEqual(kanban_reader._build_title(row), "Skin (SKIN) - TBL 1")
 
+    def test_a_title_that_already_names_its_module_is_not_prefixed_again(self):
+        row = {"Module": "ANPA", "TBL/Quiz Details": "TBL Session: ANPA 1.2.1T Topography\nANPA CS 1.2.1T 221026 2026Y1"}
+        self.assertEqual(kanban_reader._build_title(row), "ANPA CS 1.2.1T 221026 2026Y1")
+        self.assertEqual(build_title(kanban_reader._build_title(row), "learner"), "LAMS ANPA CS 1.2.1T 221026 2026Y1")
+        row = {"Module": "INF", "TBL/Quiz Details": "TBL 1 Respiratory infections\nINF TBL 01 201026 2025Y2"}
+        self.assertEqual(
+            build_title(kanban_reader._build_title(row), "monitoring"), "LAMS INF TBL 01 201026 2025Y2 (Facilitator/CE)"
+        )
+        row = {"Module": "Skin (SKIN)", "TBL/Quiz Details": "TBL 1\nSKIN TBL 1 real"}
+        self.assertEqual(kanban_reader._build_title(row), "SKIN TBL 1 real")
+        # A title that only begins with the same letters still gets its module.
+        row = {"Module": "INF", "TBL/Quiz Details": "INFLUENZA TBL"}
+        self.assertEqual(kanban_reader._build_title(row), "INF - INFLUENZA TBL")
+
 
 SHEET_CSV = (
     "w,Module,TBL/Quiz Details,Lesson ID,Elentra Event ID,w\n"
@@ -105,7 +120,7 @@ class KanbanReaderTest(unittest.TestCase):
     def test_fetch_step_needs_can_start_and_an_event_id(self):
         lessons = kanban_reader.get_ready_lessons("Tab")
         self.assertEqual([l["id"] for l in lessons], ["27662", "27323", "27325"])
-        self.assertEqual(lessons[0]["title"], "Skin (SKIN) - Skin TBL 1 real")
+        self.assertEqual(lessons[0]["title"], "Skin TBL 1 real")
         self.assertEqual(lessons[0]["row"], 1)
 
     def test_links_step_also_needs_a_numeric_lesson_id(self):
@@ -169,11 +184,13 @@ class TabTest(unittest.TestCase):
 
 class SettingsTest(unittest.TestCase):
     def test_session_and_downloads_stay_in_ignored_folders(self):
-        self.assertEqual(settings.AUTH_STATE_PATH, settings.REPO_ROOT / ".playwright" / "elentra-auth.json")
+        self.assertEqual(settings.PROFILE_DIR, settings.REPO_ROOT / ".playwright" / "elentra-profile")
+        self.assertEqual(settings.LEGACY_AUTH_STATE_PATH.parent, settings.REPO_ROOT / ".playwright")
         if not os.environ.get("DOWNLOAD_DIR"):
             self.assertEqual(settings.DOWNLOAD_DIR, settings.REPO_ROOT / "sot-docs")
         ignored = (settings.REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("sot-docs/", ignored)
+        self.assertIn(".playwright/", ignored)
 
     def test_browser_channel_follows_local_config(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -225,3 +242,62 @@ class DownloadManifestTest(unittest.TestCase):
     def test_recorded_paths_are_repository_relative_with_forward_slashes(self):
         import main
         self.assertEqual(main._relative(settings.REPO_ROOT / "sot-docs" / "27337" / "a.docx"), "sot-docs/27337/a.docx")
+
+
+class FakeLocator:
+    def __init__(self, count):
+        self._count = count
+
+    def count(self):
+        return self._count
+
+
+class FakePage:
+    def __init__(self, url, form=False):
+        self.url = url
+        self.form = form
+
+    def locator(self, _selector):
+        return FakeLocator(1 if self.form else 0)
+
+
+class FakeContext:
+    def __init__(self, pages=(), admin_opens=False):
+        self.pages = list(pages)
+        self.added = []
+        self.admin_opens = admin_opens
+        self.request = mock.Mock()
+        self.request.get.side_effect = lambda url, timeout: FakeResponse(
+            url=url if self.admin_opens else "https://ntu.elentra.cloud/?url=%2Fadmin%2Fevents"
+        )
+
+    def add_cookies(self, cookies):
+        self.added.extend(cookies)
+
+
+class SessionTest(unittest.TestCase):
+    def test_a_microsoft_sign_in_form_means_a_person_is_needed(self):
+        form = FakeContext([FakePage("https://login.microsoftonline.com/common/oauth2", form=True)])
+        self.assertTrue(session._asks_for_credentials(form))
+        redirecting = FakeContext([FakePage("https://login.microsoftonline.com/common/oauth2")])
+        self.assertFalse(session._asks_for_credentials(redirecting))
+        # Elentra's own login page is not a Microsoft form; the SSO redirect is still to come.
+        self.assertFalse(session._asks_for_credentials(FakeContext([FakePage("https://ntu.elentra.cloud/", form=True)])))
+
+    def test_a_live_session_is_used_without_opening_the_sign_in(self):
+        context = FakeContext(admin_opens=True)
+        context.new_page = mock.Mock()
+        self.assertTrue(session.renew_session(context))
+        context.new_page.assert_not_called()
+
+    def test_the_earlier_snapshot_moves_into_a_new_profile_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            legacy = Path(folder) / "elentra-auth.json"
+            legacy.write_text(json.dumps({"cookies": [{"name": "ESTSAUTHPERSISTENT", "value": "x", "domain": ".login.microsoftonline.com", "path": "/"}]}))
+            context = FakeContext()
+            with mock.patch.object(session, "LEGACY_AUTH_STATE_PATH", legacy):
+                session._seed_from_legacy_snapshot(context)
+                self.assertEqual([c["name"] for c in context.added], ["ESTSAUTHPERSISTENT"])
+                self.assertFalse(legacy.exists())
+                session._seed_from_legacy_snapshot(context)  # nothing left to move
+            self.assertEqual(len(context.added), 1)

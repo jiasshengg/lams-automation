@@ -54,8 +54,9 @@ def main() -> None:
     if args.login:
         login_interactive()
 
+    # Renews Elentra's own session through the profile's Microsoft sign-in when it has lapsed.
     if not session_ok():
-        sys.exit("Elentra session missing or expired. Run: npm run login:elentra")
+        sys.exit("Elentra sign-in needed (Microsoft asked for credentials). Run: npm run login:elentra")
 
     py = sys.executable
     dl_id = args.download_event_id or args.event_id

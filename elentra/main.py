@@ -157,7 +157,8 @@ from playwright.sync_api import sync_playwright
 
 from kanban_reader import get_ready_lessons
 from elentra_client import ElentraClient
-from settings import AUTH_STATE_PATH, DOWNLOAD_DIR, REPO_ROOT, launch_options
+from session import signed_in_profile
+from settings import DOWNLOAD_DIR, REPO_ROOT
 
 MANIFEST_NAME = "sources.json"  # per event: which file is the iRAT and which the AE SoT
 LATEST_NAME = "latest.json"  # per run: the events this run downloaded or confirmed
@@ -247,75 +248,66 @@ def main():
     if not lessons:
         print("No matching ready lesson in the named Kanban tab; skipping download.")
         return
-    if not AUTH_STATE_PATH.exists():
-        raise SystemExit("No saved Elentra session. Run: npm run login:elentra")
-
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     failed = []
     ready = []  # manifests of this run's events whose files are all present
 
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(**launch_options(headless=True))
-        context = browser.new_context(storage_state=str(AUTH_STATE_PATH))
-        try:
-            client = ElentraClient(context.request)
-            client.login()
-            for lesson in lessons:
-                lesson_id = lesson["id"]
-                lesson_dir = DOWNLOAD_DIR / lesson_id
-                existing = read_manifest(lesson_dir)
-                if existing:
-                    print(f"Skipping {lesson_id} — {lesson['title']} (already downloaded)")
-                    ready.append(existing)
-                    continue
+    with sync_playwright() as playwright, signed_in_profile(playwright, headless=True) as context:
+        client = ElentraClient(context.request)
+        client.login()
+        for lesson in lessons:
+            lesson_id = lesson["id"]
+            lesson_dir = DOWNLOAD_DIR / lesson_id
+            existing = read_manifest(lesson_dir)
+            if existing:
+                print(f"Skipping {lesson_id} — {lesson['title']} (already downloaded)")
+                ready.append(existing)
+                continue
 
-                print(f"Processing {lesson_id} — {lesson['title']}")
+            print(f"Processing {lesson_id} — {lesson['title']}")
+            try:
+                soup = client.fetch_event_page(lesson_id)
+            except PermissionError as exc:
+                print(f"  Skipped: {exc}")
+                failed.append(lesson_id)
+                continue
+            except requests.exceptions.RequestException as exc:
+                print(f"  Elentra/network error fetching this event, skipping: {exc}")
+                failed.append(lesson_id)
+                continue
+
+            resources = find_qa_resources(soup)
+            if not resources:
+                print("  No iRA/AE QA resources found (not yet uploaded, or not applicable)")
+                continue
+
+            lesson_dir.mkdir(parents=True, exist_ok=True)
+            files = []
+            for title, url in resources:
+                safe_name = re.sub(r"[^\w\-. ]", "_", title)
                 try:
-                    soup = client.fetch_event_page(lesson_id)
-                except PermissionError as exc:
-                    print(f"  Skipped: {exc}")
-                    failed.append(lesson_id)
-                    continue
+                    destination = Path(client.download_resource(url, str(lesson_dir), fallback_name=safe_name))
+                    print(f"  Downloaded: {title} -> {destination}")
+                    files.append({
+                        "kind": sot_kind(title),
+                        "title": title,
+                        "filename": destination.name,
+                        "path": _relative(destination),
+                    })
                 except requests.exceptions.RequestException as exc:
-                    print(f"  Elentra/network error fetching this event, skipping: {exc}")
+                    print(f"  Failed to download '{title}': {exc}")
                     failed.append(lesson_id)
-                    continue
 
-                resources = find_qa_resources(soup)
-                if not resources:
-                    print("  No iRA/AE QA resources found (not yet uploaded, or not applicable)")
-                    continue
-
-                lesson_dir.mkdir(parents=True, exist_ok=True)
-                files = []
-                for title, url in resources:
-                    safe_name = re.sub(r"[^\w\-. ]", "_", title)
-                    try:
-                        destination = Path(client.download_resource(url, str(lesson_dir), fallback_name=safe_name))
-                        print(f"  Downloaded: {title} -> {destination}")
-                        files.append({
-                            "kind": sot_kind(title),
-                            "title": title,
-                            "filename": destination.name,
-                            "path": _relative(destination),
-                        })
-                    except requests.exceptions.RequestException as exc:
-                        print(f"  Failed to download '{title}': {exc}")
-                        failed.append(lesson_id)
-
-                if lesson_id in failed:
-                    continue  # no manifest: the next run downloads this event again
-                manifest = {
-                    "eventId": lesson_id,
-                    "title": lesson["title"],
-                    "sheetRow": lesson["row"] + 2 if "row" in lesson else None,
-                    "files": files,
-                }
-                (lesson_dir / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-                ready.append(manifest)
-        finally:
-            context.close()
-            browser.close()
+            if lesson_id in failed:
+                continue  # no manifest: the next run downloads this event again
+            manifest = {
+                "eventId": lesson_id,
+                "title": lesson["title"],
+                "sheetRow": lesson["row"] + 2 if "row" in lesson else None,
+                "files": files,
+            }
+            (lesson_dir / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            ready.append(manifest)
 
     if ready:
         latest = write_latest(args.tab, ready)

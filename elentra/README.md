@@ -15,9 +15,14 @@ Elentra for you to sign in. Nothing needs to be typed in the terminal. On a comp
 
 Every command below runs the `.venv` interpreter directly (that is all activating a venv
 does), so you never activate it yourself. No Elentra username or password is stored: you
-sign in once in a browser window and the session is saved to
-`.playwright/elentra-auth.json`, which Git ignores. Never commit or share that file; it is
-equivalent to a live login.
+sign in once in a browser window, and the sign-in is kept in the persistent browser profile
+`.playwright/elentra-profile/`, which Git ignores, just as LAMS keeps its sign-in in
+`.playwright/lams-profile/`. Elentra's own session still expires between runs; each run then
+renews it through Institutional Login from Microsoft's "Stay signed in" cookie in that profile,
+with nothing to type. You sign in again only when Microsoft itself asks. Never commit, copy,
+or share the profile folder; it is equivalent to a live login. A computer that used the older
+`.playwright/elentra-auth.json` snapshot moves it into the new profile on its first run and
+deletes it.
 
 ## Commands
 
@@ -26,7 +31,7 @@ Run from the repository root. Every command that reads the sheet needs `--tab "<
 | Command | What it does |
 |---|---|
 | `npm run login:elentra` | Open Elentra and sign in with Institutional Login (SSO) yourself; the sign-in is detected automatically, then saved and verified |
-| `npm run elentra:check` | Verify the saved session without opening a window |
+| `npm run elentra:check` | Verify the sign-in without opening a window (renewing Elentra's session silently if it has lapsed) |
 | `npm run elentra:kanban -- --tabs` | List the sheet's tab names |
 | `npm run elentra:kanban -- --tab "<tab>"` | List the tab's **Can start** rows (`--json` for details) |
 | `npm run elentra:kanban -- --tab "<tab>" --details "<TBL/Quiz Details text>"` | Find the one row whose TBL/Quiz Details match |
@@ -56,7 +61,8 @@ documents are supplied. An event is skipped on rerun only when every file its
 ## Feature 2: add the LAMS monitoring and learner links
 
 For each row that is **Can start** and also has a Lesson ID, adds two Link resources to its
-Elentra event, both titled `LAMS <Module> - <TBL/Quiz Details>`:
+Elentra event, both titled `LAMS <lesson title>` (the lesson title from TBL/Quiz Details, prefixed with
+`<Module> - ` only when it does not already start with the module code):
 
 - monitoring (`.../monitorLesson.do?lessonID=<id>`): Optional, hidden from learners, and
   suffixed ` (Facilitator/CE)`;

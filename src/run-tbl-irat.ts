@@ -18,6 +18,7 @@ import { buildAEPlan } from './ae/plan.js';
 import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
 import { reconcileAndWriteAEGraph } from './lams/ae-graph.js';
+import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames } from './lams/ae-rename.js';
 import { publishLesson, requirePublishSettings } from './lams/publish.js';
 
 loadEnvFile();
@@ -43,6 +44,12 @@ async function main(): Promise<void> {
     : undefined;
   // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
   if (aePlan) await assertAEPlanMatchesSOT(aePlan);
+  // Authorised in-place renames of the copy's earlier AE chain, exactly as apply:ae takes them.
+  const renameJson = readArgument('--rename-json');
+  const renames = renameJson ? parseAERenamePlan(JSON.parse(await readFile(await resolveInputFile(renameJson, '.json'), 'utf8'))) : undefined;
+  if (renames && !aePlan) throw new Error('--rename-json renames AE titles, so it needs --ae-json.');
+  if (renames && aePlan) assertRenamesFollowPlan(renames, aePlan);
+  if (renames && renames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle does not match the requested destination lesson.');
   // --slow-mo pauses before every action so a live run can be watched step by step.
   const slowMoArgument = readArgument('--slow-mo');
   const slowMoMs = slowMoArgument === undefined ? undefined : Number(slowMoArgument);
@@ -70,7 +77,11 @@ async function main(): Promise<void> {
     }
     // iRAT and AE each verify their own targets as they write. The full-lesson expectations for the closing validation come from an in-page read of the
     // copy, which opens no activity and costs no navigation.
-    const expectations = aePlan ? tryExpectedTBLGraph(await inspectAuthoringGraph(activePage), config, aePlan, repair) : undefined;
+    const copied = aePlan ? await inspectAuthoringGraph(activePage) : undefined;
+    const expectations = aePlan && copied
+      ? tryExpectedTBLGraph(renames ? projectAERenames(copied, renames) : copied, config, aePlan, repair)
+      : undefined;
+    if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);
     if (repair) {
       const repaired = await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
       await persistPlaceholderRepairs(activePage, repaired, () =>
@@ -86,7 +97,8 @@ async function main(): Promise<void> {
           aePlan,
           new LamsAEEditor(activePage, aePlan, config.browser.actionTimeoutMs, aeImages),
           readArgument('--team-setup') ?? irat.teamSetupName,
-          config.browser.actionTimeoutMs
+          config.browser.actionTimeoutMs,
+          renames
         )
       : undefined;
     if (expectations) {
@@ -122,6 +134,8 @@ async function main(): Promise<void> {
       console.log(`AE nodes written: ${aeResult.writtenNodes.map((node) => node.nodeTitle).join(', ')}`);
       console.log(`AE nodes/gates created: ${aeResult.createdNodes.length}/${aeResult.createdGates.length}`);
       console.log(`AE gates replaced: ${aeResult.replacedGates.join(', ') || 'none'}`);
+      console.log(`AE nodes renamed: ${aeResult.renamedNodes.map((rename) => `${rename.from} -> ${rename.to}`).join(', ') || 'none'}`);
+      console.log(`AE gates renamed: ${aeResult.renamedGates.map((rename) => `${rename.from} -> ${rename.to}`).join(', ') || 'none'}`);
       console.log(`AE transitions removed: ${aeResult.removedTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
       console.log(`AE images imported: ${aeResult.writtenNodes.reduce((sum, node) => sum + node.importedImages, 0)}`);
     }

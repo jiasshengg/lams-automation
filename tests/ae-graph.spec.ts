@@ -4,6 +4,7 @@ import {
   arrangeAEActivities,
   buildDesiredAEFlow,
   planAEGraphReconciliation,
+  projectToolRenames,
   renameLeadingAEGate,
   removeAuthoringNode,
   removeAuthoringTransition
@@ -142,6 +143,26 @@ test('allows gate replacement when every incident transition belongs to the revi
   const result = planAEGraphReconciliation(graph, plan);
   expect(result.gatesToReplace).toEqual(['AE Gate 2']);
   expect(result.invalidGates).toEqual([]);
+});
+
+test('judges gate replacement against authorised activity renames', () => {
+  const graph: AuthoringGraph = {
+    rendering: 'svg', modelAvailable: true,
+    nodes: [
+      node(1, 'AE 1 to earlier', 'tool'),
+      { ...node(2, 'AE Gate 2', 'gate'), gateType: 'permission', stopAtPrecedingActivity: false },
+      node(3, 'AE 2', 'tool')
+    ],
+    transitions: [
+      { uiid: 10, fromUiid: 1, toUiid: 2 },
+      { uiid: 11, fromUiid: 2, toUiid: 3 }
+    ]
+  };
+  expect(planAEGraphReconciliation(graph, plan).invalidGates).toHaveLength(1);
+  const renames = { lessonTitle: 'Lesson', renames: [{ type: 'tool' as const, from: 'AE 1 to earlier', to: 'AE 1' }] };
+  const result = planAEGraphReconciliation(projectToolRenames(graph, renames), plan);
+  expect(result.invalidGates).toEqual([]);
+  expect(result.gatesToReplace).toEqual(['AE Gate 2']);
 });
 
 test('accepts existing permission gate with stop at preceding activity enabled', () => {
@@ -296,7 +317,7 @@ test('reports an Arrange that left an activity off the grid', async ({ page }) =
 // Reproduces the authoring surface: the SVG canvas plus the properties dialog LAMS opens for the
 // selected activity. The gate the template supplies before the AE chain arrives under its own
 // title, so the reconciler renames it after the node it leads into.
-function leadGateMarkup(gate: { uiid: number; title: string; gateType: string }): string {
+function leadGateMarkup(gate: { uiid: number; title: string; gateType: string; stop?: boolean }): string {
   return `
     <div id="canvas"><svg>
       <g class="svg-activity svg-activity-gate" uiid="${gate.uiid}" data-x="40" data-y="40"></g>
@@ -311,7 +332,7 @@ function leadGateMarkup(gate: { uiid: number; title: string; gateType: string })
     <script>
       window.layout = { activities: [
         { uiid: ${gate.uiid}, title: ${JSON.stringify(gate.title)}, gateType: ${JSON.stringify(gate.gateType)},
-          gateStopAtPrecedingActivity: true,
+          gateStopAtPrecedingActivity: ${gate.stop ?? true},
           transitions: { from: [{ uiid: 30, fromActivity: { uiid: ${gate.uiid} }, toActivity: { uiid: 20 } }] } },
         { uiid: 20, title: 'AE 1', transitions: { from: [] } }
       ] };
@@ -350,10 +371,45 @@ test('leaves the leading gate alone when it already carries its reviewed title',
   expect(await renameLeadingAEGate(page, leadPlan, 20, 5000)).toEqual([]);
 });
 
+test('reconfigures a correctly titled leading gate that does not stop at the preceding activity', async ({ page }) => {
+  await page.setContent(leadGateMarkup({ uiid: 7, title: 'AE Gate AE 1', gateType: 'permission', stop: false }));
+
+  expect(await renameLeadingAEGate(page, leadPlan, 20, 5000)).toEqual([]);
+  await expect(page.locator('.propertiesContentFieldStopAtPrecedingActivity')).toBeChecked();
+  await expect(page.locator('.propertiesContentFieldDescription')).toHaveValue('AE Gate AE 1');
+});
+
 test('refuses to rename a gate in front of the AE chain that is not a permission gate', async ({ page }) => {
   await page.setContent(leadGateMarkup({ uiid: 7, title: 'iRAT Gate', gateType: 'password' }));
 
   await expect(renameLeadingAEGate(page, leadPlan, 20, 5000)).rejects.toThrow(
     /is a password gate, not the permission gate/
   );
+});
+
+test('accepts the TBL layout LAMS Arrange draws, with each gate on the activity column', async ({ page }) => {
+  // Observed on the live authoring canvas after Arrange: a TBL row ends with its gate, drawn at the
+  // next column's x and half an activity lower.
+  await page.setContent(`
+    <button id="arrangeButton" onclick="arrange()">Arrange</button>
+    <div id="canvas"><svg>
+      <g class="svg-activity svg-activity-grouping" uiid="6" data-x="10" data-y="10"></g>
+      <g class="svg-activity svg-activity-gate" uiid="7" data-x="10" data-y="90"></g>
+      <g class="svg-activity svg-activity-tool" uiid="8" data-x="10" data-y="170"></g>
+      <g class="svg-activity svg-activity-tool" uiid="9" data-x="200" data-y="170"></g>
+      <g class="svg-activity svg-activity-gate" uiid="10" data-x="400" data-y="170"></g>
+    </svg></div>
+    <script>
+      function arrange() {
+        [[6, 40, 40], [7, 280, 60], [8, 40, 160], [9, 280, 160], [10, 520, 180]].forEach(function (move) {
+          var activity = document.querySelector('g.svg-activity[uiid="' + move[0] + '"]');
+          activity.setAttribute('data-x', move[1]);
+          activity.setAttribute('data-y', move[2]);
+        });
+      }
+    </script>`);
+
+  await arrangeAEActivities(page, 5000);
+
+  expect(await page.locator('g.svg-activity[uiid="10"]').getAttribute('data-x')).toBe('520');
 });

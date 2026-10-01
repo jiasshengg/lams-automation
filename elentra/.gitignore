@@ -2,6 +2,6 @@ __pycache__/
 *.pyc
 
 # Legacy locations from before these scripts joined the repository; setup now keeps the
-# saved session in .playwright/elentra-auth.json and downloads in sot-docs/.
+# sign-in in the .playwright/elentra-profile browser profile and downloads in sot-docs/.
 auth_state.json
 downloads/

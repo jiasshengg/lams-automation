@@ -298,3 +298,85 @@ test('a header positioned by tabs joins its block, and empty columns are dropped
   expect(table).toContain('<td></td><td></td><td>Reference range</td>');
   expect(table).toContain('<td>Serum iron</td><td>8 umol/L</td><td>10 – 30 umol/L</td>');
 });
+
+const DECIMAL_NUMBERING = `<w:numbering>
+  <w:abstractNum w:abstractNumId="5"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1)"/></w:lvl></w:abstractNum>
+  <w:num w:numId="20"><w:abstractNumId w:val="5"/></w:num>
+</w:numbering>`;
+
+test('shows the numbers of a decimal statement list without reading them as question stems', () => {
+  const paragraphs = extractSOTParagraphs(
+    doc(
+      p('Case 1'),
+      p('1. Which statements are most likely to be correct?'),
+      p('Such a system allows rapid characterisation.', { list: 20 }),
+      p('Their genomes are large.', { list: 20 }),
+      p('A. 1, 2'),
+      p('B. 2'),
+      p('Answer: A'),
+      p('END')
+    ),
+    { numberingXml: DECIMAL_NUMBERING }
+  );
+
+  expect(paragraphs[2]!.text).toBe('Such a system allows rapid characterisation.');
+  expect(paragraphs[2]!.html).toBe('1) Such a system allows rapid characterisation.');
+  const analysis = analyzeAESOT(paragraphs, 'fallback');
+  expect(analysis.questions).toHaveLength(1);
+  const plan = buildAEPlan(buildAEDraft(analysis));
+  const prompt = plan.nodes[0]!.questions[0]!.promptHtml;
+  // The stem loses its own number and keeps its heading; the statements keep theirs.
+  expect(prompt).toContain('QUESTION 1');
+  expect(prompt).toContain('Which statements are most likely to be correct?');
+  expect(prompt).not.toContain('1. Which statements');
+  expect(prompt).toContain('1) Such a system allows rapid characterisation.');
+  expect(prompt).toContain('2) Their genomes are large.');
+});
+
+const AUTO_NUMBERED = `<w:numbering>
+  <w:abstractNum w:abstractNumId="6"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>
+  <w:abstractNum w:abstractNumId="7"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1)"/></w:lvl></w:abstractNum>
+  <w:num w:numId="30"><w:abstractNumId w:val="6"/></w:num>
+  <w:num w:numId="31"><w:abstractNumId w:val="6"/></w:num>
+  <w:num w:numId="32"><w:abstractNumId w:val="7"/></w:num>
+  <w:num w:numId="33"><w:abstractNumId w:val="7"/></w:num>
+</w:numbering>`;
+
+test('reads question stems Word numbers as a list, but not numbered outcomes, statements, or rationales', () => {
+  const paragraphs = extractSOTParagraphs(
+    doc(
+      p('Learning Outcomes:'),
+      p('Describe the epidemiology of pneumonia.', { list: 31 }),
+      p('Discuss microbiological diagnosis.', { list: 31 }),
+      p('Case 1'),
+      p('A patient presents with fever. Which statements are correct?', { list: 30 }),
+      p('The fever is infective.', { list: 32 }),
+      p('The fever is drug-induced.', { list: 32 }),
+      p('A. 1 only'),
+      p('B. 1 and 2'),
+      p('Answer - A'),
+      p('Rationale - two points follow.'),
+      p('Fever with a focus suggests infection.', { list: 33 }),
+      p('Nothing suggests a drug.', { list: 33 }),
+      p('Which test should be done next?', { list: 30 }),
+      p('A. Blood culture'),
+      p('B. Serology'),
+      p('Answer - A'),
+      p('END')
+    ),
+    { numberingXml: AUTO_NUMBERED }
+  );
+
+  const analysis = analyzeAESOT(paragraphs, 'fallback');
+  expect(analysis.questions.map((question) => question.number)).toEqual([1, 2]);
+  const plan = buildAEPlan(buildAEDraft(analysis));
+  const [first, second] = plan.nodes[0]!.questions;
+  expect(first!.promptHtml).toContain('QUESTION 1');
+  expect(first!.promptHtml).toContain('1) The fever is infective.');
+  expect(first!.promptHtml).toContain('2) The fever is drug-induced.');
+  expect(first!.options.map((option) => option.creditPercent)).toEqual([100, 0]);
+  expect(second!.promptHtml).toContain('QUESTION 2');
+  expect(second!.promptHtml).toContain('Which test should be done next?');
+  expect(second!.promptHtml).not.toContain('2. Which test');
+  expect(second!.options.map((option) => option.creditPercent)).toEqual([100, 0]);
+});

@@ -11,8 +11,10 @@ import {
   isOptionLine,
   isStructuralLine,
   numberQuestionStems,
-  questionForEachParagraph
+  questionForEachParagraph,
+  type ListItemNumber
 } from './question-numbering.js';
+import { emfBitmapToPng } from './emf.js';
 
 /** Where the image sits relative to its question stem in the source document. */
 export type ImagePlacement = 'before' | 'after';
@@ -115,8 +117,8 @@ const IMAGE_SECTION_BOUNDARY = new RegExp(`${SECTION_BOUNDARY.source}|${CASE_REL
  * The question each paragraph belongs to, in document order. Images and inline formatting share
  * this rule so both are assigned to the same question numbers.
  */
-export function questionNumbersForParagraphs(texts: string[]): (number | null)[] {
-  return questionForEachParagraph(numberQuestionStems(texts, { inferUnnumbered: true }));
+export function questionNumbersForParagraphs(texts: string[], listItems?: (ListItemNumber | undefined)[]): (number | null)[] {
+  return questionForEachParagraph(numberQuestionStems(texts, { inferUnnumbered: true, ...(listItems ? { listItems } : {}) }));
 }
 
 type ReadParagraph = ReturnType<typeof paragraphContent> & { xml: string };
@@ -140,9 +142,14 @@ export interface CaseHeadingObservation {
  */
 export function detectCaseHeadings(buffer: Buffer): CaseHeadingObservation[] {
   const { documentXml, ...parts } = readSOTDocxParts(buffer);
-  const texts = readParagraphsWithListLabels(documentXml, parts).map((paragraph) => paragraph.structureText);
+  const read = readParagraphsWithListLabels(documentXml, parts);
+  const texts = read.map((paragraph) => paragraph.structureText);
   // Explicitly numbered stems only: an inferred number is a guess this must not build on.
-  const stems = numberQuestionStems(texts, { inferUnnumbered: false });
+  const stems = numberQuestionStems(texts, {
+    inferUnnumbered: false,
+    bold: read.map((paragraph) => paragraph.content.bold),
+    listItems: read.map((paragraph) => paragraph.content.listItem)
+  });
   const observations: CaseHeadingObservation[] = [];
   texts.forEach((text, paragraphIndex) => {
     if (!CASE_RELATES_HEADING.test(text)) return;
@@ -172,7 +179,11 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const read = readParagraphsWithListLabels(documentXml, parts);
   const paragraphs: ReadParagraph[] = read.map(({ xml, content }) => ({ ...content, xml: withoutCompatibilityFallback(xml) }));
   const texts = read.map((paragraph) => paragraph.structureText);
-  const stems = numberQuestionStems(texts, { inferUnnumbered: true });
+  const stems = numberQuestionStems(texts, {
+    inferUnnumbered: true,
+    bold: read.map((paragraph) => paragraph.content.bold),
+    listItems: read.map((paragraph) => paragraph.content.listItem)
+  });
   const images: DocxImage[] = [];
   // Images seen after a section boundary, or in the narrative leading into the next stem; they
   // illustrate the question that follows, so their number is only known once it is reached.
@@ -209,22 +220,25 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
       const target = relationships.get(picture.relationshipId);
       if (!target || target.external) continue;
       const sourcePart = normalizeWordTarget(target.value);
-      const data = entries.get(sourcePart);
-      if (!data) throw new Error(`Image relationship ${picture.relationshipId} points to missing DOCX entry ${sourcePart}.`);
+      const stored = entries.get(sourcePart);
+      if (!stored) throw new Error(`Image relationship ${picture.relationshipId} points to missing DOCX entry ${sourcePart}.`);
+      // A browser cannot show EMF; a bitmap-only EMF becomes a PNG of that same bitmap.
+      const isEmf = path.extname(sourcePart).toLowerCase() === '.emf';
+      const data = isEmf ? emfBitmapToPng(stored) : stored;
       imageIndex += 1;
       const drawingXml = picture.drawingXml;
       const extent = /<wp:extent\b[^>]*\bcx=["'](\d+)["'][^>]*\bcy=["'](\d+)["']/.exec(drawingXml);
       const crop = parseSourceRectangle(picture.pictureXml);
       const docProperties = /<wp:docPr\b([^>]*)\/?>(?:<\/wp:docPr>)?/.exec(drawingXml)?.[1] ?? '';
       const altText = attribute(docProperties, 'descr') || attribute(docProperties, 'title') || '';
-      const extension = path.extname(sourcePart).toLowerCase();
+      const extension = isEmf ? '.png' : path.extname(sourcePart).toLowerCase();
       const sha256 = createHash('sha256').update(data).digest('hex');
       const assigned = leadIn ? null : currentQuestion;
       const image: DocxImage = {
         id: `image-${imageIndex}`,
         relationshipId: picture.relationshipId,
         sourcePart,
-        sourceFilename: path.basename(sourcePart),
+        sourceFilename: isEmf ? path.basename(sourcePart, path.extname(sourcePart)) + '.png' : path.basename(sourcePart),
         contentType: contentTypeFor(extension),
         questionNumber: assigned,
         placement: assigned === null ? 'before' : 'after',

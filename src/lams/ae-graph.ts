@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import type { AEPlan } from '../ae/plan.js';
 import type { LamsAEEditor, AEWriteResult } from './ae-editor.js';
 import { inspectAuthoringGraph, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
+import { renameSource, type AERenamePlan } from './ae-rename.js';
 
 export interface AEGraphReconciliationPlan {
   desiredFlow: string[];
@@ -22,6 +23,7 @@ export interface AEGraphReconciliationResult {
   createdTransitions: Array<{ from: string; to: string }>;
   replacedGates: string[];
   renamedGates: Array<{ from: string; to: string }>;
+  renamedNodes: Array<{ from: string; to: string }>;
   removedTransitions: Array<{ from: string; to: string }>;
 }
 
@@ -88,9 +90,13 @@ export async function reconcileAndWriteAEGraph(
     'writeExistingNode' | 'writeNode' | 'associateWithTeamSetup' | 'associateNodeWithTeamSetup' | 'saveDesign'
   >,
   teamSetupName: string,
-  timeoutMs: number
+  timeoutMs: number,
+  renames?: AERenamePlan
 ): Promise<AEGraphReconciliationResult> {
-  const initial = planAEGraphReconciliation(await inspectAuthoringGraph(page), plan);
+  // Authorised activity renames are applied before any gate is judged, so an existing gate whose
+  // neighbour still carries its earlier title is checked against the flow it is about to join.
+  // Renamed gates keep their earlier titles here: they are reconfigured when they are renamed.
+  const initial = planAEGraphReconciliation(projectToolRenames(await inspectAuthoringGraph(page), renames), plan);
   if (initial.invalidGates.length > 0) {
     throw new Error(`Existing AE gates do not match required settings: ${initial.invalidGates.join('; ')}. No AE changes applied.`);
   }
@@ -101,9 +107,13 @@ export async function reconcileAndWriteAEGraph(
   const createdTransitions: Array<{ from: string; to: string }> = [];
   const replacedGates: string[] = [];
   const removedTransitions: Array<{ from: string; to: string }> = [];
+  const renamedNodes: Array<{ from: string; to: string }> = [];
+  // An authorised earlier gate takes its reviewed title last, like the leading gate: saving an
+  // activity reloads the canvas model from the server and would drop a rename made before it.
+  const pendingGateRenames: Array<{ gate: GraphNode; to: string }> = [];
 
   for (const edge of initial.bypassTransitions) {
-    await removeAuthoringTransition(page, edge.from, edge.to, timeoutMs);
+    await removeAuthoringTransition(page, liveToolTitle(edge.from, renames), liveToolTitle(edge.to, renames), timeoutMs);
     removedTransitions.push(edge);
   }
 
@@ -127,8 +137,14 @@ export async function reconcileAndWriteAEGraph(
     if (existing.length > 1) {
       throw new Error(`AE node title "${nodePlan.title}" is ambiguous; found ${existing.length}.`);
     }
-    const node = existing.length === 1 ? existing[0]! : await createTemplateNode(page, 'Assessment', 'tool', timeoutMs);
-    if (existing.length === 0) createdNodes.push(nodePlan.title);
+    // An earlier AE activity the user authorised renaming is rewritten in place; writeNode gives it
+    // the reviewed title together with its content.
+    const renamed = existing.length === 0 ? renameSource(graph, renames, 'tool', nodePlan.title) : null;
+    if (renamed) renamedNodes.push({ from: renamed.name, to: nodePlan.title });
+    const node = existing.length === 1
+      ? existing[0]!
+      : renamed ?? await createTemplateNode(page, 'Assessment', 'tool', timeoutMs);
+    if (existing.length === 0 && !renamed) createdNodes.push(nodePlan.title);
     await editor.associateNodeWithTeamSetup(node, teamSetupName);
     nodeRefs.push(node);
   }
@@ -140,6 +156,12 @@ export async function reconcileAndWriteAEGraph(
     if (matches.length > 1) throw new Error(`AE gate title "${gatePlan.title}" is ambiguous; found ${matches.length}.`);
     if (matches.length === 1) {
       gateRefs.set(gatePlan.title, matches[0]!);
+      continue;
+    }
+    const renamedGate = renameSource(graph, renames, 'gate', gatePlan.title);
+    if (renamedGate) {
+      pendingGateRenames.push({ gate: renamedGate, to: gatePlan.title });
+      gateRefs.set(gatePlan.title, renamedGate);
       continue;
     }
     const gate = await createTemplateNode(page, 'Gate', 'gate', timeoutMs);
@@ -240,13 +262,41 @@ export async function reconcileAndWriteAEGraph(
   // Renaming the gate only changes the canvas model, and saving an activity reloads that model from
   // the server, which drops a rename made before it. It therefore runs last, against the design the
   // save is about to write.
-  const renamedGates = await renameLeadingAEGate(page, plan, nodeRefs[0]!.uiid, timeoutMs);
+  const renamedGates: Array<{ from: string; to: string }> = [];
+  for (const { gate: planned, to } of pendingGateRenames) {
+    const current = (await inspectAuthoringGraph(page)).nodes.filter(
+      (node) => node.type === 'gate' && node.uiid === planned.uiid && node.name === planned.name
+    );
+    if (current.length !== 1) throw new Error(`AE gate "${planned.name}" (uiid ${planned.uiid}) changed before it could be renamed.`);
+    const gate = current[0]!;
+    await configurePermissionGate(page, gate, to, timeoutMs);
+    console.log(`Renamed AE gate "${gate.name}" to "${to}".`);
+    renamedGates.push({ from: gate.name, to });
+  }
+  renamedGates.push(...await renameLeadingAEGate(page, plan, nodeRefs[0]!.uiid, timeoutMs));
   await editor.saveDesign();
   const finalPlan = planAEGraphReconciliation(await inspectAuthoringGraph(page), plan);
   if (!finalPlan.ready || finalPlan.missingTransitions.length > 0 || finalPlan.missingNodeTitles.length > 0 || finalPlan.missingGateTitles.length > 0) {
     throw new Error('Post-save AE graph verification reports invalid gates, bypasses, or missing nodes, gates, or transitions.');
   }
-  return { plan: finalPlan, writtenNodes, createdNodes, createdGates, createdTransitions, replacedGates, renamedGates, removedTransitions };
+  return { plan: finalPlan, writtenNodes, createdNodes, createdGates, createdTransitions, replacedGates, renamedGates, renamedNodes, removedTransitions };
+}
+
+/** The graph with each authorised AE activity rename applied; gates keep the titles they have. */
+export function projectToolRenames(graph: AuthoringGraph, renames?: AERenamePlan): AuthoringGraph {
+  if (!renames) return graph;
+  return {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      const rename = node.type === 'tool' ? renames.renames.find((candidate) => candidate.type === 'tool' && candidate.from === node.name) : undefined;
+      return rename ? { ...node, name: rename.to } : node;
+    })
+  };
+}
+
+/** The title an activity carries on the live canvas before its authorised rename is applied. */
+function liveToolTitle(title: string, renames?: AERenamePlan): string {
+  return renames?.renames.find((candidate) => candidate.type === 'tool' && candidate.to === title)?.from ?? title;
 }
 
 export function buildDesiredAEFlow(plan: AEPlan): string[] {
@@ -317,7 +367,11 @@ export const TEMPLATE_LIBRARY_TITLES = { Assessment: 'Assessment', Gate: 'gate' 
  * transition and autosaves. Pressing it is what an author does, so the automation presses it too
  * rather than placing each activity by hand and drifting from the layout LAMS would have made.
  */
-const ARRANGE_GRID = { columnWidth: 240, rowHeight: 120, activityX: 40, activityY: 40, gateX: 120, gateY: 60 };
+// LAMS's current Arrange (authoringGeneral.js arrangeActivities) draws a gate at its column's own x
+// minus the row's columnShift, and in a TBL sequence breaks the row after every gate, so a TBL gate
+// lands on the activity column (x = 40 + 240n). Layouts arranged with a half-column gate offset
+// (x = 120 + 240n) are accepted too. Either way a gate sits half an activity lower than its row.
+const ARRANGE_GRID = { columnWidth: 240, rowHeight: 120, activityX: 40, activityY: 40, gateX: [40, 120], gateY: 60 };
 
 export async function arrangeAEActivities(page: Page, timeoutMs: number): Promise<void> {
   await page.locator('#arrangeButton').click();
@@ -336,7 +390,7 @@ export async function arrangeAEActivities(page: Page, timeoutMs: number): Promis
         if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
         const gate = activity.classList.contains('svg-activity-gate');
         return (
-          x % grid.columnWidth === (gate ? grid.gateX : grid.activityX) &&
+          (gate ? grid.gateX.includes(x % grid.columnWidth) : x % grid.columnWidth === grid.activityX) &&
           y % grid.rowHeight === (gate ? grid.gateY : grid.activityY)
         );
       }),
@@ -435,14 +489,22 @@ export async function renameLeadingAEGate(
   if (incoming.length !== 1) return [];
   const lead = graph.nodes.find((node) => node.uiid === incoming[0]!.fromUiid);
   // The chain can also extend straight from an activity, which is not a gate and is not renamed.
-  if (!lead || lead.type !== 'gate' || lead.name === plan.leadingGateTitle) return [];
+  if (!lead || lead.type !== 'gate') return [];
+  const titled = lead.name === plan.leadingGateTitle;
+  if (titled && lead.gateType === 'permission' && lead.stopAtPrecedingActivity === true) return [];
   if (lead.gateType !== 'permission') {
     throw new Error(
       `The gate before "${plan.nodes[0]!.title}" is a ${lead.gateType ?? 'unreadable'} gate, not the permission gate ` +
         `the reviewed AE flow expects; inspect "${lead.name}" before renaming it.`
     );
   }
+  // A gate already carrying its reviewed title is only reconfigured, so it stops students at the
+  // preceding activity like every other AE gate.
   await configurePermissionGate(page, lead, plan.leadingGateTitle, timeoutMs);
+  if (titled) {
+    console.log(`Enabled "stop at preceding activity" on the leading AE gate "${lead.name}".`);
+    return [];
+  }
   console.log(`Renamed the leading AE gate "${lead.name}" to "${plan.leadingGateTitle}".`);
   return [{ from: lead.name, to: plan.leadingGateTitle }];
 }

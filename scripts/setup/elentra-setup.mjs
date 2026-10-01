@@ -18,8 +18,9 @@ export async function setupPythonRuntime() {
   console.log('PASS Elentra Python runtime installed.');
 }
 
-// The user signs in to Elentra themselves in the opened window; session.py saves the session
-// under .playwright/ and then verifies it can open the admin events page without input.
+// The user signs in to Elentra themselves in the opened window; session.py keeps the sign-in in
+// the persistent .playwright/elentra-profile and then verifies, after a browser restart, that it
+// can open the admin events page without input.
 export function openElentraSignIn() {
   console.log('Next: sign in to Elentra. This is a separate sign-in from LAMS.');
   const result = spawnSync(venvPython(), [path.join(elentraDir, 'session.py'), '--login'], { cwd: elentraDir, stdio: 'inherit', env: pythonEnv });

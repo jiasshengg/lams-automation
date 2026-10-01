@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { paragraphBlocks, topLevelBlocks } from '../src/docx/blocks.js';
-import { numberQuestionStems } from '../src/docx/question-numbering.js';
+import { BREAK_MARKER, numberQuestionStems } from '../src/docx/question-numbering.js';
 
 test('reads a paragraph that anchors a text box as one block', () => {
   const xml = '<w:p><w:pPr/><w:r><w:t>outer</w:t></w:r><w:txbxContent><w:p><w:r><w:t>label</w:t></w:r></w:p></w:txbxContent><w:r><w:t>tail</w:t></w:r></w:p><w:p/><w:p><w:r><w:t>next</w:t></w:r></w:p>';
@@ -45,4 +45,25 @@ test('a sentence opening with the next number is narrative unless an answer or o
   expect(numberQuestionStems(texts, { inferUnnumbered: false })).toEqual([1, null, null, null, null, null, null]);
   expect(numberQuestionStems(['1. Microcytosis', 'Answer - A', '2 Increased LDH', 'Answer - C'], { inferUnnumbered: false }))
     .toEqual([1, null, 2, null]);
+});
+
+test('a Word-numbered stem opens a question only once the previous one is answered and its own answer follows', () => {
+  const texts = ['Stem one', 'A. x', 'Answer - A', 'Rationale', 'first reason', 'second reason', 'Stem two', 'A. y', 'Answer - A'];
+  const listItems = [
+    { key: 'q', number: 1 }, null, null, null,
+    { key: 'r', number: 1 }, { key: 'r', number: 2 },
+    { key: 'q', number: 2 }, null, null
+  ];
+  expect(numberQuestionStems(texts, { inferUnnumbered: false, listItems })).toEqual([1, null, null, null, null, null, 2, null, null]);
+  // Without the list numbers the document shows no question numbers at all.
+  expect(numberQuestionStems(texts, { inferUnnumbered: false })).toEqual(texts.map(() => null));
+});
+
+test('a BREAK marker indented with spaces, tabs, or non-breaking spaces is still a break', () => {
+  for (const marker of ['--- BREAK ---', '-- BREAK --', '    ******BREAK******', '\t*** BREAK ***  ', '--- BREAK --- ']) {
+    expect(BREAK_MARKER.test(marker)).toBe(true);
+  }
+  for (const text of ['BREAK', '--- BREAK', 'Take a --- BREAK --- here', '** BREAK **']) {
+    expect(BREAK_MARKER.test(text)).toBe(false);
+  }
 });

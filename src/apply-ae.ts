@@ -1,5 +1,6 @@
 import { tryExpectedTBLGraph } from './lams/tbl-expectations.js';
 import { parsePlaceholderRepair, persistPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
+import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames } from './lams/ae-rename.js';
 import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { readFile } from 'node:fs/promises';
@@ -18,6 +19,8 @@ import { openLessonFromLibrary } from './lams/lesson-copy.js';
 async function main(): Promise<void> {
   const repairJson = readArgument('--repair-json');
   const repair = repairJson ? parsePlaceholderRepair(JSON.parse(await readFile(await resolveInputFile(repairJson, '.json'), 'utf8'))) : undefined;
+  const renameJson = readArgument('--rename-json');
+  const renames = renameJson ? parseAERenamePlan(JSON.parse(await readFile(await resolveInputFile(renameJson, '.json'), 'utf8'))) : undefined;
   const aeJson = readArgument('--ae-json');
   if (!aeJson) throw new Error('Usage: npm run apply:ae -- --config <path> --ae-json <path> --request-json <json> [--team-setup <title>] [--dry-run] [--skip-sot-check]');
   const commit = !process.argv.includes('--dry-run');
@@ -29,6 +32,7 @@ async function main(): Promise<void> {
   const plan = buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown);
   // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
   await assertAEPlanMatchesSOT(plan);
+  if (renames) assertRenamesFollowPlan(renames, plan);
   const teamSetup = readArgument('--team-setup') ?? config.irat?.teamSetupName ?? 'Team Setup';
   const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
@@ -38,9 +42,13 @@ async function main(): Promise<void> {
     activePage = await openAuthoringLibrary(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
     if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle differs from the requested lesson.');
-    const expectations = tryExpectedTBLGraph(await inspectAuthoringGraph(activePage), config, plan, repair);
+    if (renames && renames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle differs from the requested lesson.');
+    const before = await inspectAuthoringGraph(activePage);
+    const expectations = tryExpectedTBLGraph(renames ? projectAERenames(before, renames) : before, config, plan, repair);
+    if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);
     if (!commit) {
-      const graphPlan = planAEGraphReconciliation(await inspectAuthoringGraph(activePage), plan);
+      const graphPlan = planAEGraphReconciliation(renames ? projectAERenames(before, renames) : before, plan);
+      console.log(`Full-lesson expectations: ${expectations ? expectations.expectedFlow.join(' -> ') : 'not derivable (see warning above)'}`);
       console.log(`AE write preview: ${plan.nodes.length} node(s), ${plan.nodes.flatMap((node) => node.questions).length} question(s); no changes applied.`);
       console.log(`Missing AE nodes: ${graphPlan.missingNodeTitles.join(', ') || 'none'}`);
       console.log(`Missing AE gates: ${graphPlan.missingGateTitles.join(', ') || 'none'}`);
@@ -57,7 +65,7 @@ async function main(): Promise<void> {
     }
     const images = await resolveAEQuestionImages(plan);
     const editor = new LamsAEEditor(activePage, plan, config.browser.actionTimeoutMs, images);
-    const result = await reconcileAndWriteAEGraph(activePage, plan, editor, teamSetup, config.browser.actionTimeoutMs);
+    const result = await reconcileAndWriteAEGraph(activePage, plan, editor, teamSetup, config.browser.actionTimeoutMs, renames);
     if (expectations) {
       const validation = validateAuthoringGraph(await inspectAuthoringGraph(activePage), { ...config, ...expectations });
       console.log(formatValidationReport(validation));
@@ -69,6 +77,7 @@ async function main(): Promise<void> {
     console.log(`Nodes created: ${result.createdNodes.join(', ') || 'none'}`);
     console.log(`Gates created: ${result.createdGates.join(', ') || 'none'}`);
     console.log(`Gates replaced: ${result.replacedGates.join(', ') || 'none'}`);
+    console.log(`Nodes renamed: ${result.renamedNodes.map((node) => `${node.from} -> ${node.to}`).join(', ') || 'none'}`);
     console.log(`Gates renamed: ${result.renamedGates.map((gate) => `${gate.from} -> ${gate.to}`).join(', ') || 'none'}`);
     console.log(`Transitions removed: ${result.removedTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
     console.log(`Transitions created: ${result.createdTransitions.map((edge) => `${edge.from} -> ${edge.to}`).join(', ') || 'none'}`);
