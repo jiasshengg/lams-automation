@@ -89,6 +89,8 @@ The command requires resolved copy targets and the structured `irat` request. It
 
 Pass `--ae-json '<AE_JSON>'` or use the `run:tbl` alias to continue in the same browser context and Author window through AE writing and verified graph reconciliation after iRAT is saved. There is no separate preflight before copying; this is the only command a new copy + iRAT + AE lesson needs. Add `--publish` (with `lessonIndex.endDate` in the request) only when the user asked for the full flow or for publishing: the same browser then publishes the design the run just saved and records its 5-digit Kanban code.
 
+`--await-ae-json '<NEW_PATH>'` replaces `--ae-json` when the AE JSON is still being prepared. The path is literal and must not exist when the run starts. The run reads the copied graph right after copying, writes the iRAT, then checks the path every 5 seconds. Each new version of the file goes through the same checks as `--ae-json` (plan build, Source-of-Truth comparison, AE image resolution). A refused version is logged with its reason and the run waits for the next rewrite. `--ae-wait-minutes` (default 60) bounds the wait; on timeout the run stops with the copy and iRAT saved, and AE is finished with `apply:ae`. `--ae-json` and `--await-ae-json` are mutually exclusive, and `--publish` accepts either.
+
 ## Failures
 
 When the automation saves diagnostics, report the artifact directory. Diagnostics may include a screenshot, HTML, frame information, and a DOM summary. Do not include browser profiles, authentication material, or secrets in the report.
