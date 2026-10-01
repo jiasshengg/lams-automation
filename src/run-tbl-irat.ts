@@ -14,8 +14,9 @@ import { resolveIratQuestionImages } from './docx/question-images.js';
 import { resolveAEQuestionImages } from './docx/question-images.js';
 import { readFile } from 'node:fs/promises';
 import { resolveInputFile } from './input-file.js';
-import { buildAEPlan } from './ae/plan.js';
+import { buildAEPlan, type AEPlan } from './ae/plan.js';
 import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
+import { AE_WAIT_MINUTES_FLAG, AWAIT_AE_JSON_FLAG, awaitAEJson, parseAEWaitMinutes, resolveAwaitedAEJsonPath } from './ae/plan-wait.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
 import { reconcileAndWriteAEGraph } from './lams/ae-graph.js';
 import { publishLesson, requirePublishSettings } from './lams/publish.js';
@@ -29,20 +30,23 @@ async function main(): Promise<void> {
   const publish = process.argv.includes('--publish');
   const configPath = readArgument('--config') ?? 'configs/local.json';
   const config = await loadConfig(configPath, parseRequestOverrides(readArgument('--request-json')), { defaultDestinationToSource: true });
+  const aeJson = readArgument('--ae-json');
+  const awaitedAEJson = readArgument(AWAIT_AE_JSON_FLAG);
+  if (aeJson && awaitedAEJson) throw new Error(`Pass either --ae-json or ${AWAIT_AE_JSON_FLAG}, not both.`);
   if (publish) {
-    if (!readArgument('--ae-json')) throw new Error('--publish runs after AE, so it needs --ae-json.');
+    if (!aeJson && !awaitedAEJson) throw new Error(`--publish runs after AE, so it needs --ae-json or ${AWAIT_AE_JSON_FLAG}.`);
     // The end date can only come from the user; without it nothing is copied or published.
     requirePublishSettings(config);
   }
   const irat = await resolveIratRequest(config);
   const repairJson = readArgument('--repair-json');
   const repair = repairJson ? parsePlaceholderRepair(JSON.parse(await readFile(await resolveInputFile(repairJson, '.json'), 'utf8'))) : undefined;
-  const aeJson = readArgument('--ae-json');
-  const aePlan = aeJson
-    ? buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown)
-    : undefined;
   // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
-  if (aePlan) await assertAEPlanMatchesSOT(aePlan);
+  let ae = aeJson ? await loadAEStage(await resolveInputFile(aeJson, '.json')) : undefined;
+  // With --await-ae-json the AE JSON is still being prepared: the browser copies the lesson and
+  // writes the iRAT meanwhile, and the same checks run on the file once it arrives.
+  const awaitedAEPath = awaitedAEJson ? await resolveAwaitedAEJsonPath(awaitedAEJson) : undefined;
+  const aeWaitMs = parseAEWaitMinutes(readArgument(AE_WAIT_MINUTES_FLAG)) * 60_000;
   // --slow-mo pauses before every action so a live run can be watched step by step.
   const slowMoArgument = readArgument('--slow-mo');
   const slowMoMs = slowMoArgument === undefined ? undefined : Number(slowMoArgument);
@@ -69,8 +73,8 @@ async function main(): Promise<void> {
       return;
     }
     // iRAT and AE each verify their own targets as they write. The full-lesson expectations for the closing validation come from an in-page read of the
-    // copy, which opens no activity and costs no navigation.
-    const expectations = aePlan ? tryExpectedTBLGraph(await inspectAuthoringGraph(activePage), config, aePlan, repair) : undefined;
+    // copy, which opens no activity and costs no navigation. It is read now, before iRAT or repairs change it, even when the AE plan arrives later.
+    const copiedGraph = ae || awaitedAEPath ? await inspectAuthoringGraph(activePage) : undefined;
     if (repair) {
       const repaired = await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
       await persistPlaceholderRepairs(activePage, repaired, () =>
@@ -79,12 +83,13 @@ async function main(): Promise<void> {
     const questionImages = await resolveIratQuestionImages(irat);
     const editor = new LamsIratEditor(activePage, irat, config.browser.actionTimeoutMs, questionImages);
     const result = await executeIratAutomation(editor, irat, { commit });
-    const aeImages = aePlan ? await resolveAEQuestionImages(aePlan) : undefined;
-    const aeResult = aePlan
+    if (awaitedAEPath) ae = await awaitAEJson(awaitedAEPath, loadAEStage, { timeoutMs: aeWaitMs });
+    const expectations = ae && copiedGraph ? tryExpectedTBLGraph(copiedGraph, config, ae.plan, repair) : undefined;
+    const aeResult = ae
       ? await reconcileAndWriteAEGraph(
           activePage,
-          aePlan,
-          new LamsAEEditor(activePage, aePlan, config.browser.actionTimeoutMs, aeImages),
+          ae.plan,
+          new LamsAEEditor(activePage, ae.plan, config.browser.actionTimeoutMs, ae.images),
           readArgument('--team-setup') ?? irat.teamSetupName,
           config.browser.actionTimeoutMs
         )
@@ -142,6 +147,13 @@ async function main(): Promise<void> {
   } finally {
     await context.close();
   }
+}
+
+/** Every check an AE JSON passes before it may reach LAMS, including its images resolving. */
+async function loadAEStage(file: string): Promise<{ plan: AEPlan; images: Awaited<ReturnType<typeof resolveAEQuestionImages>> }> {
+  const plan = buildAEPlan(JSON.parse(await readFile(file, 'utf8')) as unknown);
+  await assertAEPlanMatchesSOT(plan);
+  return { plan, images: await resolveAEQuestionImages(plan) };
 }
 
 function readArgument(name: string): string | undefined {

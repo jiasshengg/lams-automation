@@ -61,6 +61,19 @@ A full flow normally starts from the Kanban sheet. Use this start whenever the u
    npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST_JSON>' --ae-json '<AE_JSON>'
    ```
 
+   **Prepare AE while the browser works.** Once the iRAT request is resolved, do not wait for the AE JSON before starting. Start the same command in the background with `--await-ae-json '<NEW_AE_JSON_PATH>'` in place of `--ae-json`, then extract and review the AE (`extract:ae-sot --draft`, `_review` notes, `TODO_` keys, any extractor fix) while it copies the lesson and writes the iRAT:
+
+   ```bash
+   npx tsx src/run-tbl-irat.ts --config configs/local.json --request-json '<REQUEST_JSON>' --await-ae-json '<NEW_AE_JSON_PATH>'
+   ```
+
+   - The path is literal and must not exist yet; the run refuses an existing file so a stale plan is never written. Draft into a different file, and when review is finished write the final JSON to a temporary file in the same folder and rename it onto the awaited path.
+   - When iRAT is saved, the run waits for that file and applies the same checks as `--ae-json` (plan rules, Source-of-Truth comparison, AE images). If it refuses a version, it prints the reason and keeps waiting; fix it and write the file again. Watch the background output for `AE JSON not accepted yet`.
+   - It waits up to `--ae-wait-minutes` (default 60). If nothing acceptable arrives, it stops with the copy and iRAT saved; finish with `apply:ae` on that lesson rather than copying again.
+   - The browser process has already loaded its code, so extractor fixes made during the wait do not affect it. Do not switch branches or check out files while it runs.
+   - Questions for the user (`TODO_answerKey`, `multipleAnswerCredit`) are asked during the wait as usual; the run simply waits for the answer. `--publish` still needs `lessonIndex.endDate` before the command starts.
+   - In an all-rows run, keep one browser at a time: prepare the next row's AE while the current row's run is in the browser, and pass it with `--ae-json` when that row starts.
+
    The AE stage writes existing exact Assessment nodes, adds missing AE Assessment nodes, permission gates, and reviewed linear transitions, removes exact direct transitions that bypass planned gates, and replaces exact planned gates whose verified type/settings are wrong. It does not delete questions or infer that unrelated nodes are extra.
 6. **Publishing is the last LAMS stage of the full flow; the Elentra links follow it.** Run it when the user asked for the
    full/end-to-end/complete flow, or asked for the lesson to be deployed, published, or made
