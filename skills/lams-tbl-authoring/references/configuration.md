@@ -143,7 +143,7 @@ Prompts follow the document's layout while the paragraph format (Normal) and fon
 
 ## Source-of-Truth check
 
-`apply:ae` and `run:tbl` re-read `sourceDocx`, rebuild the plan the document produces, and stop before opening the browser when node count, node titles, question placement, question types, prompts, or option text differ. Answer keys, marks, and weights are not compared. An AE JSON without `sourceDocx` is refused. `--skip-sot-check` bypasses the check for a difference the user has confirmed is intentional.
+`apply:ae` and `run:tbl` re-read `sourceDocx`, rebuild the plan the document produces, and stop before opening the browser when node count, node titles, question placement, question types, prompts, or option text differ. With `run:tbl --await-ae-json` the same comparison runs on the awaited file after iRAT is saved, and a mismatch makes the run wait for a corrected file instead of stopping. Answer keys, marks, and weights are not compared. An AE JSON without `sourceDocx` is refused. `--skip-sot-check` bypasses the check for a difference the user has confirmed is intentional.
 
 ## AE node title convention
 
