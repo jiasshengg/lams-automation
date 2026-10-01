@@ -1,6 +1,6 @@
 import { tryExpectedTBLGraph } from './lams/tbl-expectations.js';
 import { parsePlaceholderRepair, persistPlaceholderRepairs, repairAEPlaceholders } from './lams/ae-placeholder.js';
-import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames } from './lams/ae-rename.js';
+import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames, withRangeSpellingRenames } from './lams/ae-rename.js';
 import { validateAuthoringGraph, formatValidationReport } from './lams/validation.js';
 import { launchLamsBrowser } from '../scripts/setup/browser-profile.mjs';
 import { readFile } from 'node:fs/promises';
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   const repairJson = readArgument('--repair-json');
   const repair = repairJson ? parsePlaceholderRepair(JSON.parse(await readFile(await resolveInputFile(repairJson, '.json'), 'utf8'))) : undefined;
   const renameJson = readArgument('--rename-json');
-  const renames = renameJson ? parseAERenamePlan(JSON.parse(await readFile(await resolveInputFile(renameJson, '.json'), 'utf8'))) : undefined;
+  const explicitRenames = renameJson ? parseAERenamePlan(JSON.parse(await readFile(await resolveInputFile(renameJson, '.json'), 'utf8'))) : undefined;
   const aeJson = readArgument('--ae-json');
   if (!aeJson) throw new Error('Usage: npm run apply:ae -- --config <path> --ae-json <path> --request-json <json> [--team-setup <title>] [--dry-run] [--skip-sot-check]');
   const commit = !process.argv.includes('--dry-run');
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const plan = buildAEPlan(JSON.parse(await readFile(await resolveInputFile(aeJson, '.json'), 'utf8')) as unknown);
   // Checked before the browser opens: nothing reaches LAMS unless it follows the document.
   await assertAEPlanMatchesSOT(plan);
-  if (renames) assertRenamesFollowPlan(renames, plan);
+  if (explicitRenames) assertRenamesFollowPlan(explicitRenames, plan);
   const teamSetup = readArgument('--team-setup') ?? config.irat?.teamSetupName ?? 'Team Setup';
   const context = await launchLamsBrowser(config.browser.userDataDir, browserLaunchOptions(config));
   context.setDefaultTimeout(config.browser.actionTimeoutMs);
@@ -42,8 +42,10 @@ async function main(): Promise<void> {
     activePage = await openAuthoringLibrary(page, config);
     await openLessonFromLibrary(activePage, config.destinationFolderPath, config.lessonTitle, config);
     if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle differs from the requested lesson.');
-    if (renames && renames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle differs from the requested lesson.');
+    if (explicitRenames && explicitRenames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle differs from the requested lesson.');
     const before = await inspectAuthoringGraph(activePage);
+    // An earlier chain titled "AE Case 1 Q1 to Q4" is the same chain as "AE Case 1 Q1-4", renamed in place.
+    const renames = withRangeSpellingRenames(before, plan, config.lessonTitle, explicitRenames);
     const expectations = tryExpectedTBLGraph(renames ? projectAERenames(before, renames) : before, config, plan, repair);
     if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);
     if (!commit) {

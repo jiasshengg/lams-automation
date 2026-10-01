@@ -47,7 +47,7 @@ function validInput() {
     ],
     gates: [
       {
-        title: 'AE Gate Case 1 to Case 2 Question 3',
+        title: 'AE Gate AE Case 2',
         afterNodeTitle: 'AE Case 1',
         beforeNodeTitle: 'AE Case 2',
         beforeQuestionNumber: 3
@@ -504,4 +504,15 @@ test('a plan saved when hedged answers needed a decision still builds, ignoring 
   const plan = buildAEPlan(input);
   expect(plan.nodes[0]!.questions[0]!.options.map((option) => option.creditPercent)).toEqual([100, 0, 0]);
   expect(plan.nodes[0]!.questions[0]!.multipleAnswersAllowed).toBe(false);
+});
+
+test('refuses an AE gate whose title does not repeat the node it leads into exactly', () => {
+  const input = validInput();
+  input.nodes[1]!.title = 'AE Case 2 Q3-4';
+  input.gates[0]!.beforeNodeTitle = 'AE Case 2 Q3-4';
+  input.gates[0]!.title = 'AE Gate AE Case 2 Q3 to Q4';
+  expect(() => buildAEPlan(input)).toThrow('must be titled "AE Gate AE Case 2 Q3-4"');
+
+  input.gates[0]!.title = 'AE Gate AE Case 2 Q3-4';
+  expect(buildAEPlan(input).gates[0]!.title).toBe('AE Gate AE Case 2 Q3-4');
 });

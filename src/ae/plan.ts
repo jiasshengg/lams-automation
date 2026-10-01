@@ -587,6 +587,15 @@ function validateGateAdjacency(input: AEPlanInput): void {
     }
   }
 
+  // A gate is named after the node it leads into, character for character, so it never drifts
+  // from that node's spelling ("AE Gate AE Case 1 Q1-4", never "AE Gate AE Case 1 Q1 to Q4").
+  for (const gate of input.gates) {
+    const expected = aeGateTitle(gate.beforeNodeTitle);
+    if (gate.title !== expected) {
+      throw new Error(`AE gate "${gate.title}" must be titled "${expected}", after the node it leads into`);
+    }
+  }
+
   const betweenGates = leading ? input.gates.slice(1) : input.gates;
   betweenGates.forEach((gate, index) => {
     const after = input.nodes[index]!;

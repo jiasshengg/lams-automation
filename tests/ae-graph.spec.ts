@@ -20,21 +20,21 @@ const plan = buildAEPlan({
       { text: 'A. Yes', correct: true }, { text: 'B. No', correct: false }
     ] }] }
   ],
-  gates: [{ title: 'AE Gate 2', afterNodeTitle: 'AE 1', beforeNodeTitle: 'AE 2', beforeQuestionNumber: 2 }]
+  gates: [{ title: 'AE Gate AE 2', afterNodeTitle: 'AE 1', beforeNodeTitle: 'AE 2', beforeQuestionNumber: 2 }]
 });
 
 test('builds an interleaved AE node and gate flow', () => {
-  expect(buildDesiredAEFlow(plan)).toEqual(['AE 1', 'AE Gate 2', 'AE 2']);
+  expect(buildDesiredAEFlow(plan)).toEqual(['AE 1', 'AE Gate AE 2', 'AE 2']);
 });
 
 test('plans missing AE graph additions without treating unrelated nodes as changes', () => {
   const graph: AuthoringGraph = { rendering: 'svg', modelAvailable: true, nodes: [node(1, 'Team Setup', 'grouping')], transitions: [] };
   const result = planAEGraphReconciliation(graph, plan);
   expect(result.missingNodeTitles).toEqual(['AE 1', 'AE 2']);
-  expect(result.missingGateTitles).toEqual(['AE Gate 2']);
+  expect(result.missingGateTitles).toEqual(['AE Gate AE 2']);
   expect(result.missingTransitions).toEqual([
-    { from: 'AE 1', to: 'AE Gate 2' },
-    { from: 'AE Gate 2', to: 'AE 2' }
+    { from: 'AE 1', to: 'AE Gate AE 2' },
+    { from: 'AE Gate AE 2', to: 'AE 2' }
   ]);
   expect(result.ready).toBe(true);
 });
@@ -42,7 +42,7 @@ test('plans missing AE graph additions without treating unrelated nodes as chang
 test('reports an existing transition that bypasses a planned AE gate', () => {
   const graph: AuthoringGraph = {
     rendering: 'svg', modelAvailable: true,
-    nodes: [node(1, 'AE 1', 'tool'), node(2, 'AE Gate 2', 'gate'), node(3, 'AE 2', 'tool')],
+    nodes: [node(1, 'AE 1', 'tool'), node(2, 'AE Gate AE 2', 'gate'), node(3, 'AE 2', 'tool')],
     transitions: [{ uiid: 10, fromUiid: 1, toUiid: 3 }]
   };
   const result = planAEGraphReconciliation(graph, plan);
@@ -65,10 +65,10 @@ for (const settings of [
   test(`blocks existing gate with settings ${JSON.stringify(settings)}`, () => {
     const graph: AuthoringGraph = {
       rendering: 'svg', modelAvailable: true,
-      nodes: [{ ...node(2, 'AE Gate 2', 'gate'), ...settings }], transitions: []
+      nodes: [{ ...node(2, 'AE Gate AE 2', 'gate'), ...settings }], transitions: []
     };
     const result = planAEGraphReconciliation(graph, plan);
-    expect(result.gatesToReplace).toEqual(['AE Gate 2']);
+    expect(result.gatesToReplace).toEqual(['AE Gate AE 2']);
     expect(result.invalidGates).toEqual([]);
     expect(result.ready).toBe(false);
   });
@@ -77,12 +77,12 @@ for (const settings of [
 test('refuses to replace a gate whose settings could not be observed', () => {
   const graph: AuthoringGraph = {
     rendering: 'svg', modelAvailable: true,
-    nodes: [{ ...node(2, 'AE Gate 2', 'gate'), gateType: null, stopAtPrecedingActivity: null }], transitions: []
+    nodes: [{ ...node(2, 'AE Gate AE 2', 'gate'), gateType: null, stopAtPrecedingActivity: null }], transitions: []
   };
   const result = planAEGraphReconciliation(graph, plan);
   expect(result.gatesToReplace).toEqual([]);
   expect(result.invalidGates).toEqual([
-    '"AE Gate 2" settings could not be verified (found unknown, unknown)'
+    '"AE Gate AE 2" settings could not be verified (found unknown, unknown)'
   ]);
   expect(result.ready).toBe(false);
 });
@@ -92,7 +92,7 @@ test('refuses gate replacement when it would remove an unrelated transition', ()
     rendering: 'svg', modelAvailable: true,
     nodes: [
       node(1, 'AE 1', 'tool'),
-      { ...node(2, 'AE Gate 2', 'gate'), gateType: 'time', stopAtPrecedingActivity: true },
+      { ...node(2, 'AE Gate AE 2', 'gate'), gateType: 'time', stopAtPrecedingActivity: true },
       node(3, 'AE 2', 'tool'),
       node(4, 'Unrelated activity', 'tool')
     ],
@@ -105,7 +105,7 @@ test('refuses gate replacement when it would remove an unrelated transition', ()
   const result = planAEGraphReconciliation(graph, plan);
   expect(result.gatesToReplace).toEqual([]);
   expect(result.invalidGates).toEqual([
-    '"AE Gate 2" cannot be safely replaced: found 1 incoming transition(s) outside the reviewed AE flow'
+    '"AE Gate AE 2" cannot be safely replaced: found 1 incoming transition(s) outside the reviewed AE flow'
   ]);
   expect(result.ready).toBe(false);
 });
@@ -115,7 +115,7 @@ test('refuses gate replacement when a transition endpoint could not be observed'
     rendering: 'svg', modelAvailable: true,
     nodes: [
       node(1, 'AE 1', 'tool'),
-      { ...node(2, 'AE Gate 2', 'gate'), gateType: 'time', stopAtPrecedingActivity: true },
+      { ...node(2, 'AE Gate AE 2', 'gate'), gateType: 'time', stopAtPrecedingActivity: true },
       node(3, 'AE 2', 'tool')
     ],
     transitions: [{ uiid: 10, fromUiid: null, toUiid: null }]
@@ -123,7 +123,7 @@ test('refuses gate replacement when a transition endpoint could not be observed'
   const result = planAEGraphReconciliation(graph, plan);
   expect(result.gatesToReplace).toEqual([]);
   expect(result.invalidGates).toEqual([
-    '"AE Gate 2" cannot be safely replaced: 1 graph transition(s) have unverified endpoints'
+    '"AE Gate AE 2" cannot be safely replaced: 1 graph transition(s) have unverified endpoints'
   ]);
 });
 
@@ -132,7 +132,7 @@ test('allows gate replacement when every incident transition belongs to the revi
     rendering: 'svg', modelAvailable: true,
     nodes: [
       node(1, 'AE 1', 'tool'),
-      { ...node(2, 'AE Gate 2', 'gate'), gateType: 'time', stopAtPrecedingActivity: true },
+      { ...node(2, 'AE Gate AE 2', 'gate'), gateType: 'time', stopAtPrecedingActivity: true },
       node(3, 'AE 2', 'tool')
     ],
     transitions: [
@@ -141,7 +141,7 @@ test('allows gate replacement when every incident transition belongs to the revi
     ]
   };
   const result = planAEGraphReconciliation(graph, plan);
-  expect(result.gatesToReplace).toEqual(['AE Gate 2']);
+  expect(result.gatesToReplace).toEqual(['AE Gate AE 2']);
   expect(result.invalidGates).toEqual([]);
 });
 
@@ -150,7 +150,7 @@ test('judges gate replacement against authorised activity renames', () => {
     rendering: 'svg', modelAvailable: true,
     nodes: [
       node(1, 'AE 1 to earlier', 'tool'),
-      { ...node(2, 'AE Gate 2', 'gate'), gateType: 'permission', stopAtPrecedingActivity: false },
+      { ...node(2, 'AE Gate AE 2', 'gate'), gateType: 'permission', stopAtPrecedingActivity: false },
       node(3, 'AE 2', 'tool')
     ],
     transitions: [
@@ -162,13 +162,13 @@ test('judges gate replacement against authorised activity renames', () => {
   const renames = { lessonTitle: 'Lesson', renames: [{ type: 'tool' as const, from: 'AE 1 to earlier', to: 'AE 1' }] };
   const result = planAEGraphReconciliation(projectToolRenames(graph, renames), plan);
   expect(result.invalidGates).toEqual([]);
-  expect(result.gatesToReplace).toEqual(['AE Gate 2']);
+  expect(result.gatesToReplace).toEqual(['AE Gate AE 2']);
 });
 
 test('accepts existing permission gate with stop at preceding activity enabled', () => {
   const graph: AuthoringGraph = {
     rendering: 'svg', modelAvailable: true,
-    nodes: [{ ...node(2, 'AE Gate 2', 'gate'), gateType: 'permission', stopAtPrecedingActivity: true }], transitions: []
+    nodes: [{ ...node(2, 'AE Gate AE 2', 'gate'), gateType: 'permission', stopAtPrecedingActivity: true }], transitions: []
   };
   expect(planAEGraphReconciliation(graph, plan).ready).toBe(true);
 });
@@ -176,11 +176,11 @@ test('accepts existing permission gate with stop at preceding activity enabled',
 test('blocks an expected gate title that belongs to a non-gate node', () => {
   const graph: AuthoringGraph = {
     rendering: 'svg', modelAvailable: true,
-    nodes: [node(2, 'AE Gate 2', 'tool')], transitions: []
+    nodes: [node(2, 'AE Gate AE 2', 'tool')], transitions: []
   };
   const result = planAEGraphReconciliation(graph, plan);
   expect(result.gatesToReplace).toEqual([]);
-  expect(result.invalidGates).toEqual(['"AE Gate 2" must identify exactly one gate']);
+  expect(result.invalidGates).toEqual(['"AE Gate AE 2" must identify exactly one gate']);
   expect(result.ready).toBe(false);
 });
 
@@ -218,7 +218,7 @@ test('removes one exact authoring node through the verified LAMS runtime API', a
       <g class="svg-activity svg-activity-gate" uiid="2"></g>
     </svg></div>
     <script>
-      const gate = { uiid: 2, title: 'AE Gate 2', gateType: 'time', transitions: { from: [], to: [] } };
+      const gate = { uiid: 2, title: 'AE Gate AE 2', gateType: 'time', transitions: { from: [], to: [] } };
       window.layout = { activities: [gate] };
       window.ActivityLib = { removeActivity(item) {
         window.layout.activities = window.layout.activities.filter(candidate => candidate !== item);
@@ -227,7 +227,7 @@ test('removes one exact authoring node through the verified LAMS runtime API', a
     </script>
   `);
 
-  await removeAuthoringNode(page, node(2, 'AE Gate 2', 'gate'), 2_000);
+  await removeAuthoringNode(page, node(2, 'AE Gate AE 2', 'gate'), 2_000);
   expect(await page.locator('#canvas g.svg-activity').count()).toBe(0);
 });
 
@@ -312,6 +312,35 @@ test('reports an Arrange that left an activity off the grid', async ({ page }) =
   await page.setContent(canvasMarkup({ arranges: false }));
 
   await expect(arrangeAEActivities(page, 1500)).rejects.toThrow(/Timeout/i);
+});
+
+test('answers an annotation confirmation that fades in after the click', async ({ page }) => {
+  await page.setContent(canvasMarkup({ arranges: true }));
+  // LAMS shows its confirmation dialog a moment after Arrange is pressed, not at once.
+  await page.evaluate(() => {
+    const button = document.getElementById('arrangeButton')!;
+    button.onclick = () => {
+      setTimeout(() => { document.getElementById('confirmationDialogConfirmButton')!.style.display = 'block'; }, 500);
+    };
+  });
+
+  await arrangeAEActivities(page, 5000);
+
+  expect(await page.locator('g.svg-activity[uiid="1"]').getAttribute('data-y')).toBe('400');
+});
+
+test('runs LAMS GeneralLib.arrangeActivities when the Arrange click is ignored', async ({ page }) => {
+  await page.setContent(canvasMarkup({ arranges: true }));
+  await page.evaluate(() => {
+    document.getElementById('arrangeButton')!.onclick = null;
+    (window as unknown as { GeneralLib: { arrangeActivities: () => void } }).GeneralLib = {
+      arrangeActivities: () => (window as unknown as { doArrange: () => void }).doArrange()
+    };
+  });
+
+  await arrangeAEActivities(page, 8000);
+
+  expect(await page.locator('g.svg-activity[uiid="2"]').getAttribute('data-y')).toBe('420');
 });
 
 // Reproduces the authoring surface: the SVG canvas plus the properties dialog LAMS opens for the

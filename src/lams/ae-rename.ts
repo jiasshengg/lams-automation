@@ -65,6 +65,50 @@ export function renameSource(graph: AuthoringGraph, renames: AERenamePlan | unde
   return matches[0]!;
 }
 
+/**
+ * One AE title however its range is spelled: "Q1 to Q4", "Q1-Q4" and "Q1-4" all read the same, as do
+ * "Q1 to Case 2 Q2" and "Q1-Case 2 Q2". Case and spacing are ignored like library title matching.
+ */
+export function aeRangeKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\s*(?:\bto\b|[-–—])\s*/g, '-')
+    .replace(/-q(?=\d)/g, '-')
+    .replace(/\s+/g, '');
+}
+
+/**
+ * Earlier lessons join an AE range with "to" ("AE Case 1 Q1 to Q4"); the reviewed plan joins it with
+ * a hyphen ("AE Case 1 Q1-4"). Both name the same activity, so each existing AE node or gate whose
+ * title differs from a reviewed title only in that spelling is renamed in place to it. A reviewed
+ * title that already exists, or a spelling shared by more than one node, is left alone.
+ */
+export function withRangeSpellingRenames(
+  graph: AuthoringGraph,
+  plan: AEPlan,
+  lessonTitle: string,
+  explicit?: AERenamePlan
+): AERenamePlan | undefined {
+  const renames = [...(explicit?.renames ?? [])];
+  const targets: Array<{ type: AERename['type']; title: string }> = [
+    ...plan.nodes.map((node) => ({ type: 'tool' as const, title: node.title })),
+    ...[plan.leadingGateTitle, ...plan.gates.map((gate) => gate.title)].map((title) => ({ type: 'gate' as const, title }))
+  ];
+  for (const { type, title } of targets) {
+    const ofType = graph.nodes.filter((node) => node.type === type);
+    if (ofType.some((node) => node.name === title)) continue;
+    if (renames.some((rename) => rename.type === type && rename.to === title)) continue;
+    const key = aeRangeKey(title);
+    const matches = ofType.filter((node) => /^AE/i.test(node.name) && aeRangeKey(node.name) === key);
+    if (matches.length !== 1) continue;
+    const from = matches[0]!.name;
+    if (renames.some((rename) => rename.type === type && rename.from === from)) continue;
+    renames.push({ type, from, to: title });
+  }
+  if (renames.length === 0) return undefined;
+  return { lessonTitle: explicit?.lessonTitle ?? lessonTitle, renames };
+}
+
 /** The graph as it reads once the authorised renames are applied, for deriving expectations. */
 export function projectAERenames(graph: AuthoringGraph, renames: AERenamePlan): AuthoringGraph {
   const nodes = graph.nodes.map((node) => {

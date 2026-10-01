@@ -144,7 +144,7 @@ test('validates exact AE node and gate titles plus their graph connections', () 
     ],
     gates: [
       {
-        title: 'AE Gate Case 1 to Case 2 Question 2',
+        title: 'AE Gate AE Case 2',
         afterNodeTitle: 'AE Case 1',
         beforeNodeTitle: 'AE Case 2',
         beforeQuestionNumber: 2
@@ -153,7 +153,7 @@ test('validates exact AE node and gate titles plus their graph connections', () 
   });
   const nodes = [
     graphNode(1, 'AE Case 1', 'tool'),
-    graphNode(2, 'AE Gate Case 1 to Case 2 Question 2', 'gate'),
+    graphNode(2, 'AE Gate AE Case 2', 'gate'),
     graphNode(3, 'AE Case 2', 'tool')
   ];
   const graph: AuthoringGraph = {
@@ -174,7 +174,7 @@ test('validates exact AE node and gate titles plus their graph connections', () 
   const failed = validateAEPlanGraph(graph, plan);
   expect(failed.passed).toBe(false);
   expect(failed.checks.find((check) => check.label === 'AE plan connectivity')?.detail).toContain(
-    'AE Gate Case 1 to Case 2 Question 2 -> AE Case 2'
+    'AE Gate AE Case 2 -> AE Case 2'
   );
 });
 

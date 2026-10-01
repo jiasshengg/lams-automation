@@ -19,7 +19,7 @@ import { assertAEPlanMatchesSOT } from './ae/sot-check.js';
 import { AE_WAIT_MINUTES_FLAG, AWAIT_AE_JSON_FLAG, awaitAEJson, parseAEWaitMinutes, resolveAwaitedAEJsonPath } from './ae/plan-wait.js';
 import { LamsAEEditor } from './lams/ae-editor.js';
 import { reconcileAndWriteAEGraph } from './lams/ae-graph.js';
-import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames } from './lams/ae-rename.js';
+import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames, withRangeSpellingRenames } from './lams/ae-rename.js';
 import { publishLesson, requirePublishSettings } from './lams/publish.js';
 
 loadEnvFile();
@@ -50,10 +50,10 @@ async function main(): Promise<void> {
   const aeWaitMs = parseAEWaitMinutes(readArgument(AE_WAIT_MINUTES_FLAG)) * 60_000;
   // Authorised in-place renames of the copy's earlier AE chain, exactly as apply:ae takes them.
   const renameJson = readArgument('--rename-json');
-  const renames = renameJson ? parseAERenamePlan(JSON.parse(await readFile(await resolveInputFile(renameJson, '.json'), 'utf8'))) : undefined;
-  if (renames && !aeJson && !awaitedAEJson) throw new Error(`--rename-json renames AE titles, so it needs --ae-json or ${AWAIT_AE_JSON_FLAG}.`);
-  if (renames && ae) assertRenamesFollowPlan(renames, ae.plan);
-  if (renames && renames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle does not match the requested destination lesson.');
+  const explicitRenames = renameJson ? parseAERenamePlan(JSON.parse(await readFile(await resolveInputFile(renameJson, '.json'), 'utf8'))) : undefined;
+  if (explicitRenames && !aeJson && !awaitedAEJson) throw new Error(`--rename-json renames AE titles, so it needs --ae-json or ${AWAIT_AE_JSON_FLAG}.`);
+  if (explicitRenames && ae) assertRenamesFollowPlan(explicitRenames, ae.plan);
+  if (explicitRenames && explicitRenames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle does not match the requested destination lesson.');
   // --slow-mo pauses before every action so a live run can be watched step by step.
   const slowMoArgument = readArgument('--slow-mo');
   const slowMoMs = slowMoArgument === undefined ? undefined : Number(slowMoArgument);
@@ -82,7 +82,6 @@ async function main(): Promise<void> {
     // iRAT and AE each verify their own targets as they write. The full-lesson expectations for the closing validation come from an in-page read of the
     // copy, which opens no activity and costs no navigation. It is read now, before iRAT or repairs change it, even when the AE plan arrives later.
     const copiedGraph = ae || awaitedAEPath ? await inspectAuthoringGraph(activePage) : undefined;
-    if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);
     if (repair) {
       const repaired = await repairAEPlaceholders(activePage, repair, config.browser.actionTimeoutMs);
       await persistPlaceholderRepairs(activePage, repaired, () =>
@@ -93,7 +92,10 @@ async function main(): Promise<void> {
     const result = await executeIratAutomation(editor, irat, { commit });
     if (awaitedAEPath) ae = await awaitAEJson(awaitedAEPath, loadAEStage, { timeoutMs: aeWaitMs });
     // A plan that arrived late is held to the same rule: every rename lands on a reviewed title.
-    if (renames && ae && awaitedAEPath) assertRenamesFollowPlan(renames, ae.plan);
+    if (explicitRenames && ae && awaitedAEPath) assertRenamesFollowPlan(explicitRenames, ae.plan);
+    // An earlier chain titled "AE Case 1 Q1 to Q4" is the same chain as "AE Case 1 Q1-4", renamed in place.
+    const renames = ae && copiedGraph ? withRangeSpellingRenames(copiedGraph, ae.plan, config.lessonTitle, explicitRenames) : explicitRenames;
+    if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);
     const expectations = ae && copiedGraph
       ? tryExpectedTBLGraph(renames ? projectAERenames(copiedGraph, renames) : copiedGraph, config, ae.plan, repair)
       : undefined;

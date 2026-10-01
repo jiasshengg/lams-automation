@@ -373,31 +373,93 @@ export const TEMPLATE_LIBRARY_TITLES = { Assessment: 'Assessment', Gate: 'gate' 
 // (x = 120 + 240n) are accepted too. Either way a gate sits half an activity lower than its row.
 const ARRANGE_GRID = { columnWidth: 240, rowHeight: 120, activityX: 40, activityY: 40, gateX: [40, 120], gateY: 60 };
 
-export async function arrangeAEActivities(page: Page, timeoutMs: number): Promise<void> {
-  await page.locator('#arrangeButton').click();
-  // Arrange only asks before discarding annotation positions, which a TBL sequence has none of.
-  // It is answered rather than assumed absent, because cancelling leaves the canvas untouched.
-  const confirmation = page.locator('#confirmationDialogConfirmButton');
-  if (await confirmation.isVisible().catch(() => false)) await confirmation.click();
+/** How long a pressed Arrange may show nothing before LAMS's own handler is called directly. */
+const ARRANGE_CLICK_GRACE_MS = 3000;
+/** Arrange asks at most once before discarding annotation positions; a little slack for a re-ask. */
+const ARRANGE_MAX_CONFIRMATIONS = 2;
 
-  // Arrange lays every activity on a fixed grid, so a silently ignored click shows up as soon as
-  // one activity is still off it. Gates sit half a row below the activity whose gap they bridge.
-  await page.waitForFunction(
-    (grid) =>
-      Array.from(document.querySelectorAll('#canvas > svg > g.svg-activity')).every((activity) => {
-        const x = Number(activity.getAttribute('data-x') ?? NaN);
-        const y = Number(activity.getAttribute('data-y') ?? NaN);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
-        const gate = activity.classList.contains('svg-activity-gate');
-        return (
-          (gate ? grid.gateX.includes(x % grid.columnWidth) : x % grid.columnWidth === grid.activityX) &&
-          y % grid.rowHeight === (gate ? grid.gateY : grid.activityY)
-        );
-      }),
-    ARRANGE_GRID,
-    { timeout: timeoutMs }
-  );
+type ArrangeState = 'arranged' | 'confirm' | 'waiting';
+
+export async function arrangeAEActivities(page: Page, timeoutMs: number): Promise<void> {
+  // A properties dialog left open by the last transition or rename sits over the canvas toolbar.
+  if (await page.locator('#propertiesDialog').isVisible().catch(() => false)) {
+    await page.locator('#canvas').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+  }
+  const clicked = await page
+    .locator('#arrangeButton')
+    .click({ timeout: Math.min(timeoutMs, 5000) })
+    .then(() => true, () => false);
+  // The button's own onclick is GeneralLib.arrangeActivities() (authoringGeneral.js), so a click
+  // that cannot land - an overlay, a toolbar scrolled away - runs the same handler directly.
+  if (!clicked) await runArrangeHandler(page);
+
+  const deadline = Date.now() + timeoutMs;
+  const graceEnds = Date.now() + ARRANGE_CLICK_GRACE_MS;
+  let confirmations = 0;
+  let handlerCalled = !clicked;
+  for (;;) {
+    const state = await readArrangeState(page);
+    if (state === 'arranged') break;
+    // Arrange only asks before discarding annotation positions, which a TBL sequence has none of.
+    // The dialog fades in after the click, so it is watched for rather than checked once, and it
+    // is answered rather than cancelled, because cancelling leaves the canvas untouched.
+    if (state === 'confirm' && confirmations < ARRANGE_MAX_CONFIRMATIONS) {
+      await page.locator('#confirmationDialogConfirmButton').click({ timeout: 5000 }).catch(() => undefined);
+      confirmations += 1;
+    } else if (state === 'waiting' && !handlerCalled && Date.now() > graceEnds) {
+      // A click LAMS silently ignored moves nothing; its handler is called once instead.
+      await runArrangeHandler(page);
+      handlerCalled = true;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`Timeout ${timeoutMs}ms: LAMS Arrange left activities off its grid: ${await offGridActivities(page)}.`);
+    }
+    await page.waitForTimeout(200);
+  }
   console.log('Arranged the design with LAMS Arrange.');
+}
+
+async function runArrangeHandler(page: Page): Promise<void> {
+  const ran = await page.evaluate(() => {
+    const runtime = window as typeof window & { GeneralLib?: { arrangeActivities?: () => void } };
+    if (typeof runtime.GeneralLib?.arrangeActivities !== 'function') return false;
+    runtime.GeneralLib.arrangeActivities();
+    return true;
+  });
+  if (ran) console.log('Arrange click had no effect; ran LAMS GeneralLib.arrangeActivities() directly.');
+}
+
+/**
+ * Arrange lays every activity on a fixed grid, so a silently ignored click shows up as soon as
+ * one activity is still off it. Gates sit half a row below the activity whose gap they bridge.
+ */
+async function readArrangeState(page: Page): Promise<ArrangeState> {
+  return page.evaluate((grid): ArrangeState => {
+    const confirm = document.querySelector<HTMLElement>('#confirmationDialogConfirmButton');
+    if (confirm && confirm.getClientRects().length > 0 && getComputedStyle(confirm).visibility !== 'hidden') return 'confirm';
+    const activities = Array.from(document.querySelectorAll('#canvas > svg > g.svg-activity'));
+    const onGrid = activities.every((activity) => {
+      const x = Number(activity.getAttribute('data-x') ?? NaN);
+      const y = Number(activity.getAttribute('data-y') ?? NaN);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+      const gate = activity.classList.contains('svg-activity-gate');
+      return (
+        (gate ? grid.gateX.includes(x % grid.columnWidth) : x % grid.columnWidth === grid.activityX) &&
+        y % grid.rowHeight === (gate ? grid.gateY : grid.activityY)
+      );
+    });
+    return onGrid ? 'arranged' : 'waiting';
+  }, ARRANGE_GRID);
+}
+
+async function offGridActivities(page: Page): Promise<string> {
+  return page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll('#canvas > svg > g.svg-activity'))
+        .map((activity) => `uiid ${activity.getAttribute('uiid')} at (${activity.getAttribute('data-x')},${activity.getAttribute('data-y')})`)
+        .join(', ')
+    )
+    .catch(() => 'unreadable');
 }
 
 async function createTemplateNode(
