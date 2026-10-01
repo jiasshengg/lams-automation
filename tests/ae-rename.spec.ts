@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { buildAEPlan } from '../src/ae/plan.js';
 import type { AuthoringGraph, GraphNode } from '../src/lams/authoring.js';
-import { assertRenamesFollowPlan, parseAERenamePlan, projectAERenames, renameSource } from '../src/lams/ae-rename.js';
+import {
+  aeRangeKey, assertRenamesFollowPlan, parseAERenamePlan, projectAERenames, renameSource, withRangeSpellingRenames
+} from '../src/lams/ae-rename.js';
 
 function node(uiid: number, name: string, type: GraphNode['type']): GraphNode {
   return {
@@ -94,4 +96,47 @@ test('an earlier AE activity titled by case alone can be renamed, but only as a 
   expect(parsed.renames[0]!.from).toBe('Case 1 Q2 to Q4');
   expect(() => parseAERenamePlan({ lessonTitle: 'Copy', renames: [{ type: 'gate', from: 'Case 1 Q2 to Q4', to: 'AE Gate AE Case 1 Q3' }] })).toThrow('exact AE title');
   expect(() => parseAERenamePlan({ lessonTitle: 'Copy', renames: [{ type: 'tool', from: 'Cases', to: 'AE Case 1 Q3' }] })).toThrow('exact AE title');
+});
+
+test('a range joined with "to" reads the same as the hyphenated title', () => {
+  expect(aeRangeKey('AE Case 1 Q1 to Q4')).toBe(aeRangeKey('AE Case 1 Q1-4'));
+  expect(aeRangeKey('AE Case 1 Q1-Q4')).toBe(aeRangeKey('AE Case 1 Q1-4'));
+  expect(aeRangeKey('AE Case 1 Q1 to Case 2 Q2')).toBe(aeRangeKey('AE Case 1 Q1-Case 2 Q2'));
+  expect(aeRangeKey('AE Gate AE Case 3 Q3 to Q6')).toBe(aeRangeKey('AE Gate AE Case 3 Q3-6'));
+  expect(aeRangeKey('AE Case 1 Q1 to Q4')).not.toBe(aeRangeKey('AE Case 1 Q1-5'));
+  expect(aeRangeKey('AE Q1 to Q2')).not.toBe(aeRangeKey('AE Case 1 Q1-2'));
+});
+
+test('an earlier chain titled with "to" is renamed in place to the reviewed hyphenated titles', () => {
+  const earlier: AuthoringGraph = {
+    ...graph,
+    nodes: [
+      node(1, 'tRAT', 'tool'),
+      node(2, 'AE Gate AE Case 1 Q1 to Q2', 'gate'),
+      node(3, 'AE Case 1 Q1 to Q2', 'tool'),
+      node(4, 'AE Gate AE Case 1 Q3', 'gate'),
+      node(5, 'AE Case 1 Q3', 'tool')
+    ]
+  };
+  const derived = withRangeSpellingRenames(earlier, plan, 'Copy');
+  expect(derived?.renames).toEqual([
+    { type: 'tool', from: 'AE Case 1 Q1 to Q2', to: 'AE Case 1 Q1-2' },
+    { type: 'gate', from: 'AE Gate AE Case 1 Q1 to Q2', to: 'AE Gate AE Case 1 Q1-2' }
+  ]);
+  assertRenamesFollowPlan(derived!, plan);
+  expect(projectAERenames(earlier, derived!).nodes.map((entry) => entry.name)).toEqual([
+    'tRAT', 'AE Gate AE Case 1 Q1-2', 'AE Case 1 Q1-2', 'AE Gate AE Case 1 Q3', 'AE Case 1 Q3'
+  ]);
+});
+
+test('range spelling renames leave reviewed titles, ambiguous spellings and explicit renames alone', () => {
+  const current: AuthoringGraph = { ...graph, nodes: [node(3, 'AE Case 1 Q1-2', 'tool'), node(5, 'AE Case 1 Q3', 'tool')] };
+  expect(withRangeSpellingRenames(current, plan, 'Copy')).toBeUndefined();
+
+  const doubled: AuthoringGraph = { ...graph, nodes: [node(3, 'AE Case 1 Q1 to Q2', 'tool'), node(6, 'AE Case 1 Q1-Q2', 'tool')] };
+  expect(withRangeSpellingRenames(doubled, plan, 'Copy')).toBeUndefined();
+
+  const explicit = parseAERenamePlan({ lessonTitle: 'Copy', renames: [{ type: 'tool', from: 'AE Q1 to Q2', to: 'AE Case 1 Q1-2' }] });
+  const both: AuthoringGraph = { ...graph, nodes: [node(3, 'AE Q1 to Q2', 'tool'), node(6, 'AE Case 1 Q1 to Q2', 'tool')] };
+  expect(withRangeSpellingRenames(both, plan, 'Copy', explicit)?.renames).toEqual(explicit.renames);
 });

@@ -57,7 +57,7 @@
   ],
   "gates": [
     {
-      "title": "AE Gate before Q3",
+      "title": "AE Gate AE Case 2 Q3",
       "afterNodeTitle": "AE Case 1 Q1-2",
       "beforeNodeTitle": "AE Case 2 Q3",
       "beforeQuestionNumber": 3

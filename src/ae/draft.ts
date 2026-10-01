@@ -1,4 +1,5 @@
 import type { DocxImage } from '../docx/media.js';
+import { aeGateTitle } from './plan.js';
 import type { AESOTAnalysis } from './sot-docx.js';
 
 /**
@@ -81,8 +82,9 @@ export function buildAEDraft(
     })
   }));
 
+  // Each gate takes its title from the node it leads into, so the two are always spelled alike.
   const gates = analysis.gates.map<AEDraftGate>((gate) => ({
-    title: gate.suggestedTitle,
+    title: aeGateTitle(nodes[gate.beforeNodeIndex - 1]!.title),
     afterNodeTitle: nodes[gate.afterNodeIndex - 1]!.title,
     beforeNodeTitle: nodes[gate.beforeNodeIndex - 1]!.title,
     beforeQuestionNumber: gate.beforeQuestionNumber
