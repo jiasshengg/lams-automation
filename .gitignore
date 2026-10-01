@@ -13,3 +13,4 @@ sot-docs/
 .venv/
 # Credentials; never commit
 **/service-account-key.json
+runs/

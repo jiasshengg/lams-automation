@@ -1,6 +1,6 @@
 import { readZipEntries, requireZipEntry } from '../docx/archive.js';
 import { renderInlineSegments, type InlineSegment, type InlineTag } from './inline-html.js';
-import { SOTLayoutReader, spacingBlankLines, type ParagraphLayout, type SOTLayoutParts } from './sot-layout.js';
+import { SOTLayoutReader, spacingBlankLines, type DecimalListItem, type ParagraphLayout, type SOTLayoutParts } from './sot-layout.js';
 import {
   paragraphBlocks,
   topLevelBlocks,
@@ -45,8 +45,15 @@ export interface SOTParagraph {
   blankLinesBefore: number;
   /** The paragraph starts a new page. */
   pageBreakBefore: boolean;
+  /**
+   * For a paragraph Word numbers as a decimal list item: its list and printed number. The number
+   * is in `html` only, never in `text`; question numbering decides whether it opens a question.
+   */
+  listItem?: DecimalListItem;
   /** For a table block, its cell text row by row. Absent for an ordinary paragraph. */
   cells?: string[][];
+  /** For a table block, its cell html row by row, in step with `cells`. */
+  cellHtml?: string[][];
   /** How far the document indents the line from the left margin, in twips. */
   indentTwips?: number;
 }
@@ -80,7 +87,10 @@ export function readParagraphsWithListLabels(
   const reader = new SOTLayoutReader(parts);
   return topLevelBlocks(documentXml).flatMap((block) => {
     if (block.kind === 'p') {
-      const content = paragraphContent(block.inner, reader.read(block.inner).listLabel);
+      const layout = reader.read(block.inner);
+      // The html keeps its old reading here (formatting and captions match against it); only the
+      // list number is carried, for question numbering.
+      const content = withListItem(paragraphContent(block.inner, layout.listLabel), layout.listItem ?? null);
       return [{ xml: block.inner, content, structureText: content.text }];
     }
     // A table reads as one block of structure, as `extractSOTParagraphs` reads it: an option list
@@ -109,7 +119,10 @@ export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts 
 
   for (const block of topLevelBlocks(documentXml)) {
     const layout = block.kind === 'p' ? reader.read(block.inner) : TABLE_LAYOUT;
-    const content = block.kind === 'p' ? paragraphContent(block.inner, layout.listLabel) : tableContent(block.inner);
+    const content =
+      block.kind === 'p'
+        ? withListItem(paragraphContent(block.inner, layout.listLabel, layout.displayLabel ?? null), layout.listItem ?? null)
+        : tableContent(block.inner, (paragraph) => reader.read(paragraph).listLabel);
     pageBreak ||= layout.pageBreakBefore;
     if (content.text === '' && content.imageCount === 0) {
       // A paragraph holding only a page break moves to a new page; it is not a typed blank line.
@@ -137,6 +150,8 @@ const HEADER_INDENT_TWIPS = 2880;
 const TAB_COLUMN_BREAK = new RegExp(TAB_GAP + '+', 'g');
 /** A cell holding nothing but a question number, such as "8." or "Q8.". */
 const QUESTION_NUMBER_CELL = /^Q?\d+[.)]?$/i;
+/** "A.<tab>First option": an answer letter hung before its option text. */
+const OPTION_LABEL_CELL = /^[A-Z][.)]$/;
 
 /**
  * Word lays a block of results out with tab stops, not a table: each line holds a label, a value
@@ -203,6 +218,8 @@ function tabColumns(paragraph: SOTParagraph | undefined): string[] | null {
   // "8.<tab>Human nucleated cells tend to be:" is a question number hung before its stem.
   const text = columns.filter((cell) => cell !== '');
   if (filled === 2 && QUESTION_NUMBER_CELL.test(text[0]!.replace(/<[^>]+>/g, ''))) return null;
+  // "A.<tab>Complete heart block" is an answer option, however many options align under it.
+  if (filled === 2 && OPTION_LABEL_CELL.test(text[0]!.replace(/<[^>]+>/g, '').trim())) return null;
   return filled >= 2 || (filled === 1 && columns[0] === '') ? columns : null;
 }
 
@@ -240,12 +257,16 @@ const TABLE_LAYOUT: ParagraphLayout = {
   indentTwips: 0
 };
 
-/** Reads one `<w:tbl>` as a single block whose html is the table itself. */
-export function tableContent(xml: string): SOTParagraph {
+/**
+ * Reads one `<w:tbl>` as a single block whose html is the table itself. With `listLabel`, a cell
+ * paragraph Word letters as a list item shows its letter, as Word prints it: an option table whose
+ * first column is an automatic "A.", "B." list is otherwise a column of empty cells.
+ */
+export function tableContent(xml: string, listLabel?: (paragraphXml: string) => string | null): SOTParagraph {
   const rows = [...xml.matchAll(/<w:tr(?:\s[^>]*)?>([\s\S]*?)<\/w:tr>/g)].map((row) =>
     [...(row[1] ?? '').matchAll(/<w:tc(?:\s[^>]*)?>([\s\S]*?)<\/w:tc>/g)].map((cell) => {
       const paragraphs = paragraphBlocks(cell[1] ?? '')
-        .map((paragraph) => ({ ...paragraphContent(paragraph), align: cellAlignment(paragraph) }))
+        .map((paragraph) => ({ ...labelledCellParagraph(paragraph, listLabel?.(paragraph) ?? null), align: cellAlignment(paragraph) }))
         .filter((paragraph) => paragraph.text !== '');
       const [first] = paragraphs;
       return {
@@ -264,8 +285,16 @@ export function tableContent(xml: string): SOTParagraph {
     imageCount: 0,
     blankLinesBefore: 0,
     pageBreakBefore: false,
-    cells: rows.map((row) => row.map((cell) => cell.text))
+    cells: rows.map((row) => row.map((cell) => cell.text)),
+    cellHtml: rows.map((row) => row.map((cell) => cell.html))
   };
+}
+
+function labelledCellParagraph(paragraphXml: string, label: string | null): SOTParagraph {
+  const content = paragraphContent(paragraphXml);
+  if (label === null) return content;
+  if (content.text === '') return { ...content, text: label, html: label };
+  return { ...content, text: `${label} ${content.text}`, html: `${label} ${content.html}` };
 }
 
 /** `w:gridCol` widths are twips; the document's proportions are what carry over, not the absolute size. */
@@ -311,8 +340,21 @@ function renderTable(
   return `<table${widthPx === null ? '' : ` width="${widthPx}"`}>${body}</table>`;
 }
 
+/**
+ * Attaches a decimal list number to the paragraph it is printed on. An empty item or an option
+ * line ("A. …" typed inside a numbered list) shows no number, so it carries none.
+ */
+function withListItem(content: SOTParagraph, item: DecimalListItem | null): SOTParagraph {
+  if (item === null || content.text.trim() === '' || /^\s*[A-Z][.)]\s/.test(content.text)) return content;
+  return { ...content, listItem: item };
+}
+
 /** Reads one `<w:p>` body. Shared so image captions resolve exactly as prompts do. */
-export function paragraphContent(paragraphXml: string, listLabel: string | null = null): SOTParagraph {
+export function paragraphContent(
+  paragraphXml: string,
+  listLabel: string | null = null,
+  displayLabel: string | null = null
+): SOTParagraph {
   // Labels typed in text boxes on a figure belong to the picture, not to the line of prose.
   const drawings = withoutCompatibilityFallback(paragraphXml);
   const xml = withoutTextBoxes(drawings);
@@ -321,9 +363,16 @@ export function paragraphContent(paragraphXml: string, listLabel: string | null 
   // Word prints a list paragraph's label without storing it as text, so it is added here and
   // "A." reads exactly as the page shows it. An empty list item stays empty.
   const shown = listLabel !== null && contentText !== '' ? [{ text: `${listLabel} `, tags: [] }, ...segments] : segments;
+  // A decimal list's number is for the reader only ("1, 2, 3" options refer to it); the text that
+  // structure is read from never carries it.
+  // An option line is sliced by its text offsets, so it never gains a number its text lacks.
+  const displayed =
+    displayLabel !== null && contentText !== '' && !/^\s*[A-Z][.)]\s/.test(contentText)
+      ? [{ text: `${displayLabel} `, tags: [] as InlineTag[] }, ...shown]
+      : shown;
   return {
     text: shown.map((segment) => segment.text).join(''),
-    html: renderInlineSegments(shown),
+    html: renderInlineSegments(displayed),
     // Word marks an answer key by emboldening the whole option paragraph, so a
     // paragraph only counts as bold when no visible character is left plain.
     bold: contentText !== '' && segments.every((segment) => segment.text.trim() === '' || segment.tags.includes('strong')),

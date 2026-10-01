@@ -17,7 +17,7 @@ export function resolveCommand(args) {
   let logFile;
   const forwarded = [];
   const flags = new Set(['--commit', '--dry-run', '--validate', '--source', '--json', '--keep-open', '--skip-sot-check', '--monitor-only', '--no-publish-code', '--publish-code', '--check-only', '--resume-trat-sync', '--monitor', '--skip-download', '--skip-links', '--headless', '--no-pause', '--login', '--tabs', '--publish']);
-  const values = new Set(['--config', '--request-json', '--ae-json', '--repair-json', '--team-setup', '--slow-mo', '--query', '--exact-title', '--roots', '--max-expansions', '--node', '--dump-question', '--sot-docx', '--out', '--draft', '--expect-design', '--checkpoint', '--batch-size', '--question-batch-size', '--lesson', '--manifest', '--out-dir', '--title', '--gate', '--rotation-seconds', '--code', '--identifier', '--repair-question', '--event-id', '--download-event-id', '--links-event-id', '--lesson-id', '--tab', '--details']);
+  const values = new Set(['--config', '--request-json', '--ae-json', '--repair-json', '--rename-json', '--team-setup', '--slow-mo', '--query', '--exact-title', '--roots', '--max-expansions', '--node', '--dump-question', '--sot-docx', '--out', '--draft', '--expect-design', '--checkpoint', '--batch-size', '--question-batch-size', '--lesson', '--manifest', '--out-dir', '--title', '--gate', '--rotation-seconds', '--code', '--identifier', '--repair-question', '--event-id', '--download-event-id', '--links-event-id', '--lesson-id', '--tab', '--details']);
   for (let i = 0; i < input.length; i++) {
     const arg = input[i];
     if (flags.has(arg)) { forwarded.push(arg); continue; }

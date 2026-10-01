@@ -15,9 +15,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 BASE_URL = os.environ.get("ELENTRA_BASE_URL", "https://ntu.elentra.cloud")
 
-# The saved Elentra SSO session holds live cookies, so it lives with the LAMS
-# browser profile under the ignored .playwright/ folder, never in the source tree.
-AUTH_STATE_PATH = REPO_ROOT / ".playwright" / "elentra-auth.json"
+# The Elentra browser profile holds live sign-in cookies, so it lives beside the LAMS
+# profile under the ignored .playwright/ folder, never in the source tree. Like the LAMS
+# profile it is one stable per-machine folder reused by every run: Microsoft's "Stay signed
+# in" cookie survives there, so an expired Elentra session is renewed without a sign-in.
+PROFILE_DIR = REPO_ROOT / ".playwright" / "elentra-profile"
+
+# The one-time cookie snapshot earlier versions saved instead of a profile. It is read only
+# to carry an existing sign-in into a new profile, then removed.
+LEGACY_AUTH_STATE_PATH = REPO_ROOT / ".playwright" / "elentra-auth.json"
 
 # QA files are Source-of-Truth material: keep them in the project's sot-docs/ folder
 # (ignored by Git, created on first download), one subfolder per Elentra event. The LAMS
@@ -66,7 +72,7 @@ def kanban_sheet_id() -> str:
 
 
 def launch_options(headless: bool) -> dict:
-    """Keyword arguments for chromium.launch(); use this for every Elentra browser."""
+    """Keyword arguments for launching Chromium; use this for every Elentra browser."""
     options = {"headless": headless}
     channel = browser_channel()
     if channel:

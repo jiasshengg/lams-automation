@@ -96,7 +96,8 @@ export const SOT_QUESTION_START = NUMBERED_STEM;
 const END_MARKER = /^END$/i;
 const OPTION_START = /^([A-Z])[.)]\s+\S/;
 const INLINE_OPTION = /(?:^|\s)([A-Z])[.)]\s+\S/g;
-const ANSWER_LINE = /^Answer\s*[-:]\s*(.+)$/i;
+// A bare "Answer:" opens a key stated on the lines below it.
+const ANSWER_LINE = /^Answer\s*[-:]\s*(.*)$/i;
 /** "Select from above images: A, B, C, D" — the document naming the options it prints as figures. */
 const DECLARED_LABELS = /^(?:select|choose)\b[^:]*:\s*([A-Z](?:\s*,\s*[A-Z])+)/i;
 /** "possibly H", "possible C and G": an answer the document will not commit to, which is ignored. */
@@ -119,6 +120,12 @@ const DECLARED_LABEL_RANGE = /\b(?:match|select|choose)\b[^.]*\(\s*([A-Z])\s*[�
 const DECLARED_COLUMN_SET = /\bQ(\d+)\s*(?:to|through|[-–—])\s*Q?(\d+)\b/i;
 const ANSWER_ROW = /^Answer\b/i;
 const RATIONALE_LINE = /^Rationale\b/i;
+/** One pairing in a matching key: an item, a dash, and the option letter it matches. */
+const MATCHING_KEY_LINE = /^\s*\S.*\s[–—-]\s*[A-Z]\.?\s*$/;
+
+function isMatchingPair(text: string): boolean {
+  return MATCHING_KEY_LINE.test(text) && !ANSWER_LINE.test(text.trim()) && !RATIONALE_LINE.test(text.trim());
+}
 /** Front matter of the first group (copyright, outcomes, labels) is never case narrative. */
 const METADATA_LABEL =
   /^(?:Module|Session Title|Authors and affiliations|Resource|Learning Outcomes|Specific Objectives for Session|Application title|Copyright Statement)\b/i;
@@ -143,7 +150,11 @@ export function analyzeAESOT(
   const caseNumbers = caseNumberByParagraph(relevant);
   // Numbered across the whole document, so an unpunctuated "3 Increased LDH…" is only a stem
   // when it is the next number in sequence.
-  const stemNumbers = numberQuestionStems(relevant.map((paragraph) => paragraph.text), { inferUnnumbered: false });
+  const stemNumbers = numberQuestionStems(relevant.map((paragraph) => paragraph.text), {
+    inferUnnumbered: false,
+    bold: relevant.map((paragraph) => paragraph.bold),
+    listItems: relevant.map((paragraph) => paragraph.listItem)
+  });
   const breakIndexes = relevant
     .map((paragraph, index) => (BREAK_MARKER.test(paragraph.text) ? index : -1))
     .filter((index) => index >= 0);
@@ -375,6 +386,9 @@ function caseNumberByParagraph(paragraphs: SOTParagraph[]): (number | null)[] {
  * itself ("AE Case 2 Q6"). Every AE gate then carries the title of the node it leads into.
  */
 function suggestNodeTitle(firstCase: number | null, lastCase: number | null, first: number, last: number): string {
+  // Questions ahead of the first Case heading carry no case, but a range that runs into a Case
+  // still names it at that end ("AE Q1-Case 2 Q6").
+  if (firstCase === null && lastCase !== null) return `AE Q${first}-Case ${lastCase} Q${last}`;
   if (firstCase === null || lastCase === null) return `AE ${formatQuestionRange(first, last)}`;
   if (firstCase === lastCase) return `AE Case ${firstCase} ${formatQuestionRange(first, last)}`;
   return `AE Case ${firstCase} Q${first}-Case ${lastCase} Q${last}`;
@@ -441,6 +455,11 @@ interface OptionEntry {
   end: number;
   /** False when the label was synthesised for an unprefixed block, so nothing is stripped. */
   labelled: boolean;
+  /**
+   * The table these options were read from. A one-column option table is shown by LAMS as the
+   * options themselves, so it leaves the prompt; a wider one stays there for the learner to read.
+   */
+  table?: { paragraph: SOTParagraph; consumed: boolean };
   /**
    * The option is the caption printed under its figure. It names the figure for a reader as well
    * as being the answer to pick, so the prompt keeps it where the document prints it.
@@ -512,6 +531,12 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   const keyIndex = body.findIndex(
     (paragraph) => ANSWER_LINE.test(paragraph.text) || RATIONALE_LINE.test(paragraph.text)
   );
+  // A key that pairs several items with letters ("AntiVir-A – C", "AntiVir-B – B") answers a
+  // matching task: the lettered list is what the learner matches against, not one choice to pick,
+  // so the question takes a written answer and the list stays in its prompt.
+  if (keyIndex >= 0 && body.slice(keyIndex).filter((paragraph) => isMatchingPair(paragraph.text)).length >= 2) {
+    return { entries: [], unlabelledOptionBlock: false };
+  }
   const beforeKey = keyIndex < 0 ? body : body.slice(0, keyIndex);
   const romanItems = romanListParagraphs(beforeKey);
   const optionBody = beforeKey.filter((paragraph) => !romanItems.has(paragraph));
@@ -519,7 +544,8 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   // paragraph is proof that any inline split would be spurious.
   const allowInlineSplit = optionBody.filter((paragraph) => OPTION_START.test(paragraph.text)).length <= 1;
   const labelled: OptionEntry[] = [];
-  for (const paragraph of optionBody) {
+  // A table's letters are its rows' labels, read whole by `optionTableEntries`, never a line of text.
+  for (const paragraph of optionBody.filter((candidate) => candidate.cells === undefined)) {
     const inline = allowInlineSplit ? splitInlineOptionRun(paragraph) : null;
     if (inline) {
       labelled.push(...inline);
@@ -529,6 +555,9 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
     if (match) labelled.push(wholeParagraphEntry(match[1]!, paragraph, { boldEligible: true, labelled: true }));
   }
   if (labelled.length > 0) return { entries: labelled, unlabelledOptionBlock: false };
+
+  const tabled = optionTableEntries(optionBody);
+  if (tabled.length > 0) return { entries: tabled, unlabelledOptionBlock: false };
 
   // Figures labelled in a sequence ("Diagram A", "Diagram B", …, or "ECG A."): the caption under
   // each figure is the option a learner picks, and the answer key names it by its letter.
@@ -567,6 +596,70 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   // The answer names a label, so an option list exists but could not be bounded.
   // Report it rather than silently degrading the question to open-response.
   return { entries: [], unlabelledOptionBlock: answerLabel !== undefined };
+}
+
+const TABLE_OPTION_LABEL = /^([A-Z])[.)]$/;
+
+/**
+ * Options laid out as the rows of one table whose first column is lettered A., B., … in order
+ * (typed, or Word's automatic list). Rows above the first letter are a header, and only when their
+ * first cell is empty. A row with a single further cell is that option's text, so the options
+ * replace the table; with several columns ("X | Y") the table is what the learner reads and the
+ * options are its row letters. Anything less regular is not read as options.
+ */
+function optionTableEntries(paragraphs: SOTParagraph[]): OptionEntry[] {
+  const tables = paragraphs.filter((paragraph) => paragraph.cells !== undefined);
+  if (tables.length !== 1) return [];
+  const table = tables[0]!;
+  const rows = table.cells ?? [];
+  const html = table.cellHtml ?? [];
+  const first = rows.findIndex((row) => TABLE_OPTION_LABEL.test((row[0] ?? '').trim()));
+  if (first < 0 || rows.slice(0, first).some((row) => (row[0] ?? '').trim() !== '')) return [];
+  const body = rows.slice(first);
+  const labels = body.map((row) => TABLE_OPTION_LABEL.exec((row[0] ?? '').trim())?.[1]);
+  if (body.length < 2 || !labels.every((label, index) => label === optionLabelAt(index))) return [];
+  const content = body.map((row, index) =>
+    row.slice(1).flatMap((text, column) => (text.trim() === '' ? [] : [html[first + index]?.[column + 1] ?? text]))
+  );
+  if (content.some((cells) => cells.length === 0)) return [];
+  const single = first === 0 && content.every((cells) => cells.length === 1);
+  return content.map((cells, index) => {
+    const label = labels[index]!;
+    const text = single ? cells[0]! : label;
+    const bold = cells.every((cell) => isUniformlyStrong(cell));
+    const paragraph: SOTParagraph = { text: plainText(text), html: text, bold, imageCount: 0, blankLinesBefore: 0, pageBreakBefore: false };
+    return {
+      label,
+      paragraph,
+      start: 0,
+      end: paragraph.text.length,
+      labelled: false,
+      boldEligible: true,
+      table: { paragraph: table, consumed: single }
+    };
+  });
+}
+
+function isUniformlyStrong(html: string): boolean {
+  return /^\s*<strong>[\s\S]*<\/strong>\s*$/.test(html) && withoutUniformInlineTag(html, 'strong') !== html;
+}
+
+function plainText(html: string): string {
+  return html.replace(/<[^>]+>/g, '');
+}
+
+/**
+ * The option table as the learner reads it: the answer row Word marks by emboldening every cell
+ * loses that emphasis, so the table shows the options without giving the answer away.
+ */
+function withoutAnswerRowEmphasis(html: string, options: OptionEntry[]): string {
+  const bold = new Set(options.filter((option) => option.paragraph.bold).map((option) => option.label));
+  if (bold.size === 0) return html;
+  return html.replace(/<tr>([\s\S]*?)<\/tr>/g, (row, cells: string) => {
+    const label = /^<td[^>]*>([A-Z])[.)]<\/td>/.exec(cells)?.[1];
+    if (label === undefined || !bold.has(label)) return row;
+    return `<tr>${cells.replace(/(<td[^>]*>)([\s\S]*?)(<\/td>)/g, (_cell, open: string, inner: string, close: string) => open + withoutUniformInlineTag(inner, 'strong') + close)}</tr>`;
+  });
 }
 
 const ROMAN_ITEM = /^([IVX]+)[.)]\s+\S/;
@@ -610,7 +703,7 @@ function learnerBody(paragraphs: SOTParagraph[], options: OptionEntry[]): SOTPar
   // still explains itself there, and that explanation is the answer.
   let lastOption = -1;
   paragraphs.forEach((paragraph, index) => {
-    if (options.some((option) => option.paragraph === paragraph)) lastOption = index;
+    if (options.some((option) => option.paragraph === paragraph || option.table?.paragraph === paragraph)) lastOption = index;
   });
   const ends = [answer, lastOption + 1].filter((index) => index > 0);
   const end = ends.length > 0 ? Math.min(...ends) : paragraphs.length;
@@ -618,6 +711,12 @@ function learnerBody(paragraphs: SOTParagraph[], options: OptionEntry[]): SOTPar
     .slice(1, end)
     .filter((paragraph) => !ANSWER_SPACE.test(paragraph.text))
     .filter((paragraph) => options.every((option) => option.paragraph !== paragraph || option.caption === true))
+    .filter((paragraph) => options.every((option) => option.table?.paragraph !== paragraph || !option.table.consumed))
+    .map((paragraph) =>
+      options.some((option) => option.table?.paragraph === paragraph)
+        ? { ...paragraph, html: withoutAnswerRowEmphasis(paragraph.html, options) }
+        : paragraph
+    )
     // Word marks the answer by emboldening the whole caption. The learner reads the caption under
     // the figure, so it keeps the words and loses the emphasis that would give the answer away.
     .map((paragraph) =>
@@ -829,7 +928,7 @@ function observeQuestion(
   const optionLabels = optionParagraphs.map(({ label }) => label);
   const explicitAnswer = paragraphs
     .map((paragraph) => paragraph.text.match(ANSWER_LINE)?.[1])
-    .find((value) => value !== undefined);
+    .find((value) => value !== undefined && value.trim() !== '');
   const explicitLabels = [...statedAnswer(explicitAnswer ?? '').matchAll(/\b([A-Z])\b/g)].map((match) => match[1]!);
   const boldLabels = optionParagraphs
     .filter(({ paragraph, boldEligible }) => boldEligible && paragraph.bold)

@@ -768,3 +768,168 @@ test('an answer the key only hedges ("possibly H") is ignored', () => {
   // Nothing is left for the reviewer to decide.
   expect(analysis.warnings.join(' ')).not.toMatch(/hedge/i);
 });
+
+test('a lettered option hung on a tab stays an option, not a tabbed table', () => {
+  const option = (label: string, text: string, bold = false) =>
+    `<w:p><w:r>${bold ? '<w:rPr><w:b/></w:rPr>' : ''}<w:t>${label}</w:t><w:tab/><w:t>${text}</w:t></w:r></w:p>`;
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. Which statement is most accurate?')}
+    ${option('A.', 'High counts mean no infection')}
+    ${option('B.', 'Decreasing counts mark progression', true)}
+    ${paragraph('Answer: B', { bold: true })}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  expect(paragraphs.some((entry) => entry.html.includes('<table'))).toBe(false);
+  const question = analyzeAESOT(paragraphs, 'Example').questions[0]!;
+  expect(question.options.map((entry) => entry.html)).toEqual(['High counts mean no infection', 'Decreasing counts mark progression']);
+  expect(question.correctAnswerLabels).toEqual(['B']);
+});
+
+test('a numbered rationale under an answer key is not read as more questions', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. First question?')}
+    ${paragraph('A. One', { bold: true })}
+    ${paragraph('B. Two')}
+    ${paragraph('2. He therefore ____. Please include a rationale.')}
+    ${paragraph('A. Does not need to worry.')}
+    ${paragraph('B. Must be careful.')}
+    ${paragraph('Answer: B', { bold: true })}
+    ${paragraph('1. Immunity may not last.', { bold: true })}
+    ${paragraph('2. There may be no cross-protection.', { bold: true })}
+    ${paragraph('3. Research is ongoing.', { bold: true })}
+    ${paragraph('3. What lab tests would you run? And why?')}
+    ${paragraph('Answer: Serum IgG titres')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Example');
+
+  expect(analysis.questions.map((question) => question.number)).toEqual([1, 2, 3]);
+  expect(analysis.questions[1]!.correctAnswerLabels).toEqual(['B']);
+  expect(analysis.questions[2]!.promptHtml).toBe('3. What lab tests would you run? And why?');
+  expect(analysis.warnings.join(' ')).not.toContain('numbers question');
+});
+
+test('a stem whose full stop was typed as a comma is read as the next question', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. First question?')}
+    ${paragraph('A. One', { bold: true })}
+    ${paragraph('B. Two')}
+    ${paragraph('2, What is the species?')}
+    ${paragraph('A. Falciparum', { bold: true })}
+    ${paragraph('B. Vivax')}
+    ${paragraph('3. Which mode of infection?')}
+    ${paragraph('A. Transfusion', { bold: true })}
+    ${paragraph('B. Travel')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Example');
+
+  expect(analysis.questions.map((question) => question.options.map((option) => option.html))).toEqual([
+    ['One', 'Two'],
+    ['Falciparum', 'Vivax'],
+    ['Transfusion', 'Travel']
+  ]);
+});
+
+test('a bare "Answer:" ends the learner prompt of an open question', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. What lab test would you run?')}
+    ${paragraph('Answer:', { bold: true })}
+    ${paragraph('Serum titres of IgG antibodies', { bold: true })}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Example');
+
+  const question = analysis.questions[0]!;
+  expect(question.type).toBe('open-response');
+  expect(question.bodyLines.join(' ')).not.toContain('IgG');
+});
+
+test('a key pairing several items with letters makes the lettered list matching material', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. Determine which step each antiviral is targeting.')}
+    ${paragraph('A. Virus entry')}
+    ${paragraph('B. Reverse transcription')}
+    ${paragraph('C. Virus DNA integration')}
+    ${paragraph('Answer:', { bold: true })}
+    ${paragraph('AntiVir-A – C', { bold: true })}
+    ${paragraph('AntiVir-B – B', { bold: true })}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Example');
+
+  const question = analysis.questions[0]!;
+  expect(question.type).toBe('open-response');
+  expect(question.bodyLines).toEqual(['A. Virus entry', 'B. Reverse transcription', 'C. Virus DNA integration']);
+  expect(analysis.warnings.join(' ')).not.toContain('answer key');
+});
+
+test('a range that runs from questions before any Case into a Case names that Case at its end', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(`<w:document><w:body>
+      ${paragraph('1. Opening question?')}
+      ${paragraph('Case 2')}
+      ${paragraph('2. Case question?')}
+      ${paragraph('END')}
+    </w:body></w:document>`),
+    'Example'
+  );
+  expect(analysis.nodes[0]?.suggestedTitle).toBe('AE Q1-Case 2 Q2');
+});
+
+const LETTERED_LIST = {
+  numberingXml:
+    '<w:numbering><w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="upperLetter"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum><w:num w:numId="7"><w:abstractNumId w:val="1"/></w:num></w:numbering>'
+};
+const letteredCell = '<w:tc><w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr></w:p></w:tc>';
+const optionCell = (text: string, bold = false) => `<w:tc><w:p><w:r>${bold ? '<w:rPr><w:b/></w:rPr>' : ''}<w:t>${text}</w:t></w:r></w:p></w:tc>`;
+const emptyCell = '<w:tc><w:p/></w:tc>';
+
+test('a one-column table lettered by a Word list gives the options, and leaves the prompt', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(
+      `<w:document><w:body>
+        ${paragraph('1. Which statements are correct?')}
+        ${paragraph('First statement')}
+        <w:tbl><w:tr>${letteredCell}${optionCell('1, 2')}</w:tr><w:tr>${letteredCell}${optionCell('2, 3', true)}</w:tr><w:tr>${letteredCell}${optionCell('1, 3')}</w:tr></w:tbl>
+        ${paragraph('Answer: B')}
+        ${paragraph('END')}
+      </w:body></w:document>`,
+      LETTERED_LIST
+    ),
+    'Example'
+  );
+  const question = analysis.questions[0]!;
+  expect(question.options.map((option) => [option.label, option.html, option.correct])).toEqual([
+    ['A', '1, 2', false],
+    ['B', '2, 3', true],
+    ['C', '1, 3', false]
+  ]);
+  expect(question.bodyLines.join('\n')).not.toContain('<table');
+});
+
+test('a wider lettered table stays in the prompt without the answer row emphasis, and its letters are the options', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(
+      `<w:document><w:body>
+        ${paragraph('1. Which pairing fits?')}
+        <w:tbl><w:tr>${emptyCell}${optionCell('X', true)}${optionCell('Y', true)}</w:tr><w:tr>${letteredCell}${optionCell('Low', true)}${optionCell('High', true)}</w:tr><w:tr>${letteredCell}${optionCell('High')}${optionCell('Low')}</w:tr></w:tbl>
+        ${paragraph('Answer: A')}
+        ${paragraph('END')}
+      </w:body></w:document>`,
+      LETTERED_LIST
+    ),
+    'Example'
+  );
+  const question = analysis.questions[0]!;
+  expect(question.options.map((option) => [option.label, option.html, option.correct])).toEqual([
+    ['A', 'A', true],
+    ['B', 'B', false]
+  ]);
+  const table = question.bodyLines.find((line) => line.startsWith('<table'))!;
+  expect(table).toContain('<strong>X</strong>');
+  expect(table).toContain('<td>A.</td><td>Low</td><td>High</td>');
+  expect(table).not.toContain('<strong>Low</strong>');
+});

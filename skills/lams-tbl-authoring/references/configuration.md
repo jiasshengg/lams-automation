@@ -135,7 +135,9 @@ Prompts follow the document's layout while the paragraph format (Normal) and fon
 
 - one prompt line per Word paragraph; an empty line is a blank line, from either a typed empty paragraph or paragraph spacing of 6pt or more (contextual spacing between same-style paragraphs is honoured);
 - a `{{image}}` line marks where a figure printed inside the case text is written; an unfilled slot is dropped;
-- Word lettered and Roman lists receive the labels Word prints, so they parse as answer options; decimal lists are left alone so they never read as question stems;
+- Word lettered and Roman lists receive the labels Word prints, so they parse as answer options; a decimal list's number (`1)`, `(1)`, `1.`) is shown in the prompt and opens a question only when the document reads that way around it: it is the next question number, the previous question already has its options or answer key, and its own options or answer key follow before the next item of that list. So Word-numbered question stems are read as questions, while a numbered statement list the options refer to ("1, 2, 3"), numbered learning outcomes, and a numbered rationale keep their numbers without opening questions;
+- a lettered option hung on a tab (`A.<tab>text`) stays an option rather than a tabbed table; a numbered list under a question's answer key that numbers again from 1 is rationale, not new questions; a bare `Answer:` line opens the answer block; a stem typed `14, …` counts only as the next number in sequence;
+- an answer block pairing several items with option letters (`AntiVir-A – C`, `AntiVir-B – B`) marks a matching task: the lettered list and any results table stay in the prompt and the question is written as an essay;
 - text after a page break inside a node, when it is not an option, answer key, or rationale, opens the next question's prompt;
 - tables keep their printed width (grid twips / 15 px, at most 1200 px), column percentages, and `center`/`right` cell alignment.
 

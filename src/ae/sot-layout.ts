@@ -19,6 +19,17 @@ export interface ParagraphLayout {
   contextualSpacing: boolean;
   /** The label Word prints ahead of a list paragraph, such as "A.", or null. */
   listLabel: string | null;
+  /**
+   * The number Word prints ahead of a decimal list item, such as "1.". It is shown to the reader
+   * and kept out of `text`, so a numbered statement list cannot open a question by its text.
+   */
+  displayLabel?: string | null;
+  /**
+   * Which decimal list the paragraph belongs to and the number Word prints for it. A generated
+   * number is still a question number when the questions around it say so; see
+   * `numberQuestionStems`, which is the only place that decides.
+   */
+  listItem?: DecimalListItem | null;
   /** A page break precedes the paragraph's first visible character. */
   pageBreakBefore: boolean;
   /** A page break follows the paragraph's last visible character. */
@@ -28,6 +39,12 @@ export interface ParagraphLayout {
    * across the page this way is standing over a column of the block below it.
    */
   indentTwips: number;
+}
+
+/** One item of a decimal list: the list and level it counts in, and the number Word prints. */
+export interface DecimalListItem {
+  key: string;
+  number: number;
 }
 
 /** 6pt. Smaller gaps (such as 2pt between answer options) read as ordinary line spacing. */
@@ -46,8 +63,9 @@ interface ListLevel {
 }
 
 /**
- * Lettered and Roman lists are labelled. Decimal lists are left alone: a generated "1." would
- * read as a numbered question stem and reshape the document's question structure.
+ * Lettered and Roman lists are labelled. A decimal list's number is only displayed: a generated
+ * "1." read as text would make every numbered statement a question stem. Whether it opens a
+ * question is decided from `listItem` by `numberQuestionStems` instead.
  */
 const LABELLED_FORMATS = new Set(['upperLetter', 'lowerLetter', 'upperRoman', 'lowerRoman']);
 
@@ -93,7 +111,7 @@ export class SOTLayoutReader {
       spacingBefore: spacing.before ?? 0,
       spacingAfter: spacing.after ?? 0,
       contextualSpacing: spacing.contextualSpacing ?? false,
-      listLabel: this.listLabel(properties),
+      ...this.labels(properties),
       pageBreakBefore: /<w:pageBreakBefore(?:\s[^>]*)?\/>/.test(properties) || (firstText >= 0 && breaks.some((at) => at < firstText)),
       pageBreakAfter: breaks.some((at) => firstText < 0 || at > firstText),
       indentTwips: Number(/<w:ind\b[^>]*\bw:left="(\d+)"/.exec(properties)?.[1] ?? 0)
@@ -111,7 +129,15 @@ export class SOTLayoutReader {
     return Object.assign({}, ...chain);
   }
 
-  private listLabel(properties: string): string | null {
+  private labels(properties: string): { listLabel: string | null; displayLabel: string | null; listItem: DecimalListItem | null } {
+    const label = this.listLabel(properties);
+    if (label === null) return { listLabel: null, displayLabel: null, listItem: null };
+    return label.structural
+      ? { listLabel: label.text, displayLabel: null, listItem: null }
+      : { listLabel: null, displayLabel: label.text, listItem: label.item };
+  }
+
+  private listLabel(properties: string): { text: string; structural: boolean; item: DecimalListItem | null } | null {
     const numId = /<w:numId w:val="(\d+)"/.exec(properties)?.[1];
     if (numId === undefined || numId === '0') return null;
     const levelIndex = Number(/<w:ilvl w:val="(\d+)"/.exec(properties)?.[1] ?? 0);
@@ -123,11 +149,14 @@ export class SOTLayoutReader {
     counts.length = levelIndex + 1;
     this.counters.set(numId, counts);
     const level = levels.get(levelIndex)!;
-    if (!LABELLED_FORMATS.has(level.format)) return null;
-    return level.text.replace(/%(\d)/g, (_match, depth: string) => {
+    const structural = LABELLED_FORMATS.has(level.format);
+    if (!structural && level.format !== 'decimal') return null;
+    const text = level.text.replace(/%(\d)/g, (_match, depth: string) => {
       const index = Number(depth) - 1;
       return formatCounter(counts[index] ?? levels.get(index)?.start ?? 1, levels.get(index)?.format ?? level.format);
     });
+    const item = structural ? null : { key: `${numId}:${levelIndex}`, number: counts[levelIndex]! };
+    return text.trim() === '' ? null : { text, structural, item };
   }
 }
 

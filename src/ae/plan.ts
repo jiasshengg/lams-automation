@@ -416,7 +416,22 @@ function withQuestionHeading(entries: string[], number: number, sourceNumber: nu
   // The stem follows any case narrative, so a numbered list in that narrative never wins.
   const numbered = (entry: string): string | null =>
     TABLE_LINE.test(entry) ? null : stripQuestionNumberHtml(entry, [number, sourceNumber]);
-  let stemIndex = recased.reduce((last, entry, index) => (numbered(entry) !== null ? index : last), -1);
+  // A numbered statement list may follow the stem ("1. Which statements…", then "1. Such a…",
+  // "2. …"). The stem is the last line carrying this question's own number that does not run on
+  // into the next number; a list item always does, except its last.
+  const printedNumber = (entry: string | undefined): number | null => {
+    if (entry === undefined || numbered(entry) === null) return null;
+    return Number(/^\s*(?:Q\s?)?(\d+)/i.exec(inlineHtmlToText(entry))?.[1] ?? NaN);
+  };
+  const nextContent = (index: number): string | undefined =>
+    recased.slice(index + 1).find((entry) => entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML);
+  const ownStem = recased.reduce((last, entry, index) => {
+    const value = printedNumber(entry);
+    if (value === null || ![number, sourceNumber].includes(value)) return last;
+    return printedNumber(nextContent(index)) === value + 1 ? last : index;
+  }, -1);
+  let stemIndex =
+    ownStem >= 0 ? ownStem : recased.reduce((last, entry, index) => (numbered(entry) !== null ? index : last), -1);
   // A question the document states without a number of its own — one column of a matching table —
   // still opens with its heading, ahead of the last line of the prompt: its own stem.
   const unnumberedStem = recased.reduce(
