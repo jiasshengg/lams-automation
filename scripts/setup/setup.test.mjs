@@ -300,9 +300,9 @@ test('Elentra Python runtime is pinned and checksummed for every supported compu
   assert.equal(basePython('/p', 'darwin'), path.join('/p', 'bin', 'python3'));
   assert.equal(venvPython('/v', 'win32'), path.join('/v', 'Scripts', 'python.exe'));
   const requirements = readFileSync(path.join(root, 'elentra/requirements.txt'), 'utf8');
-  for (const line of requirements.split('\n').filter(entry => entry.trim() && !entry.startsWith('#'))) assert.match(line, /^[\w.-]+==[\w.]+$/);
+  for (const line of requirements.split(/\r?\n/).filter(entry => entry.trim() && !entry.startsWith('#'))) assert.match(line, /^[\w.-]+==[\w.]+$/);
   assert.doesNotMatch(requirements, /^pandas==/m, 'pandas is blocked by Windows Smart App Control');
-  assert.match(readFileSync(path.join(root, '.gitignore'), 'utf8'), /^\.venv\/$/m);
+  assert.match(readFileSync(path.join(root, '.gitignore'), 'utf8'), /^\.venv\/\r?$/m);
 });
 
 test('setup installs the Elentra runtime before the doctor and signs in to Elentra after LAMS', () => {
