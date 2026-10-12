@@ -32,6 +32,8 @@ export interface SotFormattingResult {
    * skipped. See `formatUnresolvedSotWarnings` in `./media.js`.
    */
   reviewWarnings: string[];
+  /** Fields whose request text differed from the SoT only in spacing; the SoT spacing was written. */
+  spacingCorrections: string[];
 }
 
 const PLAIN: Omit<StyledRun, 'text'> = { bold: false, italic: false, underline: false, vertical: null };
@@ -91,7 +93,8 @@ export function applySotFormatting(
   const result: SotFormattingResult = {
     applied: [],
     warnings: [],
-    reviewWarnings: formatUnresolvedSotWarnings(caseHeadings, [])
+    reviewWarnings: formatUnresolvedSotWarnings(caseHeadings, []),
+    spacingCorrections: []
   };
   const document = flatten(paragraphs);
   request.questions.forEach((question, index) => {
@@ -104,6 +107,9 @@ export function applySotFormatting(
         return value;
       }
       result.applied.push(label);
+      const requested = plainText(value.replace(/<br\s*\/?>/gi, ' '));
+      const written = plainText(styled.replace(/<br\s*\/?>/gi, ' '));
+      if (requested !== written) result.spacingCorrections.push(`${label}: "${requested}" -> "${written}"`);
       return styled;
     };
     question.content = format(question.content, `${question.title} content`);
@@ -123,7 +129,7 @@ export function applySotFormatting(
 }
 
 export async function applySotFormattingFromDocx(request: IratRequest): Promise<SotFormattingResult> {
-  if (!request.sourceDocx) return { applied: [], warnings: [], reviewWarnings: [] };
+  if (!request.sourceDocx) return { applied: [], warnings: [], reviewWarnings: [], spacingCorrections: [] };
   const filename = await resolveInputFile(request.sourceDocx, '.docx');
   const buffer = await readFile(filename);
   const { documentXml, ...parts } = readSOTDocxParts(buffer);
@@ -176,12 +182,36 @@ export function formatFromSot(value: string, characters: StyledCharacter[]): str
       rendered.push('');
       continue;
     }
-    const start = haystack.indexOf(segment, searchFrom);
-    if (start < 0) return undefined;
-    rendered.push(render(characters.slice(start, start + segment.length)));
-    searchFrom = start + segment.length;
+    const found = findExact(haystack, segment, searchFrom) ?? findIgnoringSpaces(haystack, segment, searchFrom);
+    if (!found) return undefined;
+    rendered.push(render(characters.slice(found.start, found.end)));
+    searchFrom = found.end;
   }
   return rendered.join('<br>');
+}
+
+function findExact(haystack: string, segment: string, from: number): { start: number; end: number } | undefined {
+  const start = haystack.indexOf(segment, from);
+  return start < 0 ? undefined : { start, end: start + segment.length };
+}
+
+/**
+ * Matches the request text with every space ignored on both sides, so a space dropped or
+ * added during transcription can never reach LAMS: the slice rendered is the SoT's own
+ * characters, spaces included.
+ */
+function findIgnoringSpaces(haystack: string, segment: string, from: number): { start: number; end: number } | undefined {
+  const positions: number[] = [];
+  let squashed = '';
+  for (let index = from; index < haystack.length; index += 1) {
+    if (haystack[index] === ' ') continue;
+    positions.push(index);
+    squashed += haystack[index];
+  }
+  const needle = segment.replace(/ /g, '');
+  const start = needle === '' ? -1 : squashed.indexOf(needle);
+  if (start < 0) return undefined;
+  return { start: positions[start]!, end: positions[start + needle.length - 1]! + 1 };
 }
 
 export interface StyledCharacter extends Omit<StyledRun, 'text'> {

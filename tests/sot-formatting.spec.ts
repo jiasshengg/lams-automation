@@ -89,6 +89,36 @@ test('formatFromSot returns undefined for text the SoT does not contain', () => 
   expect(formatFromSot('never written', characters)).toBeUndefined();
 });
 
+test('the SoT decides spacing when the request only differs from it by whitespace', () => {
+  const xml = [
+    p(run('1. Hello '), run('i', '<w:b/>'), run(' '), run('am here')),
+    p(run('A. '), run('we are', '<w:i/>'), run(' here')),
+    p(run('B. Not spaced'))
+  ].join('');
+  const irat = request();
+  irat.questions = [{
+    ...irat.questions[0]!,
+    content: 'Hello iam here',
+    answers: [{ text: 'weare here', correct: true, weight: 100 }, { text: 'Not  spa ced', correct: false, weight: 0 }]
+  }];
+  delete irat.questions[0]!.feedback;
+  const result = applySotFormatting(irat, extractStyledParagraphs(xml));
+  expect(irat.questions[0]!.content).toBe('Hello <strong>i</strong> am here');
+  expect(irat.questions[0]!.answers.map((answer) => answer.text)).toEqual(['<em>we are</em> here', 'Not spaced']);
+  expect(result.warnings).toEqual([]);
+  expect(result.spacingCorrections).toEqual([
+    'Question 1 content: "Hello iam here" -> "Hello i am here"',
+    'Question 1 answer 1: "weare here" -> "we are here"',
+    'Question 1 answer 2: "Not spa ced" -> "Not spaced"'
+  ]);
+});
+
+test('an exact match is preferred over a whitespace-insensitive one', () => {
+  const xml = [p(run('1. Siamese cats')), p(run('A. i am'))].join('');
+  const characters = extractStyledParagraphs(xml).flatMap((paragraph) => paragraph.runs.flatMap((run) => [...run.text].map((text) => ({ ...run, text }))));
+  expect(formatFromSot('i am', characters)).toBe('i am');
+});
+
 test('reads formatting from a real DOCX archive', () => {
   const buffer = mediaDocx(p(run('1. Only '), run('this', '<w:i/>'), run(' word')));
   const xml = requireZipEntry(readZipEntries(buffer), 'word/document.xml').toString('utf8');
