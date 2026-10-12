@@ -7,6 +7,8 @@ import { promisify } from 'node:util';
 import { readZipEntries, requireZipEntry } from './archive.js';
 import { topLevelBlocks } from './blocks.js';
 import type { RenderTarget } from './render-targets.js';
+import { macPageExporter, windowsPageExporter } from './page-exporters.js';
+import { renderWithWordPages } from './word-render-pages.js';
 import { writeZipEntries } from './zip-writer.js';
 
 const run = promisify(execFile);
@@ -16,6 +18,11 @@ export const RENDER_SCALE = 2;
 const RENDER_TIMEOUT_MS = 300_000;
 const BOOKMARK_ID_BASE = 990_000;
 const SCRIPT = fileURLToPath(new URL('../../scripts/render-docx-figures.ps1', import.meta.url));
+/**
+ * One stable folder for the copies Word saves as PDF. Word for Mac is sandboxed and asks once for
+ * access to a folder it has not seen; a folder that never changes is granted once and remembered.
+ */
+const PAGE_WORKSPACE = fileURLToPath(new URL('../../.word-render/', import.meta.url));
 
 export interface RenderedFigure {
   id: string;
@@ -56,8 +63,18 @@ export interface RenderRequest {
 export async function renderWithWord(docx: Buffer, requests: RenderRequest[]): Promise<RenderOutcome> {
   const outcome: RenderOutcome = { rendered: new Map(), failures: new Map() };
   if (requests.length === 0) return outcome;
+  // Word for Mac cannot hand over a picture of a range, so a Mac compares Word's pages instead.
+  // LAMS_WORD_RENDER=pages runs that same comparison on Windows, to check it there.
+  const comparePages = process.platform === 'darwin' || (process.platform === 'win32' && process.env.LAMS_WORD_RENDER === 'pages');
+  if (comparePages) {
+    return renderWithWordPages(docx, requests, {
+      exporter: process.platform === 'darwin' ? macPageExporter : windowsPageExporter,
+      workspace: PAGE_WORKSPACE,
+      scale: RENDER_SCALE
+    });
+  }
   if (process.platform !== 'win32') {
-    return { ...outcome, unavailable: 'Rendering tables and figures needs Microsoft Word on Windows.' };
+    return { ...outcome, unavailable: 'Rendering tables and figures needs Microsoft Word on Windows or macOS.' };
   }
   const workspace = await mkdtemp(path.join(os.tmpdir(), 'lams-render-'));
   try {

@@ -231,6 +231,7 @@ export function buildAEPlan(value: unknown): AEPlan {
     })
   }));
   validateGateAdjacency(input);
+  for (const question of nodes.flatMap((node) => node.questions)) assertNoVisibleMarkup(question);
 
   const totalMarks = nodes.flatMap((node) => node.questions).reduce((sum, question) => sum + question.marks, 0);
   if (input.expectedTotalMarks !== undefined && input.expectedTotalMarks !== totalMarks) {
@@ -263,6 +264,28 @@ export function buildAEPlan(value: unknown): AEPlan {
 /** Every AE gate carries the title of the node that follows it, prefixed with "AE Gate". */
 export function aeGateTitle(followingNodeTitle: string): string {
   return `AE Gate ${followingNodeTitle}`;
+}
+
+/** An HTML tag the sanitizer escaped: the learner would read it as text, such as `<td>`. */
+const VISIBLE_MARKUP = /&lt;\/?(?:table|tbody|thead|tfoot|tr|td|th|div|p|span|br|img|a|ul|ol|li|font|style|script|h[1-6]|col|colgroup|caption|b|i|u|strong|em|sup|sub)\b[^&]*?&gt;/i;
+
+/**
+ * Refuses a question whose prompt or options would show HTML code to learners. The sanitizer
+ * escapes every tag it does not rebuild itself, so markup that reached it in any other shape (a
+ * table split across lines, a tag typed into reviewed JSON) arrives as visible text such as
+ * `<td>Hb</td>` - which is how raw code once reached students in a lab-results table.
+ */
+function assertNoVisibleMarkup(question: AEQuestionPlan): void {
+  const fields = [{ name: 'prompt', html: question.promptHtml }, ...question.options.map((option, index) => ({ name: `option ${index + 1}`, html: option.html }))];
+  for (const { name, html } of fields) {
+    const leaked = VISIBLE_MARKUP.exec(html);
+    if (leaked) {
+      throw new Error(
+        `Question ${question.number} ${name} would show HTML code to learners: "${leaked[0]}". ` +
+          'A table must be one line of the prompt holding the whole <table>…</table>; regenerate the AE JSON with extract:ae-sot --draft instead of editing markup by hand.'
+      );
+    }
+  }
 }
 
 /** How the document labels a question: its `label` when one is given, otherwise its number. */

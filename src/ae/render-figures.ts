@@ -28,8 +28,8 @@ export interface RenderedDraftOptions {
 /**
  * Drafts the AE plan with every learner-facing table and drawn figure shown as Word's picture of
  * it. Only targets that reach a question's prompt are rendered: an option table, an answer key or a
- * rationale figure never becomes a picture. Whatever Word cannot render stays as rebuilt, and the
- * draft's `_review` says which, so a person checks those against the document.
+ * rationale figure never becomes a picture. If Word cannot picture one, no draft is written: the
+ * error names each and why. `render: false` (`--no-render`) is the deliberate choice to rebuild.
  */
 export async function buildRenderedAEDraft(
   docx: Buffer,
@@ -86,10 +86,13 @@ export async function buildRenderedAEDraft(
     });
   }
   const missed = shown.filter(({ target }) => !outcome.rendered.has(target.id));
+  // A table or figure rebuilt from the DOCX can lose merged cells, shading, list numbers and its
+  // arrangement, so a learner-facing one Word could not picture stops the draft instead.
+  if (missed.length > 0) throw new Error(unrenderedMessage(missed, outcome));
   return buildAEDraft(analyse(renderedTargets), {
     ...draftOptions,
     renders,
-    reviewNotes: renderNotes([...labels.values()], missed, outcome)
+    reviewNotes: renderNotes([...labels.values()])
   });
 }
 
@@ -143,27 +146,25 @@ function shownTargets(draft: AEDraftPlan, targets: readonly RenderTarget[]): { t
   return [...shown.values()];
 }
 
-function renderNotes(
-  rendered: { target: RenderTarget; question: number }[],
-  missed: { target: RenderTarget; question: number }[],
-  outcome: RenderOutcome
-): string[] {
-  const label = ({ target, question }: { target: RenderTarget; question: number }) => `Q${question} ${target.kind}`;
-  const notes: string[] = [];
-  if (rendered.length > 0) {
-    notes.push(
-      `Rendered with Word from the Source-of-Truth and shown as pictures: ${rendered.map(label).join(', ')}. ` +
-        'Open each PNG under renderedFigures and check it matches the document and shows no answer marking.'
-    );
-  }
-  if (missed.length > 0) {
-    const reason = outcome.unavailable ?? [...new Set(missed.map(({ target }) => outcome.failures.get(target.id) ?? 'no picture was produced'))].join('; ');
-    notes.push(
-      `Not rendered (${reason}), so rebuilt from the DOCX instead: ${missed.map(label).join(', ')}. ` +
-        'Check these tables and figures against the document; rebuilt tables lose merged cells and shading, and drawn figures lose their arrangement.'
-    );
-  }
-  return notes;
+const targetLabel = ({ target, question }: { target: RenderTarget; question: number }) => `Q${question} ${target.kind}`;
+
+function renderNotes(rendered: { target: RenderTarget; question: number }[]): string[] {
+  if (rendered.length === 0) return [];
+  return [
+    `Rendered with Word from the Source-of-Truth and shown as pictures: ${rendered.map(targetLabel).join(', ')}. ` +
+      'Open each PNG under renderedFigures and check it matches the document and shows no answer marking.'
+  ];
+}
+
+/** Why the draft stopped: each table or figure Word could not picture, with Word's reason. */
+function unrenderedMessage(missed: { target: RenderTarget; question: number }[], outcome: RenderOutcome): string {
+  const lines = missed.map((entry) => `- ${targetLabel(entry)} (blocks ${entry.target.firstBlock}-${entry.target.lastBlock}): ${outcome.unavailable ?? outcome.failures.get(entry.target.id) ?? 'no picture was produced'}`);
+  return (
+    'These learner-facing tables and figures could not be pictured with Microsoft Word, and a rebuilt copy can lose merged cells, ' +
+    `shading, list numbers and arrangement, so no draft was written:\n${lines.join('\n')}\n` +
+    'Fix what is named above and run again, or run this step on a computer whose Word can picture them (Windows renders every case). ' +
+    'Only if a rebuilt copy is acceptable for this lesson, rerun with --no-render and check each table and figure against the document.'
+  );
 }
 
 /** What the picture shows, in words, for readers who cannot see it. */

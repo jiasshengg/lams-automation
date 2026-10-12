@@ -101,15 +101,36 @@ test('rendered pictures stand in for the pictures inside them, in document order
   expect(images.get(1)?.[1]).toMatchObject({ widthPx: 320, altText: 'Test Result Hb 9.7 g/dl', caption: '' });
 }));
 
-test('without Word the tables and figures are rebuilt as before, and the review says so', () => withDirectory(async (directory) => {
+test('without Word no draft is written, and each table and figure is named with the reason', () => withDirectory(async (directory) => {
   const unavailable = async (): Promise<RenderOutcome> => ({
-    rendered: new Map(), failures: new Map(), unavailable: 'Rendering tables and figures needs Microsoft Word on Windows.'
+    rendered: new Map(), failures: new Map(), unavailable: 'Microsoft Word for Mac is not installed or could not be started.'
   });
-  const draft = await draftOf(SOT, directory, unavailable);
+  const stopped = draftOf(SOT, directory, unavailable);
+  await expect(stopped).rejects.toThrow('could not be pictured with Microsoft Word');
+  await expect(stopped).rejects.toThrow('Q1 table (blocks 4-4): Microsoft Word for Mac is not installed');
+  await expect(stopped).rejects.toThrow('Q2 figure (blocks 8-9)');
+}));
+
+test('one table Word could not picture stops the draft, even when the others rendered', () => withDirectory(async (directory) => {
+  const partly = async (docx: Buffer, requests: { target: RenderTarget; outputPath: string }[]): Promise<RenderOutcome> => {
+    const outcome = await fakeWord()(docx, requests);
+    const table = requests.find(({ target }) => target.kind === 'table')!.target;
+    outcome.rendered.delete(table.id);
+    outcome.failures.set(table.id, 'The table runs onto a second page, and only one page of it can be pictured.');
+    return outcome;
+  };
+  await expect(draftOf(SOT, directory, partly)).rejects.toThrow('Q1 table (blocks 4-4): The table runs onto a second page');
+}));
+
+test('--no-render is the deliberate choice to rebuild tables and figures from the DOCX', () => withDirectory(async (directory) => {
+  const docx = path.join(directory, 'AE.docx');
+  await writeFile(docx, SOT);
+  const draft = await buildRenderedAEDraft(SOT, readSOTDocxParts(SOT), {
+    sourceLabel: 'fallback', sourceDocx: docx, images: inspectDocxImages(SOT), figuresDirectory: directory, render: false
+  });
   const [first] = draft.nodes.flatMap((node) => node.questions);
   expect(first!.prompt).toContain('<table');
   expect(first!.renderedFigures).toBeUndefined();
-  expect(draft._review.find((note) => note.startsWith('Not rendered'))).toContain('needs Microsoft Word on Windows');
 }));
 
 test('the empty lines a floating figure is drawn over become part of it', () => withDirectory(async (directory) => {

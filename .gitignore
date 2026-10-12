@@ -14,3 +14,4 @@ sot-docs/
 # Credentials; never commit
 **/service-account-key.json
 runs/
+.word-render/
