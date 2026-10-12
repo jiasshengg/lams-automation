@@ -8,6 +8,8 @@
 export interface SOTLayoutParts {
   stylesXml?: string;
   numberingXml?: string;
+  /** `word/_rels/document.xml.rels`: where the document's hyperlinks point. */
+  relationshipsXml?: string;
 }
 
 export interface ParagraphLayout {

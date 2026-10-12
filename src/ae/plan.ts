@@ -22,6 +22,12 @@ export interface AEOptionInput {
 
 export interface AEQuestionInput {
   number: number;
+  /**
+   * The question as the document labels it, when that differs from its place in LAMS: "12b" for a
+   * lettered part, or "13" for the question LAMS counts fifteenth after 12a-12c. It names the
+   * question's title and its QUESTION heading. Defaults to `number`.
+   */
+  label?: string;
   title?: string;
   type: AEQuestionType;
   prompt: string;
@@ -87,6 +93,11 @@ export interface AEPlanInput {
   sourceDocx?: string;
   /** The plan was drafted with a matching table read as one question per column. */
   columnQuestions?: boolean;
+  /**
+   * The web addresses the Source-of-Truth makes clickable hyperlinks. Only these become links in
+   * a prompt; an address the document prints as text stays text, with the document's own emphasis.
+   */
+  linkedUrls?: string[];
   breakMarkerCount: number;
   expectedTotalMarks?: number;
   attempts?: number;
@@ -152,6 +163,7 @@ export interface AEPlan {
   sourceLabel: string;
   sourceDocx?: string;
   columnQuestions?: boolean;
+  linkedUrls?: string[];
   breakMarkerCount: number;
   requiredAENodes: number;
   requiredAEGates: number;
@@ -215,7 +227,7 @@ export function buildAEPlan(value: unknown): AEPlan {
         );
       }
       expectedQuestionNumber += 1;
-      return buildQuestion(question, input.multipleAnswerCredit);
+      return buildQuestion(question, input.multipleAnswerCredit, input.linkedUrls ?? []);
     })
   }));
   validateGateAdjacency(input);
@@ -232,6 +244,7 @@ export function buildAEPlan(value: unknown): AEPlan {
     sourceLabel: input.sourceLabel,
     ...(input.sourceDocx ? { sourceDocx: input.sourceDocx } : {}),
     ...(input.columnQuestions ? { columnQuestions: true } : {}),
+    ...(input.linkedUrls && input.linkedUrls.length > 0 ? { linkedUrls: input.linkedUrls } : {}),
     breakMarkerCount: input.breakMarkerCount,
     requiredAENodes,
     requiredAEGates,
@@ -252,7 +265,34 @@ export function aeGateTitle(followingNodeTitle: string): string {
   return `AE Gate ${followingNodeTitle}`;
 }
 
-function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMultipleAnswerCredit): AEQuestionPlan {
+/** How the document labels a question: its `label` when one is given, otherwise its number. */
+function questionLabel(question: AEQuestionInput): string {
+  return question.label ?? String(question.number);
+}
+
+interface PromptOptions {
+  sourceNumber: number;
+  label: string;
+  replaceFigures: boolean;
+  replacements: { find: string; replaceWith: string }[];
+  linkedUrls: readonly string[];
+}
+
+function promptOptions(question: AEQuestionInput, linkedUrls: readonly string[]): PromptOptions {
+  return {
+    sourceNumber: question.sourceQuestionNumber ?? question.number,
+    label: questionLabel(question),
+    replaceFigures: question.replaceSourceFigures === true,
+    replacements: question.promptReplacements ?? [],
+    linkedUrls
+  };
+}
+
+function buildQuestion(
+  question: AEQuestionInput,
+  multipleAnswerCredit: AEMultipleAnswerCredit | undefined,
+  linkedUrls: readonly string[]
+): AEQuestionPlan {
   const marks = question.marks ?? 4;
   if (!Number.isInteger(marks) || marks <= 0) {
     throw new Error(`Question ${question.number} marks must be a positive integer; found ${marks}`);
@@ -263,15 +303,9 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
     }
     return {
       number: question.number,
-      title: question.title ?? `Question ${question.number}`,
+      title: question.title ?? `Question ${questionLabel(question)}`,
       type: question.type,
-      promptHtml: normalizePrompt(
-        question.prompt,
-        question.number,
-        question.sourceQuestionNumber ?? question.number,
-        question.replaceSourceFigures === true,
-        question.promptReplacements ?? []
-      ),
+      promptHtml: normalizePrompt(question.prompt, question.number, promptOptions(question, linkedUrls)),
       marks,
       answerRequired: true,
       prefixSequentialLetters: false,
@@ -321,15 +355,9 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
   const defaultCorrectWeight = multipleAnswerCredit === 'full' ? 100 : 100 / correctOptions.length;
   return {
     number: question.number,
-    title: question.title ?? `Question ${question.number}`,
+    title: question.title ?? `Question ${questionLabel(question)}`,
     type: question.type,
-    promptHtml: normalizePrompt(
-        question.prompt,
-        question.number,
-        question.sourceQuestionNumber ?? question.number,
-        question.replaceSourceFigures === true,
-        question.promptReplacements ?? []
-      ),
+    promptHtml: normalizePrompt(question.prompt, question.number, promptOptions(question, linkedUrls)),
     marks,
     answerRequired: true,
     prefixSequentialLetters: true,
@@ -424,10 +452,13 @@ const BLANK_LINE = '<div><br></div>';
 const QUESTION_HEADING = /^\s*question\s+(\d+)\s*:?\s*$/i;
 
 /**
- * The documented AE format opens each question with an all-caps "QUESTION <n>" line, a blank
- * line, then the stem without its "<n>." number. A heading already present is only re-cased.
+ * The documented AE format opens each question with an all-caps "QUESTION <label>" line, a blank
+ * line, then the stem without its "<n>." number. A heading already present is only re-cased. The
+ * label is the document's ("QUESTION 12b"), never the position LAMS counts the question at.
  */
-function withQuestionHeading(entries: string[], number: number, sourceNumber: number): string[] {
+function withQuestionHeading(entries: string[], number: number, sourceNumber: number, label: string): string[] {
+  const printedAs = Number.parseInt(label, 10);
+  const ownNumbers = Number.isNaN(printedAs) ? [number, sourceNumber] : [number, sourceNumber, printedAs];
   const recased = entries.map((entry) => {
     const heading = QUESTION_HEADING.exec(inlineHtmlToText(entry));
     return heading ? `QUESTION ${heading[1]}` : entry;
@@ -435,7 +466,7 @@ function withQuestionHeading(entries: string[], number: number, sourceNumber: nu
   const hasHeading = recased.some((entry) => QUESTION_HEADING.test(entry));
   // The stem follows any case narrative, so a numbered list in that narrative never wins.
   const numbered = (entry: string): string | null =>
-    TABLE_LINE.test(entry) ? null : stripQuestionNumberHtml(entry, [number, sourceNumber]);
+    TABLE_LINE.test(entry) ? null : stripQuestionNumberHtml(entry, ownNumbers);
   // A numbered statement list may follow the stem ("1. Which statements…", then "1. Such a…",
   // "2. …"). The stem is the last line carrying this question's own number that does not run on
   // into the next number; a list item always does, except its last.
@@ -447,7 +478,7 @@ function withQuestionHeading(entries: string[], number: number, sourceNumber: nu
     recased.slice(index + 1).find((entry) => entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML);
   const ownStem = recased.reduce((last, entry, index) => {
     const value = printedNumber(entry);
-    if (value === null || ![number, sourceNumber].includes(value)) return last;
+    if (value === null || !ownNumbers.includes(value)) return last;
     return printedNumber(nextContent(index)) === value + 1 ? last : index;
   }, -1);
   let stemIndex =
@@ -462,7 +493,7 @@ function withQuestionHeading(entries: string[], number: number, sourceNumber: nu
   if (stemIndex < 0) {
     return hasHeading
       ? recased
-      : [...recased.slice(0, unnumberedStem), `QUESTION ${number}`, BLANK_LINE, ...recased.slice(unnumberedStem)];
+      : [...recased.slice(0, unnumberedStem), `QUESTION ${label}`, BLANK_LINE, ...recased.slice(unnumberedStem)];
   }
   const stem = numbered(recased[stemIndex]!)!;
   // The heading brings its own gap with it, so the document's spacing above the stem is kept to
@@ -471,7 +502,7 @@ function withQuestionHeading(entries: string[], number: number, sourceNumber: nu
     recased.splice(stemIndex - 1, 1);
     stemIndex -= 1;
   }
-  const replacement = hasHeading ? [stem] : [`QUESTION ${number}`, BLANK_LINE, stem];
+  const replacement = hasHeading ? [stem] : [`QUESTION ${label}`, BLANK_LINE, stem];
   return [...recased.slice(0, stemIndex), ...replacement, ...recased.slice(stemIndex + 1)];
 }
 
@@ -538,13 +569,8 @@ function withoutReservedSpace(entries: string[]): string[] {
   return kept;
 }
 
-function normalizePrompt(
-  prompt: string,
-  number: number,
-  sourceNumber: number,
-  replaceFigures = false,
-  replacements: { find: string; replaceWith: string }[] = []
-): string {
+function normalizePrompt(prompt: string, number: number, options: PromptOptions): string {
+  const { sourceNumber, label, replaceFigures, replacements, linkedUrls } = options;
   const supplied = replacements.reduce((text, replacement) => {
     const escaped = escapeHtmlText(replacement.find);
     if (!text.includes(replacement.find) && !text.includes(escaped)) {
@@ -553,7 +579,7 @@ function normalizePrompt(
     return text.split(replacement.find).join(replacement.replaceWith).split(escaped).join(replacement.replaceWith);
   }, prompt);
   const entries = replaceFigures ? withOneFigureSlot(promptEntries(supplied)) : promptEntries(supplied);
-  const cleaned = withQuestionHeading(entries, number, sourceNumber);
+  const cleaned = withQuestionHeading(entries, number, sourceNumber, label);
   if (!cleaned.some((entry) => entry !== BLANK_LINE && entry !== IMAGE_SLOT_HTML)) {
     throw new Error(`Question ${number} prompt is empty after removing mark annotations`);
   }
@@ -574,7 +600,7 @@ function normalizePrompt(
       return;
     }
     const styled = caseHeading && html === escapeHtmlText(text) ? `<strong><u>${html}</u></strong>` : html;
-    paragraphs.push(`<div>${linkifyUrls(styled)}</div>`);
+    paragraphs.push(`<div>${linkifyUrls(styled, linkedUrls)}</div>`);
     // The heading's blank line is added only where the document did not already leave one.
     const next = cleaned[index + 1];
     if ((caseHeading || /^QUESTION\s+\d+\s*$/i.test(text)) && next !== undefined && next !== BLANK_LINE) {
@@ -626,7 +652,7 @@ function validateGateAdjacency(input: AEPlanInput): void {
   });
 
   // Once each gate sits between the right nodes, it must carry the exact title of the node it leads
-  // into, so it never drifts from that node's spelling ("AE Gate AE Case 1 Q1-4", never "… Q1 to Q4").
+  // into, so it never drifts from that node's spelling ("AE Gate AE Case 1 Q1-Q4", never "… Q1 to Q4").
   for (const gate of input.gates) {
     const expected = aeGateTitle(gate.beforeNodeTitle);
     if (gate.title !== expected) {
@@ -662,6 +688,11 @@ function parseInput(value: unknown): AEPlanInput {
         type: question.type,
         prompt: nonEmptyString(question.prompt, `Question ${number} prompt`)
       };
+      if (question.label !== undefined) {
+        const label = nonEmptyString(question.label, `Question ${number} label`);
+        if (!/^\d+[a-z]?$/.test(label)) throw new Error(`Question ${number} label must be a number with an optional part letter, such as "12b"`);
+        parsedQuestion.label = label;
+      }
       if (question.title !== undefined) parsedQuestion.title = nonEmptyString(question.title, `Question ${number} title`);
       if (question.marks !== undefined) parsedQuestion.marks = numberValue(question.marks, `Question ${number} marks`);
       if (question.options !== undefined) {
@@ -729,6 +760,14 @@ function parseInput(value: unknown): AEPlanInput {
   if (value.columnQuestions !== undefined) {
     if (typeof value.columnQuestions !== 'boolean') throw new Error('columnQuestions must be true or false');
     parsed.columnQuestions = value.columnQuestions;
+  }
+  if (value.linkedUrls !== undefined) {
+    if (!Array.isArray(value.linkedUrls)) throw new Error('linkedUrls must be an array of web addresses');
+    parsed.linkedUrls = value.linkedUrls.map((url, index) => {
+      const address = nonEmptyString(url, `linkedUrls[${index}]`);
+      if (!/^https?:\/\/\S+$/i.test(address)) throw new Error(`linkedUrls[${index}] must be an http(s) address`);
+      return address;
+    });
   }
   if (value.multipleAnswerCredit !== undefined) {
     if (value.multipleAnswerCredit !== 'split' && value.multipleAnswerCredit !== 'full') {

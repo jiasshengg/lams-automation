@@ -17,6 +17,7 @@ import {
   type ListItemNumber
 } from './question-numbering.js';
 import { emfBitmapToPng } from './emf.js';
+import { hyperlinkTargets } from './hyperlinks.js';
 
 /** Where the image sits relative to its question stem in the source document. */
 export type ImagePlacement = 'before' | 'after';
@@ -44,6 +45,8 @@ export interface DocxImage {
   crop: ImageCrop | null;
   /** Inline HTML of the caption line printed under the image, or '' when there is none. */
   caption: string;
+  /** The addresses the caption's paragraph hyperlinks; any other address in it stays text. */
+  captionLinks: string[];
   /**
    * Text boxes Word lays over the picture (lane markers, panel letters). They are not part of the
    * embedded file, so an upload loses them; '' when the picture has none.
@@ -174,9 +177,8 @@ export function detectCaseHeadings(buffer: Buffer): CaseHeadingObservation[] {
 export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   const entries = readZipEntries(buffer);
   const documentXml = requireZipEntry(entries, 'word/document.xml').toString('utf8');
-  const relationships = parseRelationships(
-    requireZipEntry(entries, 'word/_rels/document.xml.rels').toString('utf8')
-  );
+  const relationshipsXml = requireZipEntry(entries, 'word/_rels/document.xml.rels').toString('utf8');
+  const relationships = parseRelationships(relationshipsXml);
   const parts = readSOTDocxParts(buffer);
   const read = readParagraphsWithListLabels(documentXml, parts);
   const paragraphs: ReadParagraph[] = read.map(({ xml, content }) => ({ ...content, xml: withoutCompatibilityFallback(xml) }));
@@ -202,8 +204,13 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
     const xml = paragraph.xml;
     const text = paragraph.text;
     if (text !== '' && paragraph.imageCount === 0) {
-      const caption = isCaption(text, xml) ? withHyperlinkTargets(paragraph.html, text, xml, relationships) : '';
-      for (const pending of awaitingCaption.splice(0)) pending.caption = caption;
+      const captioned = isCaption(text, xml);
+      const caption = captioned ? withHyperlinkTargets(paragraph.html, text, xml, relationships) : '';
+      const captionLinks = captioned ? hyperlinkTargets(xml, relationshipsXml) : [];
+      for (const pending of awaitingCaption.splice(0)) {
+        pending.caption = caption;
+        pending.captionLinks = captionLinks;
+      }
     }
     const stem = stems[paragraphIndex];
     // Material addressed to faculty runs to the next break or question; its figures are for
@@ -250,6 +257,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
         questionNumber: assigned,
         placement: assigned === null ? 'before' : 'after',
         caption: '',
+        captionLinks: [],
         overlayText: picture.overlayText,
         afterAnswerKey:
           !leadIn && currentStem >= 0 && texts.slice(currentStem + 1, paragraphIndex + 1).some((text) => ANSWER_OR_RATIONALE.test(text)),

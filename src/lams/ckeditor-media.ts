@@ -9,6 +9,8 @@ export interface UploadedImage {
   widthPx: number | null;
   placement: ImagePlacement;
   caption: string;
+  /** The addresses the document hyperlinks in the caption; see `QuestionImageAsset`. */
+  captionLinks?: readonly string[];
   source: string;
 }
 
@@ -82,6 +84,7 @@ export async function uploadCkEditorImages(
       widthPx: image.widthPx,
       placement: image.placement,
       caption: image.caption,
+      ...(image.captionLinks ? { captionLinks: image.captionLinks } : {}),
       source: image.source
     });
   }
@@ -162,7 +165,7 @@ export function parseCkEditorUploadResponse(body: string): string {
 export function imageHtml(images: UploadedImage[], placement?: ImagePlacement): string {
   return images.filter((image) => placement === undefined || image.placement === placement).map((image) => {
     const width = image.widthPx ? ` width="${Math.min(Math.round(image.widthPx), 1200)}"` : '';
-    const caption = image.caption === '' ? '' : `<div>${linkifyUrls(sanitizeInlineHtml(image.caption))}</div>`;
+    const caption = image.caption === '' ? '' : `<div>${linkifyUrls(sanitizeInlineHtml(image.caption), image.captionLinks ?? [])}</div>`;
     return `<div><img src="${escapeHtml(image.url)}" alt="${escapeHtml(image.altText)}"${width}></div>${caption}`;
   }).join('');
 }

@@ -66,15 +66,23 @@ export function stripOptionPrefixHtml(value: string): string {
 }
 
 /**
- * Makes every http(s) address in already-sanitized HTML a clickable link, so a Source-of-Truth
- * reference reaches learners as a link rather than dead text. Trailing sentence punctuation stays
- * outside the link. Only the http and https schemes are ever linked.
+ * Makes the http(s) addresses in already-sanitized HTML clickable links. With `linkedUrls`, only
+ * the addresses listed there are linked: the ones the Source-of-Truth itself hyperlinks. Any other
+ * address stays the text the document prints, so a credit or reference never turns into a link the
+ * document did not make. Trailing sentence punctuation stays outside the link.
  */
-export function linkifyUrls(sanitizedHtml: string): string {
+export function linkifyUrls(sanitizedHtml: string, linkedUrls?: readonly string[]): string {
+  const linked = linkedUrls === undefined ? null : new Set(linkedUrls.map(comparableUrl));
   return sanitizedHtml.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
     const url = match.replace(/[.,;:!?)\]]+$/, '');
+    if (linked !== null && !linked.has(comparableUrl(url))) return match;
     return `<a href="${url}">${url}</a>${match.slice(url.length)}`;
   });
+}
+
+/** One address however it was escaped or punctuated: `&amp;` and a trailing slash do not matter. */
+function comparableUrl(url: string): string {
+  return url.replace(/&amp;/g, '&').replace(/\/+$/, '').toLowerCase();
 }
 
 /**

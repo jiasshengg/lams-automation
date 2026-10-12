@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { buildAEDraft } from '../src/ae/draft.js';
+import { buildAEPlan } from '../src/ae/plan.js';
 import { analyzeAESOT, extractSOTParagraphs } from '../src/ae/sot-docx.js';
+import { hyperlinkTargets } from '../src/docx/hyperlinks.js';
 
 function paragraph(text: string, options: { bold?: boolean; drawing?: boolean } = {}): string {
   const bold = options.bold ? '<w:rPr><w:b/></w:rPr>' : '';
@@ -388,7 +391,7 @@ test('names each AE node from its Case headings and question range', () => {
   const analysis = analyzeAESOT(paragraphs, 'Example');
   expect(analysis.nodes.map((node) => node.suggestedTitle)).toEqual([
     'AE Case 1 Q1-Case 2 Q2',
-    'AE Case 3 Q3-4',
+    'AE Case 3 Q3-Q4',
     // A node that continues the previous case states no heading of its own.
     'AE Case 3 Q5'
   ]);
@@ -488,7 +491,7 @@ test('reads Q-prefixed stems, starred breaks, and a stem whose full stop was dro
 
   expect(analysis.breakMarkerCount).toBe(3);
   expect(analysis.nodes.map((node) => node.questionNumbers)).toEqual([[1, 2], [3], [4], [5]]);
-  expect(analysis.nodes.map((node) => node.suggestedTitle)).toEqual(['AE Case 1 Q1-2', 'AE Case 7 Q3', 'AE Case 7 Q4', 'AE Case 7 Q5']);
+  expect(analysis.nodes.map((node) => node.suggestedTitle)).toEqual(['AE Case 1 Q1-Q2', 'AE Case 7 Q3', 'AE Case 7 Q4', 'AE Case 7 Q5']);
   expect(analysis.questions[2]).toMatchObject({ type: 'single-select', correctAnswerLabels: ['B'] });
   // "Q3 to 5 relate…" is a reference, not a stem, so it stays case narrative.
   expect(analysis.nodes[1]?.contextHtml).toContain('Q3 to 5 relate to this case');
@@ -718,7 +721,7 @@ test('a matching table is case reading by default, and questions only when asked
   // question 3 is the one the document prints as "3.".
   const asPrinted = analyzeAESOT(extractSOTParagraphs(sot), 'Example');
   expect(asPrinted.questionCount).toBe(3);
-  expect(asPrinted.nodes.map((node) => node.suggestedTitle)).toEqual(['AE Case 1 Q1-2', 'AE Case 2 Q3']);
+  expect(asPrinted.nodes.map((node) => node.suggestedTitle)).toEqual(['AE Case 1 Q1-Q2', 'AE Case 2 Q3']);
   expect(asPrinted.questions[2]!.promptHtml).toContain('A 68 year old man');
   expect(asPrinted.warnings.join(' ')).toContain('--column-questions');
 
@@ -1016,6 +1019,9 @@ test('numbers lettered parts of one question (12a, 12b, 12c) as consecutive ques
   </w:body></w:document>`), 'Parts');
   expect(analysis.questions.map((question) => question.number)).toEqual([1, 2, 3, 4, 5]);
   expect(analysis.questions.map((question) => question.type)).toEqual(['single-select', 'single-select', 'single-select', 'open-response', 'single-select']);
+  // This excerpt starts at "11.", so it is labelled by LAMS's count like any renumbered document;
+  // the parts still keep their letters.
+  expect(analysis.questions.map((question) => question.label)).toEqual(['1', '2a', '2b', '2c', '3a']);
 });
 
 test('reads a bare Answer heading over label-to-statement pairings as a matching task', () => {
@@ -1088,4 +1094,108 @@ test('reads "Application Exercise" headings, "Answers -" keys, and a typed ranki
   expect(JSON.stringify(analysis.questions[1])).not.toContain('Open ended');
   expect(analysis.questions[3]?.bodyLines.join(' ')).toContain('1. Full scale rollout');
   expect(analysis.questions[3]?.correctAnswerLabels).toEqual(['A', 'B']);
+});
+
+test('lettered parts keep their letters, and later questions keep the numbers the document prints', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. First question?')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('--- BREAK ---')}
+    ${paragraph('Case 2')}
+    ${paragraph('2a. What is the finding?')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('2b. What happens next?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Right', { bold: true })}
+    ${paragraph('2c. Name the outcomes.')}
+    ${paragraph('Answer: Resolution')}
+    ${paragraph('--- BREAK ---')}
+    ${paragraph('3. A later question?')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Parts');
+
+  expect(analysis.questions.map((question) => [question.number, question.label])).toEqual([
+    [1, '1'], [2, '2a'], [3, '2b'], [4, '2c'], [5, '3']
+  ]);
+  expect(analysis.nodes.map((node) => node.suggestedTitle)).toEqual(['AE Case 1 Q1', 'AE Case 2 Q2a-Q2c', 'AE Case 2 Q3']);
+  expect(analysis.gates.map((gate) => gate.suggestedTitle)).toEqual(['AE Gate AE Case 2 Q2a-Q2c', 'AE Gate AE Case 2 Q3']);
+
+  const plan = buildAEPlan(buildAEDraft(analysis));
+  const questions = plan.nodes.flatMap((node) => node.questions);
+  expect(questions.map((question) => question.title)).toEqual(['Question 1', 'Question 2a', 'Question 2b', 'Question 2c', 'Question 3']);
+  expect(questions[2]!.promptHtml).toContain('<div>QUESTION 2b</div>');
+  expect(questions[4]!.promptHtml).toContain('<div>QUESTION 3</div>');
+  expect(questions[4]!.promptHtml).not.toContain('QUESTION 5');
+});
+
+test('an attribution after the answer key joins the prompt only for a question that shows a figure', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. What does the image show?')}
+    ${paragraph('', { drawing: true })}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('Answer: A')}
+    ${paragraph('Image source: Example Atlas of Pathology')}
+    ${paragraph('2. Which drug is first line?')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('Answer: A')}
+    ${paragraph('Adapted from Example Guidelines 2024')}
+    ${paragraph('Credit for above diagrams: Example Atlas')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Credits');
+
+  const [withFigure, withoutFigure] = analysis.questions;
+  expect(withFigure!.creditLines).toEqual(['Image source: Example Atlas of Pathology']);
+  // A rationale cites its sources in the same words; without a figure that stays out of the prompt.
+  // "Credit …" keeps its long-standing meaning of a figure credit wherever it appears.
+  expect(withoutFigure!.creditLines).toEqual(['Credit for above diagrams: Example Atlas']);
+});
+
+test('a credit printed among the question lines is not repeated after them', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. What does the image show?')}
+    ${paragraph('', { drawing: true })}
+    ${paragraph('Credit: Example Atlas')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Credits');
+
+  expect(analysis.questions[0]!.bodyLines).toContain('Credit: Example Atlas');
+  expect(analysis.questions[0]!.creditLines).toEqual([]);
+});
+
+test('reads the hyphens and symbols Word stores as elements instead of dropping them', () => {
+  const xml = `<w:document><w:body><w:p>
+    <w:r><w:t>well</w:t></w:r><w:r><w:noBreakHyphen/></w:r><w:r><w:t>known at 37</w:t></w:r>
+    <w:r><w:sym w:font="Symbol" w:char="F0B0"/></w:r><w:r><w:t>C, </w:t></w:r>
+    <w:r><w:sym w:font="Symbol" w:char="F061"/></w:r><w:r><w:t>-blocker 5 </w:t></w:r>
+    <w:r><w:sym w:font="Symbol" w:char="F0B1"/></w:r><w:r><w:t> 1, 10</w:t></w:r>
+    <w:r><w:sym w:font="Calibri" w:char="2013"/></w:r><w:r><w:t>20, hy</w:t></w:r><w:r><w:softHyphen/></w:r><w:r><w:t>phen</w:t></w:r>
+  </w:p></w:body></w:document>`;
+
+  expect(extractSOTParagraphs(xml)[0]!.text).toBe('well-known at 37°C, α-blocker 5 ± 1, 10–20, hyphen');
+});
+
+test('lists only the addresses the document makes hyperlinks', () => {
+  const relationships = `<Relationships>
+    <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.test/linked?a=1&amp;b=2" TargetMode="External"/>
+    <Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  </Relationships>`;
+  const xml = `<w:p><w:hyperlink r:id="rId5"><w:r><w:t>linked</w:t></w:r></w:hyperlink></w:p>
+    <w:p><w:r><w:instrText xml:space="preserve"> HYPERLINK "https://example.test/field" </w:instrText></w:r></w:p>
+    <w:p><w:fldSimple w:instr=" HYPERLINK &quot;https://example.test/simple&quot; "><w:r><w:t>simple</w:t></w:r></w:fldSimple></w:p>
+    <w:p><w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>https://example.test/typed</w:t></w:r></w:p>`;
+
+  expect(hyperlinkTargets(xml, relationships)).toEqual([
+    'https://example.test/linked?a=1&b=2',
+    'https://example.test/field',
+    'https://example.test/simple'
+  ]);
 });

@@ -93,7 +93,7 @@ async function main(): Promise<void> {
     if (awaitedAEPath) ae = await awaitAEJson(awaitedAEPath, loadAEStage, { timeoutMs: aeWaitMs });
     // A plan that arrived late is held to the same rule: every rename lands on a reviewed title.
     if (explicitRenames && ae && awaitedAEPath) assertRenamesFollowPlan(explicitRenames, ae.plan);
-    // An earlier chain titled "AE Case 1 Q1 to Q4" is the same chain as "AE Case 1 Q1-4", renamed in place.
+    // An earlier chain titled "AE Case 1 Q1 to Q4" is the same chain as "AE Case 1 Q1-Q4", renamed in place.
     const renames = ae && copiedGraph ? withRangeSpellingRenames(copiedGraph, ae.plan, config.lessonTitle, explicitRenames) : explicitRenames;
     if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);
     const expectations = ae && copiedGraph

@@ -31,7 +31,9 @@ def _show(row: dict) -> str:
         f"Elentra event {row['event_id'] or '(none)'}",
         f"Lesson ID {row['lesson_id'] or '(none)'}",
     ]
-    return " | ".join(parts)
+    shown = " | ".join(parts)
+    problem = row.get("title_date_problem")
+    return f"{shown}\n    DATE MISMATCH: {problem}" if problem else shown
 
 
 def main() -> None:

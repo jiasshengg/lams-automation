@@ -367,13 +367,37 @@ test('drops a full stop printed after a mark annotation only when the sentence a
   expect(plan.nodes[0]!.questions[1]!.promptHtml).toContain('<div>Explain your reasoning.</div>');
 });
 
-test('writes a web address in the prompt as a clickable link', () => {
-  const input = validInput();
+test('writes a web address the document hyperlinks as a clickable link', () => {
+  const input = { ...validInput(), linkedUrls: ['https://example.test/paper?a=1&b=2'] };
   input.nodes[0]!.questions[1]!.prompt = 'QUESTION 2\nRead https://example.test/paper?a=1&b=2. Then explain.';
 
   expect(buildAEPlan(input).nodes[0]!.questions[1]!.promptHtml).toContain(
     '<div>Read <a href="https://example.test/paper?a=1&amp;b=2">https://example.test/paper?a=1&amp;b=2</a>. Then explain.</div>'
   );
+});
+
+test('keeps a web address the document only prints as text, with its own emphasis', () => {
+  const input = validInput();
+  input.nodes[0]!.questions[1]!.prompt = 'QUESTION 2\nImage from <u>https://example.test/figure</u>. Then explain.';
+
+  const html = buildAEPlan(input).nodes[0]!.questions[1]!.promptHtml;
+  expect(html).toContain('<div>Image from <u>https://example.test/figure</u>. Then explain.</div>');
+  expect(html).not.toContain('<a ');
+});
+
+test('titles and heads a lettered part with the label the document gives it', () => {
+  const input = validInput();
+  Object.assign(input.nodes[0]!.questions[1]!, { label: '1b', prompt: '1b. Explain your reasoning.' });
+
+  const built = buildAEPlan(input).nodes[0]!.questions[1]!;
+  expect(built.number).toBe(2);
+  expect(built.title).toBe('Question 1b');
+  expect(built.promptHtml).toContain('<div>QUESTION 1b</div>');
+  expect(built.promptHtml).not.toContain('QUESTION 2');
+
+  const invalid = validInput();
+  Object.assign(invalid.nodes[0]!.questions[1]!, { label: 'part b' });
+  expect(() => buildAEPlan(invalid)).toThrow('label must be a number with an optional part letter');
 });
 
 test('every question opens with its LAMS QUESTION heading, however the document numbered it', () => {

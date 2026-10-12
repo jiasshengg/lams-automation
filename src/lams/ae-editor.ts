@@ -12,7 +12,9 @@ import {
   MAX_MARK_INPUT,
   openPrintView,
   QUESTION_TITLE,
-  REQUIRED_TOGGLE
+  readRequiredState,
+  REQUIRED_TOGGLE,
+  setAnswerRequired
 } from './irat-editor.js';
 
 const QUESTION_MODAL = '#qb-question-authoring-modal';
@@ -98,6 +100,7 @@ export class LamsAEEditor {
       }
       importedImages += assets.length;
     }
+    await this.applyAnswerRequired(activityFrame, nodePlan);
 
     await applyAEActivitySettings(this.page, { commit: true, actionTimeoutMs: this.timeoutMs });
     await this.applyAttemptSettings(activityFrame);
@@ -252,19 +255,27 @@ export class LamsAEEditor {
       await mark.fill(String(question.marks));
       await mark.blur();
     }
-    const toggle = row.locator(REQUIRED_TOGGLE);
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const actual = await toggle.evaluate((element) =>
-        element.classList.contains('text-danger') ? true : element.classList.contains('text-muted') ? false : null
-      );
-      if (actual === question.answerRequired) break;
-      await toggle.click();
-      await toggle.evaluate((element) => new Promise<void>((resolve) => {
-        const poll = () => element.classList.contains('text-danger') || element.classList.contains('text-muted')
-          ? resolve()
-          : setTimeout(poll, 50);
-        poll();
-      }), undefined, { timeout: this.timeoutMs }).catch(() => undefined);
+  }
+
+  /**
+   * Sets "answer required" (the red asterisk) for every question of the node in one pass, after
+   * the last question editor has closed, exactly as the iRAT editor does. Saving a question
+   * redraws the reference list, and a redraw that lands after a toggle restores the flag it had,
+   * so toggling question by question left some asterisks off. Each row is then read back.
+   */
+  private async applyAnswerRequired(activityFrame: Frame, nodePlan: AENodePlan): Promise<void> {
+    for (const question of nodePlan.questions) {
+      const toggle = (await exactQuestionRow(activityFrame, question.title, this.timeoutMs)).locator(REQUIRED_TOGGLE);
+      const stored = await toggle.evaluate(readRequiredState);
+      if (stored === null) throw new Error(`Cannot read the answer-required state of AE question "${question.title}".`);
+      await setAnswerRequired(this.page, toggle, stored, question.answerRequired, question.title, this.timeoutMs);
+    }
+    for (const question of nodePlan.questions) {
+      const toggle = (await exactQuestionRow(activityFrame, question.title, this.timeoutMs)).locator(REQUIRED_TOGGLE);
+      const stored = await toggle.evaluate(readRequiredState);
+      if (stored !== question.answerRequired) {
+        throw new Error(`AE question "${question.title}" shows answer required as ${String(stored)}; expected ${question.answerRequired}.`);
+      }
     }
   }
 

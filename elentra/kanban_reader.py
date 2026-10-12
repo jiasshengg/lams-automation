@@ -213,6 +213,59 @@ def _starts_with_module(details: str, module: str) -> bool:
     return bool(words) and bool(names) and re.sub(r"[^A-Za-z0-9]", "", words[0]).lower() in names
 
 
+# The session date a LAMS lesson title carries, written DDMMYY: "FOM TBL14 151026 2026Y1".
+_TITLE_DATE = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)")
+_MONTHS = {name: number for number, name in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
+
+
+def _sheet_date(cell: str) -> tuple[int, int, int | None] | None:
+    """
+    (day, month, year or None) from the sheet's Date column: "15/10/2026", "15-10-26",
+    "2026-10-15", "15 Oct 2026", "Thu 15-Oct-26", or "15/10" with no year. None when it reads as
+    none of these, so a date nobody can be sure of is never compared.
+    """
+    text = " ".join(str(cell or "").split()).lower()
+    iso = re.search(r"(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)", text)
+    if iso:
+        return int(iso.group(3)), int(iso.group(2)), int(iso.group(1)) % 100
+    numeric = re.search(r"(?<!\d)(\d{1,2})[-/.](\d{1,2})(?:[-/.](\d{2}|\d{4}))?(?!\d)", text)
+    if numeric:
+        year = numeric.group(3)
+        return int(numeric.group(1)), int(numeric.group(2)), (int(year) % 100 if year else None)
+    named = re.search(r"(?<!\d)(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]{3})[a-z]*\.?(?:[\s,-]+(\d{2}|\d{4}))?(?!\d)", text)
+    if named and named.group(2) in _MONTHS:
+        year = named.group(3)
+        return int(named.group(1)), _MONTHS[named.group(2)], (int(year) % 100 if year else None)
+    return None
+
+
+def title_date_problem(title: str, date_cell: str) -> str | None:
+    """
+    Why a lesson title's DDMMYY date disagrees with the row's Date column, or None when they agree
+    or either is missing. A copied lesson keeps last year's date in its title ("151025" for a
+    session on 15 Oct 2026), so a disagreement is reported, never corrected: either the title or
+    the sheet could be the one that is wrong, and only the user can say which.
+    """
+    stated = _TITLE_DATE.search(title or "")
+    scheduled = _sheet_date(date_cell)
+    if not stated or not scheduled:
+        return None
+    day, month, year = (int(part) for part in stated.groups())
+    if not (1 <= day <= 31 and 1 <= month <= 12):
+        return None
+    expected_day, expected_month, expected_year = scheduled
+    same_year = expected_year is None or expected_year == year
+    if (day, month) == (expected_day, expected_month) and same_year:
+        return None
+    expected = f"{expected_day:02d}{expected_month:02d}" + (f"{expected_year:02d}" if expected_year is not None else "YY")
+    return (
+        f'The title "{title}" carries the date {stated.group(0)}, but the Kanban Date column says '
+        f'"{" ".join(str(date_cell).split())}" ({expected}). Confirm the correct date with the user '
+        "before copying, renaming, or adding Elentra links."
+    )
+
+
 def describe_row(tab_name: str, idx: int, row: dict) -> dict:
     """Everything the flow needs to choose and start one row."""
     lines = _detail_lines(row.get(DETAILS_COL, ""))
@@ -226,6 +279,7 @@ def describe_row(tab_name: str, idx: int, row: dict) -> dict:
         "session": lines[0] if lines else "",
         "lesson_title": lines[1] if len(lines) > 1 else None,
         "date": row.get("Date", "").strip(),
+        "title_date_problem": title_date_problem(lines[1] if len(lines) > 1 else "", row.get("Date", "")),
         "event_id": _build_event_id(row),
         "lesson_id": _as_id(row.get(LESSON_ID_COL)),
     }
@@ -313,10 +367,12 @@ def get_resource_ready_lessons(tab: str) -> list[dict]:
         if not lesson_id:
             continue  # Lesson ID cell filled but not a usable numeric id
 
+        title = _build_title(row)
         lessons.append({
             "id": event_id,
             "lesson_id": lesson_id,
-            "title": _build_title(row),
+            "title": title,
+            "title_date_problem": title_date_problem(title, row.get("Date", "")),
             "monitoring_link": f"{MONITORING_LINK_BASE}{lesson_id}",
             "learner_link": f"{LEARNER_LINK_BASE}{lesson_id}",
             "sheet": tab_name,

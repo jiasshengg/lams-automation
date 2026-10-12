@@ -15,6 +15,8 @@ export interface AEDraftPlan {
   sourceDocx?: string;
   /** Recorded so the Source-of-Truth check reads the document the same way the draft did. */
   columnQuestions?: boolean;
+  /** The addresses the document hyperlinks; every other address in a prompt stays plain text. */
+  linkedUrls?: string[];
   breakMarkerCount: number;
   _review: string[];
   nodes: AEDraftNode[];
@@ -28,6 +30,8 @@ export interface AEDraftNode {
 
 export interface AEDraftQuestion {
   number: number;
+  /** Set when the document labels the question otherwise than LAMS counts it ("12b"). */
+  label?: string;
   type: 'mcq' | 'essay';
   prompt: string;
   marks?: number;
@@ -78,6 +82,7 @@ export function buildAEDraft(analysis: AESOTAnalysis, options: AEDraftOptions = 
       const placed = placeRenderedFigures(prompt, options);
       const draft: AEDraftQuestion = {
         number,
+        ...(question.label === String(number) ? {} : { label: question.label }),
         type: question.type === 'open-response' ? 'essay' : 'mcq',
         prompt: placed.prompt
       };
@@ -113,6 +118,7 @@ export function buildAEDraft(analysis: AESOTAnalysis, options: AEDraftOptions = 
     sourceLabel: analysis.sourceLabel,
     ...(options.sourceDocx ? { sourceDocx: options.sourceDocx } : {}),
     ...(options.columnQuestions ? { columnQuestions: true } : {}),
+    ...(analysis.linkedUrls.length > 0 ? { linkedUrls: analysis.linkedUrls } : {}),
     breakMarkerCount: analysis.breakMarkerCount,
     _review: [
       'DRAFT transcribed from the DOCX. Not authority for LAMS; confirm every title, answer key, and mark.',

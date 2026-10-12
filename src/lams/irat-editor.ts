@@ -52,6 +52,48 @@ export function readRequiredState(element: Element): boolean | null {
 
 /** Clicks needed to converge when LAMS leaves a toggle's state unconfirmed. */
 const REQUIRED_TOGGLE_ATTEMPTS = 3;
+
+/**
+ * Brings one "Answer required" toggle to `wanted`, starting from the `stored` value its row was
+ * drawn with, and fails unless LAMS confirms it. A toggle that already holds the value is never
+ * clicked. Shared by the iRAT and AE editors: both write the flag on the same reference list.
+ */
+export async function setAnswerRequired(
+  page: Page,
+  toggle: Locator,
+  stored: boolean,
+  wanted: boolean,
+  title: string,
+  timeoutMs: number
+): Promise<void> {
+  let current = stored;
+  for (let attempt = 0; attempt < REQUIRED_TOGGLE_ATTEMPTS && current !== wanted; attempt += 1) {
+    current = await toggleAnswerRequired(page, toggle, timeoutMs);
+  }
+  if (current !== wanted) {
+    throw new Error(`LAMS kept "answer required" at ${String(current)} for "${title}"; expected ${wanted}.`);
+  }
+}
+
+/**
+ * Clicks one "Answer required" toggle and returns the value LAMS stored, taken from the
+ * toggle's own AJAX reply rather than from the class it may or may not stamp afterwards.
+ * The handler only stamps a class when the reply matches the state it predicted, so a
+ * reply that arrives late reads as "nothing happened" and a second click silently flips
+ * the flag back. The reply itself is the only authoritative answer.
+ */
+async function toggleAnswerRequired(page: Page, toggle: Locator, timeoutMs: number): Promise<boolean> {
+  const reply = page.waitForResponse((response) => response.url().includes('toggleQuestionRequired.do'), { timeout: timeoutMs });
+  // Dispatched rather than clicked: hovering one toggle leaves a Bootstrap
+  // "Answer required" tooltip floating over the next row's button, and a real click
+  // then lands on the tooltip. The inline onclick handler runs either way.
+  await toggle.dispatchEvent('click');
+  const body = (await (await reply).text()).trim();
+  if (body !== 'true' && body !== 'false') {
+    throw new Error(`toggleQuestionRequired returned an unreadable state: ${JSON.stringify(body.slice(0, 100))}`);
+  }
+  return body === 'true';
+}
 /**
  * The question editor opens as an unnamed iframe inside the activity frame. This LAMS
  * build no longer uses ThickBox, so "#TB_iframeContent" never appears; the iframe is
@@ -422,39 +464,10 @@ export class LamsIratEditor implements IratEditor {
       const { question, toggle: requiredToggle } = item;
       // The rendered btn-outline-* class already states the stored value, so a question
       // that is already correct is never clicked.
-      let stored = item.stored;
-      for (let attempt = 0; attempt < REQUIRED_TOGGLE_ATTEMPTS && stored !== question.mandatory; attempt += 1) {
-        if (attempt === 0) changed.push(question.title);
-        stored = await this.toggleAnswerRequired(requiredToggle);
-      }
-      if (stored !== question.mandatory) {
-        throw new Error(`LAMS kept "answer required" at ${String(stored)} for "${question.title}"; expected ${question.mandatory}.`);
-      }
+      if (item.stored !== question.mandatory) changed.push(question.title);
+      await setAnswerRequired(this.page, requiredToggle, item.stored, question.mandatory, question.title, this.timeoutMs);
     }
     return changed;
-  }
-
-  /**
-   * Clicks one "Answer required" toggle and returns the value LAMS stored, taken from the
-   * toggle's own AJAX reply rather than from the class it may or may not stamp afterwards.
-   * The handler only stamps a class when the reply matches the state it predicted, so a
-   * reply that arrives late reads as "nothing happened" and a second click silently flips
-   * the flag back. The reply itself is the only authoritative answer.
-   */
-  private async toggleAnswerRequired(toggle: Locator): Promise<boolean> {
-    const reply = this.page.waitForResponse(
-      (response) => response.url().includes('toggleQuestionRequired.do'),
-      { timeout: this.timeoutMs }
-    );
-    // Dispatched rather than clicked: hovering one toggle leaves a Bootstrap
-    // "Answer required" tooltip floating over the next row's button, and a real click
-    // then lands on the tooltip. The inline onclick handler runs either way.
-    await toggle.dispatchEvent('click');
-    const body = (await (await reply).text()).trim();
-    if (body !== 'true' && body !== 'false') {
-      throw new Error(`toggleQuestionRequired returned an unreadable state: ${JSON.stringify(body.slice(0, 100))}`);
-    }
-    return body === 'true';
   }
 
   async updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void> {

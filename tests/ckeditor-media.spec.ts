@@ -43,15 +43,25 @@ test('an empty upload response is reported as a failure, not a stored image', ()
   expect(() => parseCkEditorUploadResponse('')).toThrow(/empty upload response/);
 });
 
-test('a source link under a figure is its caption and stays clickable', () => {
+test('a source link under a figure is its caption and stays clickable when the document links it', () => {
   expect(isCaption('https://pubmed.ncbi.nlm.nih.gov/26941407/')).toBe(true);
   expect(isCaption('Visit the source', '<w:hyperlink r:id="rId5"><w:r><w:t>Visit the source</w:t></w:r></w:hyperlink>')).toBe(true);
   expect(isCaption('A plain first option')).toBe(false);
   expect(imageHtml([{
     url: 'https://example.test/a.png', altText: '', widthPx: null, placement: 'after' as const,
-    caption: '<u>https://pubmed.ncbi.nlm.nih.gov/26941407/</u>', source: 'sot'
+    caption: '<u>https://pubmed.ncbi.nlm.nih.gov/26941407/</u>', captionLinks: ['https://pubmed.ncbi.nlm.nih.gov/26941407/'], source: 'sot'
   }])).toBe(
     '<div><img src="https://example.test/a.png" alt=""></div>' +
     '<div><u><a href="https://pubmed.ncbi.nlm.nih.gov/26941407/">https://pubmed.ncbi.nlm.nih.gov/26941407/</a></u></div>'
+  );
+});
+
+test('an address a caption only prints, underlined or not, stays text', () => {
+  expect(imageHtml([{
+    url: 'https://example.test/a.png', altText: '', widthPx: null, placement: 'after' as const,
+    caption: 'Credit for above diagrams: <u>http://example.test/figure</u>', source: 'sot'
+  }])).toBe(
+    '<div><img src="https://example.test/a.png" alt=""></div>' +
+    '<div>Credit for above diagrams: <u>http://example.test/figure</u></div>'
   );
 });
