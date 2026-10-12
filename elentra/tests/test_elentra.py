@@ -319,3 +319,24 @@ class SessionTest(unittest.TestCase):
                 self.assertFalse(legacy.exists())
                 session._seed_from_legacy_snapshot(context)  # nothing left to move
             self.assertEqual(len(context.added), 1)
+
+
+class TitleDateTest(unittest.TestCase):
+    """A lesson title carrying last year's date (DDMMYY) is reported, never corrected."""
+
+    def test_agreeing_dates_are_not_a_problem(self):
+        for cell in ("15/10/2026", "15-10-26", "2026-10-15", "Thu 15 Oct 2026", "15-Oct-26", "15/10"):
+            self.assertIsNone(kanban_reader.title_date_problem("FOM TBL14 151026 2026Y1", cell), cell)
+
+    def test_a_year_carried_over_from_last_year_is_reported(self):
+        problem = kanban_reader.title_date_problem("FOM TBL14 151025 2026Y1", "15/10/2026")
+        self.assertIn("151025", problem)
+        self.assertIn("151026", problem)
+
+    def test_a_different_day_is_reported(self):
+        self.assertIsNotNone(kanban_reader.title_date_problem("DHPM TBL2.1 131026 2025Y2", "14 Oct 2026"))
+
+    def test_nothing_to_compare_is_not_a_problem(self):
+        self.assertIsNone(kanban_reader.title_date_problem("FOM TBL14 2026Y1", "15/10/2026"))
+        self.assertIsNone(kanban_reader.title_date_problem("FOM TBL14 151026 2026Y1", ""))
+        self.assertIsNone(kanban_reader.title_date_problem("FOM TBL14 151026 2026Y1", "TBC"))

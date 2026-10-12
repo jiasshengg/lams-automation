@@ -1,5 +1,5 @@
 import { isCaption } from '../docx/media.js';
-import { BREAK_MARKER, CASE_HEADING, FACULTY_ONLY, NUMBERED_STEM, numberQuestionStems } from '../docx/question-numbering.js';
+import { BREAK_MARKER, CASE_HEADING, FACULTY_ONLY, NUMBERED_STEM, scanQuestionStems } from '../docx/question-numbering.js';
 import { sliceInlineHtml, stripOptionPrefixHtml, withoutUniformInlineTag } from './inline-html.js';
 import { IMAGE_SLOT_LINE, renderSlotLine } from './prompt-lines.js';
 import { extractSOTParagraphs, readDocumentXmlFromDocx, readSOTDocxParts, type SOTParagraph } from './sot-paragraphs.js';
@@ -18,6 +18,12 @@ export interface AEObservedOption {
 
 export interface AEQuestionObservation {
   number: number;
+  /**
+   * The question as the document labels it: "12a", "12b" for the lettered parts of one question,
+   * and the document's own number for every other question, so a question after "12c" is still
+   * "13" even though LAMS counts it fifteenth.
+   */
+  label: string;
   type: ObservedAEQuestionType;
   explicitMarks: number | null;
   caseNumber: number | null;
@@ -83,6 +89,8 @@ export interface AESOTAnalysis {
   nodes: AENodeObservation[];
   gates: AEGateObservation[];
   questions: AEQuestionObservation[];
+  /** The web addresses the document makes clickable hyperlinks. */
+  linkedUrls: string[];
   requestVariables: {
     expectedAENodes: number;
     expectedAEGates: number;
@@ -104,6 +112,14 @@ const DECLARED_LABELS = /^(?:select|choose)\b[^:]*:\s*([A-Z](?:\s*,\s*[A-Z])+)/i
 const HEDGED_ANSWER = /\bpossibl\w*\b/i;
 /** "Credit for above diagrams: http://…" — the source of the figures a question shows. */
 const CREDIT_LINE = /^Credit\b/i;
+/**
+ * The other ways a document attributes a figure: "Image source: …", "Figure courtesy of …",
+ * "Courtesy of …", "Adapted from …", "Reproduced with permission from …", "© …". A rationale cites
+ * its own sources in the same words, so these count as a figure's credit only for a question that
+ * shows a figure.
+ */
+const FIGURE_ATTRIBUTION =
+  /^(?:(?:image|figure|fig\.|photo(?:graph)?|picture|diagram|chart|graph|illustration|table|video)s?\s+(?:credits?|sources?|courtesy|adapted|reproduced|modified|taken|from|by)\b|sources?\s*(?:of|for)\s+(?:the\s+)?(?:above\s+|below\s+)?(?:image|figure|photo|diagram|chart|graph|picture|illustration)s?\b|courtesy\s+of\b|(?:adapted|reproduced|modified|reprinted|taken|retrieved|obtained)\s+(?:with\s+permission\s+)?from\b|©)/i;
 /** The ruled line a paper answer is written on; LAMS gives the learner its own answer box. */
 const ANSWER_SPACE = /^[.…\s]+$/;
 /** "Diagram A", "ECG C." — a figure caption that labels one option. */
@@ -156,6 +172,8 @@ export interface AEAnalysisOptions {
    * numbers it prints for later questions, so including them renumbers everything after them.
    */
   columnQuestions?: boolean;
+  /** The addresses the document hyperlinks (`hyperlinkTargets`); only these become links. */
+  linkedUrls?: readonly string[];
 }
 
 export function analyzeAESOT(
@@ -169,7 +187,7 @@ export function analyzeAESOT(
   const caseNumbers = caseNumberByParagraph(relevant);
   // Numbered across the whole document, so an unpunctuated "3 Increased LDH…" is only a stem
   // when it is the next number in sequence.
-  const stemNumbers = numberQuestionStems(relevant.map((paragraph) => paragraph.text), {
+  const { numbers: stemNumbers, letters: stemLetters } = scanQuestionStems(relevant.map((paragraph) => paragraph.text), {
     inferUnnumbered: false,
     bold: relevant.map((paragraph) => paragraph.bold),
     listItems: relevant.map((paragraph) => paragraph.listItem)
@@ -189,7 +207,8 @@ export function analyzeAESOT(
   // Every question the document opens, in reading order: its numbered stems and the columns of
   // any matching table. LAMS numbers questions 1..N, so that order is what the numbers follow.
   const structuralProblems: string[] = [];
-  const starts = questionStartsInOrder(relevant, stemNumbers, structuralProblems, options.columnQuestions === true);
+  const starts = questionStartsInOrder(relevant, stemNumbers, stemLetters, structuralProblems, options.columnQuestions === true);
+  const labels = questionLabels(starts);
   const { groups, facultySections } = withoutFacultySections(allGroups, starts);
   const renumbered = starts
     .map((start, index) =>
@@ -216,6 +235,7 @@ export function analyzeAESOT(
       startAt(groupStart + paragraphIndex).map((start) => ({
         paragraphIndex,
         number: starts.indexOf(start) + 1,
+        label: labels[starts.indexOf(start)]!,
         ...(start.column ? { column: start.column } : {})
       }))
     );
@@ -231,19 +251,22 @@ export function analyzeAESOT(
     const leadInStarts = slices.map((slice, questionIndex) => (questionIndex < slices.length - 1 ? leadInStart(slice) : slice.length));
     const nodeQuestions = questionStarts.map((start, questionIndex) => {
       if (start.column) {
-        const observation = columnQuestion(start.column, start.number, caseNumbers[offset + groupStart + start.paragraphIndex] ?? null);
+        const observation = columnQuestion(start.column, start.number, start.label, caseNumbers[offset + groupStart + start.paragraphIndex] ?? null);
         questions.push(observation);
         return observation;
       }
       const previous = questionIndex > 0 ? slices[questionIndex - 1]!.slice(leadInStarts[questionIndex - 1]) : [];
       const observed = observeQuestion(
         slices[questionIndex]!.slice(0, leadInStarts[questionIndex]),
-        start.number,
+        { number: start.number, label: start.label },
         caseNumbers[offset + groupStart + start.paragraphIndex] ?? null,
         {
           leadInLines: promptLines(previous),
           blankLinesBeforeStem: group[start.paragraphIndex]!.blankLinesBefore,
-          declaredLabels: declaredLabelsBefore(group, start.paragraphIndex)
+          declaredLabels: declaredLabelsBefore(group, start.paragraphIndex),
+          // The case reading above the node's first question, or the lead-in handed forward to a
+          // later one, can hold the figure this question's credit names.
+          figureBeforeStem: hasFigure(questionIndex === 0 ? group.slice(0, start.paragraphIndex) : previous)
         }
       );
       questions.push(observed.observation);
@@ -254,12 +277,14 @@ export function analyzeAESOT(
     const questionNumbers = questionStarts.map((question) => question.number);
     const firstQuestionNumber = questionNumbers[0]!;
     const lastQuestionNumber = questionNumbers.at(-1)!;
+    const firstLabel = questionStarts[0]!.label;
+    const lastLabel = questionStarts.at(-1)!.label;
     return {
       index: index + 1,
       questionNumbers,
       firstQuestionNumber,
       lastQuestionNumber,
-      questionRange: formatQuestionRange(firstQuestionNumber, lastQuestionNumber),
+      questionRange: formatQuestionRange(firstLabel, lastLabel),
       caseNumbers: unique(
         nodeQuestions.map((question) => question.caseNumber).filter((value): value is number => value !== null)
       ),
@@ -267,12 +292,7 @@ export function analyzeAESOT(
       contextHtml:
         index === 0 && precedingCaseIndex < 0 ? [] : promptLines(group.slice(0, questionStarts[0]!.paragraphIndex)),
       imageCount: group.reduce((sum, paragraph) => sum + paragraph.imageCount, 0),
-      suggestedTitle: suggestNodeTitle(
-        nodeQuestions[0]!.caseNumber,
-        nodeQuestions.at(-1)!.caseNumber,
-        firstQuestionNumber,
-        lastQuestionNumber
-      )
+      suggestedTitle: suggestNodeTitle(nodeQuestions[0]!.caseNumber, nodeQuestions.at(-1)!.caseNumber, firstLabel, lastLabel)
     };
   });
 
@@ -351,6 +371,7 @@ export function analyzeAESOT(
     nodes,
     gates,
     questions,
+    linkedUrls: [...(options.linkedUrls ?? [])],
     requestVariables: {
       expectedAENodes: groups.length,
       expectedAEGates: separatingBreaks
@@ -435,11 +456,13 @@ function withoutFacultySections(
 }
 
 /**
- * The LAMS naming convention: a hyphen joins the ends of a range, whether both are in one case
- * ("AE Case 3 Q3-6") or the range runs across two ("AE Case 5 Q14-Case 6 Q15"). One question names
- * itself ("AE Case 2 Q6"). Every AE gate then carries the title of the node it leads into.
+ * The LAMS naming convention: a hyphen joins the ends of a range and each end names its question
+ * the same way, whether both are in one case ("AE Case 3 Q3-Q6") or the range runs across two
+ * ("AE Case 5 Q14-Case 6 Q15"). One question names itself ("AE Case 2 Q6"). The ends are the
+ * questions' labels, so lettered parts keep their letters ("AE Case 4 Q12a-Q12c"). Every AE gate
+ * then carries the title of the node it leads into.
  */
-function suggestNodeTitle(firstCase: number | null, lastCase: number | null, first: number, last: number): string {
+function suggestNodeTitle(firstCase: number | null, lastCase: number | null, first: string, last: string): string {
   // Questions ahead of the first Case heading carry no case, but a range that runs into a Case
   // still names it at that end ("AE Q1-Case 2 Q6").
   if (firstCase === null && lastCase !== null) return `AE Q${first}-Case ${lastCase} Q${last}`;
@@ -763,19 +786,8 @@ function romanListParagraphs(paragraphs: SOTParagraph[]): Set<SOTParagraph> {
  * as options rather than repeated in the prompt.
  */
 function learnerBody(paragraphs: SOTParagraph[], options: OptionEntry[]): SOTParagraph[] {
-  const answer = paragraphs.findIndex(
-    (paragraph) => ANSWER_LINE.test(paragraph.text) || RATIONALE_LINE.test(paragraph.text)
-  );
-  // Nothing after the last option is for the learner: a document that states no "Answer" line
-  // still explains itself there, and that explanation is the answer.
-  let lastOption = -1;
-  paragraphs.forEach((paragraph, index) => {
-    if (options.some((option) => option.paragraph === paragraph || option.table?.paragraph === paragraph)) lastOption = index;
-  });
-  const ends = [answer, lastOption + 1].filter((index) => index > 0);
-  const end = ends.length > 0 ? Math.min(...ends) : paragraphs.length;
   return paragraphs
-    .slice(1, end)
+    .slice(1, learnerBodyEnd(paragraphs, options))
     // A figure's paragraph can hold nothing but the indentation typed around the picture.
     .filter((paragraph) => paragraph.imageCount > 0 || !ANSWER_SPACE.test(paragraph.text))
     .filter((paragraph) => options.every((option) => option.paragraph !== paragraph || option.caption === true))
@@ -803,9 +815,34 @@ function withoutRender(paragraph: SOTParagraph): SOTParagraph {
   return rest;
 }
 
-/** The credits the document prints for the figures this question shows. */
-function creditLines(paragraphs: SOTParagraph[]): SOTParagraph[] {
-  return paragraphs.slice(1).filter((paragraph) => CREDIT_LINE.test(paragraph.text));
+/** Where the learner's part of a question ends: at its answer key, or after its last option. */
+function learnerBodyEnd(paragraphs: SOTParagraph[], options: OptionEntry[]): number {
+  const answer = paragraphs.findIndex(
+    (paragraph) => ANSWER_LINE.test(paragraph.text) || RATIONALE_LINE.test(paragraph.text)
+  );
+  // Nothing after the last option is for the learner: a document that states no "Answer" line
+  // still explains itself there, and that explanation is the answer.
+  let lastOption = -1;
+  paragraphs.forEach((paragraph, index) => {
+    if (options.some((option) => option.paragraph === paragraph || option.table?.paragraph === paragraph)) lastOption = index;
+  });
+  const ends = [answer, lastOption + 1].filter((index) => index > 0);
+  return ends.length > 0 ? Math.min(...ends) : paragraphs.length;
+}
+
+/**
+ * The credits the document prints for the figures a question shows, after its answer key. A credit
+ * printed among the question's own lines is already part of the prompt and is not repeated.
+ */
+function creditLines(paragraphs: SOTParagraph[], bodyEnd: number, showsFigure: boolean): SOTParagraph[] {
+  return paragraphs
+    .slice(Math.max(bodyEnd, 1))
+    .filter((paragraph) => CREDIT_LINE.test(paragraph.text) || (showsFigure && FIGURE_ATTRIBUTION.test(paragraph.text)));
+}
+
+/** A picture or rendered figure among the lines the learner reads. */
+function hasFigure(paragraphs: SOTParagraph[]): boolean {
+  return paragraphs.some((paragraph) => paragraph.imageCount > 0 || paragraph.render !== undefined);
 }
 
 /** One column of a matching table, read as its own question. */
@@ -823,6 +860,8 @@ interface QuestionStart {
   paragraphIndex: number;
   /** The number the document prints, when it prints one. */
   printedNumber?: number;
+  /** The letter of a lettered part ("12b." is "b"). */
+  letter?: string;
   column?: ColumnQuestion;
 }
 
@@ -833,6 +872,7 @@ interface QuestionStart {
 function questionStartsInOrder(
   paragraphs: SOTParagraph[],
   stemNumbers: (number | null)[],
+  stemLetters: (string | null)[],
   problems: string[],
   columnQuestions: boolean
 ): QuestionStart[] {
@@ -840,7 +880,8 @@ function questionStartsInOrder(
   paragraphs.forEach((paragraph, index) => {
     const printed = stemNumbers[index];
     if (printed !== null && printed !== undefined) {
-      starts.push({ paragraphIndex: index, printedNumber: printed });
+      const letter = stemLetters[index];
+      starts.push({ paragraphIndex: index, printedNumber: printed, ...(letter ? { letter } : {}) });
       return;
     }
     const columns = columnQuestionsAt(paragraphs, index, problems);
@@ -929,9 +970,10 @@ function labelRange(first: string, last: string): string[] {
   return to > from ? Array.from({ length: to - from + 1 }, (_value, index) => String.fromCharCode(from + index)) : [];
 }
 
-function columnQuestion(column: ColumnQuestion, number: number, caseNumber: number | null): AEQuestionObservation {
+function columnQuestion(column: ColumnQuestion, number: number, label: string, caseNumber: number | null): AEQuestionObservation {
   return {
     number,
+    label,
     type: column.correctAnswerLabels.length > 1 ? 'multiple-select' : 'single-select',
     explicitMarks: null,
     caseNumber,
@@ -991,9 +1033,9 @@ function labelledFigureSequence(paragraphs: SOTParagraph[]): OptionEntry[] {
 
 function observeQuestion(
   paragraphs: SOTParagraph[],
-  number: number,
+  { number, label }: { number: number; label: string },
   caseNumber: number | null,
-  layout: { leadInLines: string[]; blankLinesBeforeStem: number; declaredLabels: string[] }
+  layout: { leadInLines: string[]; blankLinesBeforeStem: number; declaredLabels: string[]; figureBeforeStem: boolean }
 ): ObservedQuestion {
   const own = collectOptionEntries(paragraphs);
   // A matching question states no options of its own; the labels declared for its group are the
@@ -1017,8 +1059,11 @@ function observeQuestion(
   );
   const stem = paragraphs[0];
   const prompt = stem?.text ?? '';
-  const bodyLines = promptLines(learnerBody(paragraphs, optionParagraphs));
-  const credits = promptLines(creditLines(paragraphs));
+  const body = learnerBody(paragraphs, optionParagraphs);
+  const bodyLines = promptLines(body);
+  const credits = promptLines(
+    creditLines(paragraphs, learnerBodyEnd(paragraphs, optionParagraphs), layout.figureBeforeStem || hasFigure(body))
+  );
   const marksMatch = prompt.match(/\(?\s*(\d+)\s+marks?\s*\)?/i);
   const multipleSelect = /select\s+(?:two|three|four|five|\d+)\b/i.test(prompt) || correctAnswerLabels.length > 1;
   const type: ObservedAEQuestionType =
@@ -1026,6 +1071,7 @@ function observeQuestion(
   return {
     observation: {
       number,
+      label,
       type,
       explicitMarks: marksMatch ? Number(marksMatch[1]) : null,
       caseNumber,
@@ -1068,8 +1114,29 @@ function valueAfterLabel(paragraphs: SOTParagraph[], label: string): string | nu
   return null;
 }
 
-function formatQuestionRange(first: number, last: number): string {
-  return first === last ? `Q${first}` : `Q${first}-${last}`;
+function formatQuestionRange(first: string, last: string): string {
+  return first === last ? `Q${first}` : `Q${first}-Q${last}`;
+}
+
+/**
+ * Each question's label, in reading order. LAMS counts every lettered part as a question of its
+ * own, so the document's numbers trail that count by one for every part after the first; the
+ * label follows the document. A document that repeats or skips numbers is labelled by the count,
+ * the way its questions have always been numbered.
+ */
+function questionLabels(starts: QuestionStart[]): string[] {
+  let extraParts = 0;
+  let partBase = 0;
+  return starts.map((start, index) => {
+    const sequence = index + 1;
+    if (start.letter === undefined) return String(sequence - extraParts);
+    if (start.letter === 'a') {
+      partBase = sequence - extraParts;
+    } else {
+      extraParts += 1;
+    }
+    return `${partBase}${start.letter}`;
+  });
 }
 
 function formatNumberList(values: number[]): string {

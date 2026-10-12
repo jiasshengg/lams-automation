@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { hyperlinkTargets } from '../docx/hyperlinks.js';
 import { renderTargetId } from '../docx/render-targets.js';
 import { resolveInputFile } from '../input-file.js';
 import { buildAEDraft } from './draft.js';
@@ -9,7 +10,7 @@ export const SKIP_SOT_CHECK_FLAG = '--skip-sot-check';
 
 /**
  * Lists every way a reviewed AE plan departs from its Source-of-Truth: node titles, node and
- * question structure, prompts (paragraphs, blank lines, emphasis, tables), and options.
+ * question structure, question titles, prompts (paragraphs, blank lines, emphasis, tables), and options.
  *
  * Answer keys, marks, and weights are not compared: resolving those is what review is for.
  */
@@ -32,6 +33,9 @@ export function compareAEPlanToSOT(plan: AEPlan, analysis: AESOTAnalysis): strin
     }
     node.questions.forEach((question, questionIndex) => {
       const sourceQuestion = source.questions[questionIndex]!;
+      if (question.title !== sourceQuestion.title) {
+        differences.push(`Question ${question.number} is titled "${question.title}"; the Source-of-Truth labels it "${sourceQuestion.title}".`);
+      }
       if (question.type !== sourceQuestion.type) {
         differences.push(`Question ${question.number} is ${question.type}; the Source-of-Truth makes it ${sourceQuestion.type}.`);
       }
@@ -75,7 +79,8 @@ export async function assertAEPlanMatchesSOT(plan: AEPlan, argv: readonly string
     .flatMap((question) => question.renderedFigures)
     .map((figure) => ({ id: renderTargetId(figure.blocks[0], figure.blocks[1]), kind: figure.kind, firstBlock: figure.blocks[0], lastBlock: figure.blocks[1] }));
   const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout, { renders }), plan.sourceLabel, {
-    columnQuestions: plan.columnQuestions === true
+    columnQuestions: plan.columnQuestions === true,
+    linkedUrls: hyperlinkTargets(documentXml, layout.relationshipsXml)
   });
   const differences = compareAEPlanToSOT(plan, analysis);
   if (differences.length > 0) {

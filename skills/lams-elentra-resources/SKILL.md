@@ -17,7 +17,7 @@ node scripts/run.mjs elentra:kanban --tab '<TAB>' --json
 node scripts/run.mjs elentra:kanban --tab '<TAB>' --details '<TBL/QUIZ DETAILS TEXT>' --json
 ```
 
-Without `--details` it lists every **Can start** row. With it, it matches the TBL/Quiz Details cell or one of its lines exactly, else whole words within it, and succeeds only when exactly one **Can start** row is chosen; otherwise it prints the candidates or the row's status. Each row reports `sheet_row` (the row number in Google Sheets), `status`, `module`, `session` (first line of TBL/Quiz Details), `lesson_title` (its second line, when present), `date`, `event_id`, and `lesson_id`. The [overall workflow](../lams-tbl-authoring/SKILL.md) uses these to start a full flow from the sheet.
+Without `--details` it lists every **Can start** row. With it, it matches the TBL/Quiz Details cell or one of its lines exactly, else whole words within it, and succeeds only when exactly one **Can start** row is chosen; otherwise it prints the candidates or the row's status. Each row reports `sheet_row` (the row number in Google Sheets), `status`, `module`, `session` (first line of TBL/Quiz Details), `lesson_title` (its second line, when present), `date`, `title_date_problem`, `event_id`, and `lesson_id`. `title_date_problem` is set when the DDMMYY date in `lesson_title` disagrees with the row's Date column (a copy keeps last year's date: `151025` for a session on 15 Oct 2026); the text listing prints it as `DATE MISMATCH`. The [overall workflow](../lams-tbl-authoring/SKILL.md) uses these to start a full flow from the sheet.
 
 ## Sign-in
 
@@ -45,7 +45,7 @@ For each ready row the links step adds two Link resources to the Elentra event:
 | Monitoring | `LAMS <lesson title> (Facilitator/CE)` | Optional, hidden from learners, published, no timeframe |
 | Learner | `LAMS <lesson title>` | Required, visible to learners, published, no timeframe |
 
-`<lesson title>` is the TBL/Quiz Details lesson title (its second line when present). It is prefixed with `<Module> - ` only when it does not already start with the module code, so `ANPA CS 1.2.1T …` gives `LAMS ANPA CS 1.2.1T …`, never `LAMS ANPA - ANPA CS …`.
+`<lesson title>` is the TBL/Quiz Details lesson title (its second line when present). A row whose title's DDMMYY date disagrees with its Date column is skipped with `SKIPPED:` and the two dates; ask the user which is right, have the title or the sheet corrected, and run again. Never add links under a title the check has questioned. It is prefixed with `<Module> - ` only when it does not already start with the module code, so `ANPA CS 1.2.1T …` gives `LAMS ANPA CS 1.2.1T …`, never `LAMS ANPA - ANPA CS …`.
 
 The learner link is visible to students, so treat this step like publishing:
 

@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     if (repair && repair.lessonTitle !== config.lessonTitle) throw new Error('Repair plan lessonTitle differs from the requested lesson.');
     if (explicitRenames && explicitRenames.lessonTitle !== config.lessonTitle) throw new Error('Rename plan lessonTitle differs from the requested lesson.');
     const before = await inspectAuthoringGraph(activePage);
-    // An earlier chain titled "AE Case 1 Q1 to Q4" is the same chain as "AE Case 1 Q1-4", renamed in place.
+    // An earlier chain titled "AE Case 1 Q1 to Q4" is the same chain as "AE Case 1 Q1-Q4", renamed in place.
     const renames = withRangeSpellingRenames(before, plan, config.lessonTitle, explicitRenames);
     const expectations = tryExpectedTBLGraph(renames ? projectAERenames(before, renames) : before, config, plan, repair);
     if (renames) console.log(`Authorised AE renames: ${renames.renames.map((rename) => `${rename.type} "${rename.from}" -> "${rename.to}"`).join(', ')}`);

@@ -678,6 +678,11 @@ def main() -> None:
             event_id = lesson["id"]
             base_title = lesson["title"]
             print(f"\n{event_id} — {base_title}")
+            # Learners see this title on the event, so a date carried over from last year's lesson
+            # is stopped here rather than published.
+            if lesson.get("title_date_problem"):
+                print(f"  SKIPPED: {lesson['title_date_problem']}")
+                continue
 
             print("  Checking monitoring + learner links...")
             add_both_links(

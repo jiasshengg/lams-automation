@@ -19,6 +19,11 @@ export interface QuestionImageAsset {
   crop: ImageCrop | null;
   /** Inline HTML of the caption printed under the image, or '' when there is none. */
   caption: string;
+  /**
+   * The addresses the document hyperlinks in that caption. Only these become links; a caption
+   * supplied by hand has none, so its addresses stay the text it gives.
+   */
+  captionLinks?: readonly string[];
   source: string;
 }
 
@@ -153,6 +158,7 @@ function toAsset(image: ReturnType<typeof inspectDocxImages>[number]): QuestionI
     placement: image.placement,
     crop: image.crop,
     caption: image.caption,
+    captionLinks: image.captionLinks,
     source: `${image.sourcePart} (${image.relationshipId})`
   };
 }
@@ -185,6 +191,7 @@ function deduplicate(images: QuestionImageAsset[]): QuestionImageAsset[] {
       ...existing,
       placement: image.placement,
       caption: image.caption !== '' ? image.caption : existing.caption,
+      captionLinks: [...new Set([...(existing.captionLinks ?? []), ...(image.captionLinks ?? [])])],
       altText: image.altText !== '' ? image.altText : existing.altText,
       widthPx: image.widthPx ?? existing.widthPx
     });

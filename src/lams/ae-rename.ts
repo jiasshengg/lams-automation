@@ -79,8 +79,9 @@ export function aeRangeKey(title: string): string {
 }
 
 /**
- * Earlier lessons join an AE range with "to" ("AE Case 1 Q1 to Q4"); the reviewed plan joins it with
- * a hyphen ("AE Case 1 Q1-4"). Both name the same activity, so each existing AE node or gate whose
+ * Earlier lessons join an AE range with "to" ("AE Case 1 Q1 to Q4") or name only its first end
+ * ("AE Case 1 Q1-4"); the reviewed plan joins it with a hyphen and names both ends ("AE Case 1
+ * Q1-Q4"). All name the same activity, so each existing AE node or gate whose
  * title differs from a reviewed title only in that spelling is renamed in place to it. A reviewed
  * title that already exists, or a spelling shared by more than one node, is left alone.
  */

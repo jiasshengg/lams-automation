@@ -4,6 +4,7 @@ import { resolveInputFile } from '../input-file.js';
 import { readParagraphsWithListLabels, readSOTDocxParts } from '../ae/sot-paragraphs.js';
 import type { SOTLayoutParts } from '../ae/sot-layout.js';
 import { paragraphBlocks, withoutCompatibilityFallback, withoutTextBoxes } from './blocks.js';
+import { runCharacterText } from './run-characters.js';
 import { decodeXml, detectCaseHeadings, formatUnresolvedSotWarnings, inspectDocxImages, questionNumbersForParagraphs, type CaseHeadingObservation } from './media.js';
 
 /** One DOCX text run with the direct character formatting LAMS can reproduce. */
@@ -59,8 +60,9 @@ export function extractStyledParagraphs(documentXml: string, parts: SOTLayoutPar
           ? 'sub' as const
           : /<w:vertAlign\b[^>]*w:val="superscript"/.test(properties) ? 'sup' as const : null
       };
-      for (const piece of xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>/g)) {
-        runs.push({ text: piece[1] !== undefined ? decodeXml(piece[1]) : ' ', ...style });
+      for (const piece of xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>|(<w:(?:noBreakHyphen|softHyphen|cr|sym)\b[^>]*\/>)/g)) {
+        const text = piece[1] !== undefined ? decodeXml(piece[1]) : piece[2] !== undefined ? runCharacterText(piece[2]) : ' ';
+        if (text !== '') runs.push({ text, ...style });
       }
     }
     paragraphs.push({ runs });

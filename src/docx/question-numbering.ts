@@ -93,7 +93,23 @@ export interface ListItemNumber {
 
 /** For each paragraph, the question number it opens, or null. */
 export function numberQuestionStems(texts: string[], options: NumberingOptions): (number | null)[] {
+  return scanQuestionStems(texts, options).numbers;
+}
+
+export interface QuestionStemScan {
+  /** For each paragraph, the question number it opens, or null. */
+  numbers: (number | null)[];
+  /**
+   * For each stem that is one lettered part of a numbered question ("12a.", "12b."), its letter;
+   * null for every other paragraph. A lone "5b." that continues no "5a." is not a part.
+   */
+  letters: (string | null)[];
+}
+
+/** Numbers every stem, and records which stems are the lettered parts of one question. */
+export function scanQuestionStems(texts: string[], options: NumberingOptions): QuestionStemScan {
   const stems: (number | null)[] = texts.map(() => null);
+  const letters: (string | null)[] = texts.map(() => null);
   let highest = 0;
   // How far the document's printed numbers trail the sequence: one per extra lettered part.
   let offset = 0;
@@ -127,6 +143,7 @@ export function numberQuestionStems(texts: string[], options: NumberingOptions):
     if (part && lastPart && Number(part[1]) === lastPart.number && part[2] === nextLetter(lastPart.letter)) {
       offset += 1;
       lastPart = { number: lastPart.number, letter: part[2]! };
+      letters[index] = part[2]!;
       return open(index, highest + 1);
     }
     const printed = numberedStem(text, highest + 1 - offset, nextText) ?? listStem(texts, options.listItems ?? [], index, {
@@ -146,6 +163,7 @@ export function numberQuestionStems(texts: string[], options: NumberingOptions):
     if (numbered !== null && numbered <= highest && lastStem >= 0 && !answered && !optionsSinceStem) return;
     if (numbered !== null) {
       lastPart = part && part[2] === 'a' ? { number: printed!, letter: 'a' } : null;
+      if (lastPart) letters[index] = 'a';
       return open(index, numbered);
     }
     if (lastStem >= 0 && ANSWER_OR_RATIONALE.test(text)) answered = true;
@@ -163,7 +181,7 @@ export function numberQuestionStems(texts: string[], options: NumberingOptions):
     }
     stemHasOptions = true;
   });
-  return stems;
+  return { numbers: stems, letters };
 }
 
 function nextLetter(letter: string): string {

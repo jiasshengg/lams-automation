@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildRenderedAEDraft } from './ae/render-figures.js';
 import { analyzeAESOT, extractSOTParagraphs, formatAESOTSummary, readSOTDocxParts } from './ae/sot-docx.js';
+import { hyperlinkTargets } from './docx/hyperlinks.js';
 import { inspectDocxImages } from './docx/media.js';
 
 async function main(): Promise<void> {
@@ -18,7 +19,8 @@ async function main(): Promise<void> {
   const { documentXml, ...layout } = readSOTDocxParts(buffer);
   const columnQuestions = process.argv.includes('--column-questions');
   const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), path.basename(absoluteInput, path.extname(absoluteInput)), {
-    columnQuestions
+    columnQuestions,
+    linkedUrls: hyperlinkTargets(documentXml, layout.relationshipsXml)
   });
   const output = JSON.stringify(analysis, null, 2);
   const outputPath = readArgument('--out');

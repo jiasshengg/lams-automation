@@ -110,3 +110,25 @@ test('a declared text replacement is applied, and compared against the document 
   edited.nodes[0].questions[0].prompt = edited.nodes[0].questions[0].prompt.replace('Mr Kong fell', 'Mr Tan fell');
   expect(compareAEPlanToSOT(buildAEPlan(edited), analysis).join(' ')).toContain('prompt differs');
 });
+
+test('reports a question that lost the label the document gives it', () => {
+  const parts = analyzeAESOT(
+    extractSOTParagraphs(`<w:document><w:body>
+      ${paragraph('1a. What dose?')}
+      ${paragraph('A. 300 mg')}
+      ${paragraph('B. 600 mg', true)}
+      ${paragraph('1b. Explain.')}
+      ${paragraph('A. Yes', true)}
+      ${paragraph('B. No')}
+      ${paragraph('END')}
+    </w:body></w:document>`),
+    'fallback'
+  );
+  const draft = buildAEDraft(parts);
+  expect(compareAEPlanToSOT(buildAEPlan(draft), parts)).toEqual([]);
+
+  delete (draft.nodes[0]!.questions[1] as { label?: string }).label;
+  expect(compareAEPlanToSOT(buildAEPlan(draft), parts)).toContain(
+    'Question 2 is titled "Question 2"; the Source-of-Truth labels it "Question 1b".'
+  );
+});

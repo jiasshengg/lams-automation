@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { topLevelBlocks } from '../docx/blocks.js';
+import { hyperlinkTargets } from '../docx/hyperlinks.js';
 import type { DocxImage } from '../docx/media.js';
 import { findRenderTargets, isEmptyParagraph, renderTargetId, type RenderTarget } from '../docx/render-targets.js';
 import { renderWithWord, type RenderOutcome } from '../docx/word-render.js';
@@ -43,7 +44,8 @@ export async function buildRenderedAEDraft(
   };
   const analyse = (renders: readonly RenderTarget[]) =>
     analyzeAESOT(extractSOTParagraphs(documentXml, layout, { renders }), options.sourceLabel, {
-      columnQuestions: options.columnQuestions === true
+      columnQuestions: options.columnQuestions === true,
+      linkedUrls: hyperlinkTargets(documentXml, layout.relationshipsXml)
     });
 
   const targets = options.render ? withTabTables(findRenderTargets(documentXml), tabTableBlockRanges(documentXml, layout)) : [];

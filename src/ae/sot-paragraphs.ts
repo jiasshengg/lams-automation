@@ -8,6 +8,7 @@ import {
   withoutTextBoxes
 } from '../docx/blocks.js';
 import type { RenderKind } from '../docx/render-targets.js';
+import { runCharacterText } from '../docx/run-characters.js';
 
 /** The gap a tab leaves: four non-breaking spaces, because HTML collapses ordinary ones. */
 const TAB_GAP = '    ';
@@ -88,10 +89,12 @@ export function readSOTDocxParts(buffer: Buffer): SOTLayoutParts & { documentXml
   const entries = readZipEntries(buffer);
   const styles = entries.get('word/styles.xml');
   const numbering = entries.get('word/numbering.xml');
+  const relationships = entries.get('word/_rels/document.xml.rels');
   return {
     documentXml: requireZipEntry(entries, 'word/document.xml').toString('utf8'),
     ...(styles ? { stylesXml: styles.toString('utf8') } : {}),
-    ...(numbering ? { numberingXml: numbering.toString('utf8') } : {})
+    ...(numbering ? { numberingXml: numbering.toString('utf8') } : {}),
+    ...(relationships ? { relationshipsXml: relationships.toString('utf8') } : {})
   };
 }
 
@@ -489,7 +492,7 @@ export function paragraphContent(
  */
 function paragraphSegments(xml: string): InlineSegment[] {
   const pattern =
-    /<w:r(?:\s[^>]*)?>|<\/w:r>|<w:rPr(?:\s[^>]*)?>([\s\S]*?)<\/w:rPr>|<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|(<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>)/g;
+    /<w:r(?:\s[^>]*)?>|<\/w:r>|<w:rPr(?:\s[^>]*)?>([\s\S]*?)<\/w:rPr>|<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|(<w:tab\b[^>]*\/>|<w:br\b[^>]*\/>)|(<w:(?:noBreakHyphen|softHyphen|cr|sym)\b[^>]*\/>)/g;
   const characters: { character: string; tags: readonly InlineTag[] }[] = [];
   let tags: readonly InlineTag[] = [];
   let match: RegExpExecArray | null;
@@ -497,6 +500,12 @@ function paragraphSegments(xml: string): InlineSegment[] {
   while ((match = pattern.exec(xml)) !== null) {
     if (match[1] !== undefined) {
       tags = runTags(match[1]);
+      continue;
+    }
+    if (match[4] !== undefined) {
+      // A non-breaking hyphen, an inserted symbol, a carriage return: characters Word stores as
+      // elements of their own rather than as text.
+      for (const character of runCharacterText(match[4])) characters.push({ character, tags });
       continue;
     }
     if (match[2] !== undefined || match[3] !== undefined) {
