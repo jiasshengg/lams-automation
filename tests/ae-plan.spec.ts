@@ -255,10 +255,15 @@ test('marks MCQ questions for sequential answer letters and essays against it', 
     .toEqual(['mcq:true', 'essay:false', 'mcq:true']);
 });
 
-test('carries Source-of-Truth emphasis into the prompt and options and escapes anything else', () => {
+test('carries Source-of-Truth emphasis into the prompt and options and refuses any other tag', () => {
   const input = validInput();
   input.nodes[0]!.questions[0]!.prompt =
     'Case 1: <u>Changing exposure</u>\n1. A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>? <script>x</script>';
+  // Escaped, a tag would reach learners as visible code, so the plan is refused instead.
+  expect(() => buildAEPlan(input)).toThrow('Question 1 prompt would show HTML code to learners: "&lt;script&gt;"');
+
+  input.nodes[0]!.questions[0]!.prompt =
+    'Case 1: <u>Changing exposure</u>\n1. A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>?';
   input.nodes[0]!.questions[0]!.options = [
     { text: 'A. <strong>600</strong> mg', correct: true },
     { text: 'I:1 and I:2', correct: false }
@@ -268,7 +273,7 @@ test('carries Source-of-Truth emphasis into the prompt and options and escapes a
   expect(question.promptHtml).toBe(
     // The Source-of-Truth already styled this heading, so it keeps its own emphasis.
     '<div>Case 1: <u>Changing exposure</u></div><div><br></div>' +
-    '<div>QUESTION 1</div><div><br></div><div>A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>? &lt;script&gt;x&lt;/script&gt;</div>'
+    '<div>QUESTION 1</div><div><br></div><div>A sample contains 10<sup>9</sup> molecules of <em>PK-101</em>?</div>'
   );
   expect(question.options).toEqual([
     { text: '600 mg', html: '<strong>600</strong> mg', creditPercent: 100 },
@@ -539,4 +544,19 @@ test('refuses an AE gate whose title does not repeat the node it leads into exac
 
   input.gates[0]!.title = 'AE Gate AE Case 2 Q3-4';
   expect(buildAEPlan(input).gates[0]!.title).toBe('AE Gate AE Case 2 Q3-4');
+});
+
+test('refuses a prompt or option that would show HTML code to learners', () => {
+  const splitTable = validInput();
+  // A table split across lines is not one table line, so each piece is escaped and shown as code.
+  splitTable.nodes[0]!.questions[1]!.prompt = 'QUESTION 2\n<table><tr><td>Hb</td>\n<td>9.7</td></tr></table>\nExplain.';
+  expect(() => buildAEPlan(splitTable)).toThrow('Question 2 prompt would show HTML code to learners');
+
+  const option = validInput();
+  option.nodes[0]!.questions[0]!.options![0]!.text = 'A) <span>First</span> option';
+  expect(() => buildAEPlan(option)).toThrow('Question 1 option 1 would show HTML code to learners');
+
+  const comparison = validInput();
+  comparison.nodes[0]!.questions[1]!.prompt = 'QUESTION 2\nIs p < 0.05 and a > b?';
+  expect(() => buildAEPlan(comparison)).not.toThrow();
 });
