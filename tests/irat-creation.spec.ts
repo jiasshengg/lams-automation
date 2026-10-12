@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import type { IratRequest } from '../src/config.js';
-import { LamsIratEditor, canonicalInlineHtml, expectedQuestionDescriptionText, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionStatsUid, questionVersionUid, snapshotIratReferenceRows, snapshotTratRows, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
+import { IRAT_INSTRUCTIONS, LamsIratEditor, canonicalInlineHtml, instructionsProblems, expectedQuestionDescriptionText, formattingProblems, inlineHtml, missingInlineFormatting, missingTratQuestionSuffix, questionBankSearchTerm, questionStatsUid, questionVersionUid, snapshotIratReferenceRows, snapshotTratRows, verifySavedRequiredFlags } from '../src/lams/irat-editor.js';
 
 const request: IratRequest = {
   activityName: 'iRAT', teamSetupName: 'Team Setup',
@@ -446,6 +446,28 @@ for (const initial of [false, true]) {
     }
   });
 }
+
+test('writes the standard iRAT instruction in bold at the default format', async ({ page }) => {
+  await page.setContent(`<script>
+    window.CKEDITOR = { instances: { 'assessment.instructions': {
+      data: '', setData(value) { this.data = value; }, getData() { return this.data + '\\n'; }, fire() {}
+    } } };
+  </script>`);
+  const editor = new LamsIratEditor(page, request, 1500);
+  Object.assign(editor, { activityFrame: page.mainFrame() });
+  await editor.updateInstructions();
+  expect(await page.evaluate(() => (window as unknown as { CKEDITOR: { instances: Record<string, { data: string }> } }).CKEDITOR.instances['assessment.instructions']!.data))
+    .toBe(`<div><strong>${IRAT_INSTRUCTIONS}</strong></div>`);
+});
+
+test('reports Instructions that are not the standard bold sentence at LAMS defaults', () => {
+  expect(instructionsProblems(`<div><strong>${IRAT_INSTRUCTIONS}</strong></div>\n`)).toEqual([]);
+  expect(instructionsProblems(`<div><b>${IRAT_INSTRUCTIONS}</b></div>`)).toEqual([]);
+  expect(instructionsProblems(`<div>${IRAT_INSTRUCTIONS}</div>`)).toContain(`the saved text is "${IRAT_INSTRUCTIONS}"`);
+  expect(instructionsProblems(`<p><strong>${IRAT_INSTRUCTIONS}</strong></p>`)).toEqual(['the paragraph format is not Normal (DIV)']);
+  expect(instructionsProblems(`<div style="font-family:Arial"><strong>${IRAT_INSTRUCTIONS}</strong></div>`)).toEqual(['explicit font family or size is present']);
+  expect(instructionsProblems('')).toHaveLength(2);
+});
 
 test('stops when the Feedback & Results checkbox cannot be found exactly once', async ({ page }) => {
   const editor = await settingsFixture(page, false);

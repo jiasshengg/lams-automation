@@ -68,6 +68,7 @@ test('commit applies gate, grouping, questions, answer-required, advanced settin
     // Answer required is set once the last question editor has closed: toggling it while
     // questions are still being saved loses the flag to LAMS's reference-list rebuild.
     'required:Question 1',
+    'instructions',
     'advanced',
     'print',
     'save'
@@ -152,6 +153,9 @@ function fakeEditor(calls: string[]): IratEditor {
     async applyAnswerRequired(questions) {
       calls.push(`required:${questions.map((question) => question.title).join(',')}`);
       return questions.map((question) => question.title);
+    },
+    async updateInstructions() {
+      calls.push('instructions');
     },
     async updateAdvancedSettings() {
       calls.push('advanced');
