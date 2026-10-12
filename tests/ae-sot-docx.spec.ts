@@ -88,6 +88,25 @@ test('does not use page or Case headings as AE separators', () => {
   expect(analysis.nodes[0]?.questionNumbers).toEqual([1, 2]);
 });
 
+test('a faculty summary between two breaks is not an AE node, and its breaks make one gate', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Case 1')}
+    ${paragraph('1. First question?')}
+    ${paragraph('-- BREAK --')}
+    ${paragraph('Case 1 Summary – For Faculty: Gunshot Wound to Chest')}
+    ${paragraph('Question for students: what differs between the two films?')}
+    ${paragraph('-- BREAK --')}
+    ${paragraph('Case 2')}
+    ${paragraph('2. Second question?')}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const analysis = analyzeAESOT(paragraphs, 'Example');
+  expect(analysis.nodes.map((node) => node.questionNumbers)).toEqual([[1], [2]]);
+  expect([analysis.breakMarkerCount, analysis.requiredAENodes, analysis.requiredAEGates]).toEqual([1, 2, 1]);
+  expect(analysis.warnings.some((warning) => warning.includes('"Case 1 Summary – For Faculty: Gunshot Wound to Chest"'))).toBe(true);
+});
+
 test('rejects an empty break-derived group and non-sequential questions', () => {
   const emptyGroup = extractSOTParagraphs(`<w:document><w:body>
     ${paragraph('1. First question?')}

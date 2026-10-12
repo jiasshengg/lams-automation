@@ -1,14 +1,14 @@
 import { resolveInputFile } from './input-file.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { buildAEDraft } from './ae/draft.js';
+import { buildRenderedAEDraft } from './ae/render-figures.js';
 import { analyzeAESOT, extractSOTParagraphs, formatAESOTSummary, readSOTDocxParts } from './ae/sot-docx.js';
 import { inspectDocxImages } from './docx/media.js';
 
 async function main(): Promise<void> {
   const inputPath = readArgument('--sot-docx');
   if (!inputPath) {
-    throw new Error('Usage: npm run extract:ae-sot -- --sot-docx <path> [--out <json-path>] [--draft <json-path>] [--json]');
+    throw new Error('Usage: npm run extract:ae-sot -- --sot-docx <path> [--out <json-path>] [--draft <json-path> [--no-render]] [--json]');
   }
   if (process.argv.includes('--commit')) throw new Error('AE SOT extraction is read-only and does not accept --commit.');
 
@@ -30,14 +30,21 @@ async function main(): Promise<void> {
 
   const draftPath = readArgument('--draft');
   if (draftPath) {
-    const draft = buildAEDraft(analysis, {
+    const absoluteDraft = path.resolve(draftPath);
+    // Tables and drawn figures are shown as Word's picture of them, written beside the draft.
+    const figuresDirectory = path.join(path.dirname(absoluteDraft), `${path.basename(absoluteDraft, path.extname(absoluteDraft))}-figures`);
+    const draft = await buildRenderedAEDraft(buffer, { documentXml, ...layout }, {
+      sourceLabel: analysis.sourceLabel,
       sourceDocx: path.basename(absoluteInput),
       images: inspectDocxImages(buffer),
-      ...(columnQuestions ? { columnQuestions: true } : {})
+      ...(columnQuestions ? { columnQuestions: true } : {}),
+      figuresDirectory,
+      render: !process.argv.includes('--no-render')
     });
-    const absoluteDraft = path.resolve(draftPath);
     await writeFile(absoluteDraft, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');
     console.log(`Wrote a reviewable AE plan draft to ${absoluteDraft}`);
+    const rendered = draft.nodes.flatMap((node) => node.questions).flatMap((question) => question.renderedFigures ?? []);
+    if (rendered.length > 0) console.log(`Rendered ${rendered.length} table(s)/figure(s) with Word into ${figuresDirectory}`);
     console.log('The draft is not executable input until every _review and TODO_ entry is resolved.');
   }
   console.log(process.argv.includes('--json') ? output : formatAESOTSummary(analysis));

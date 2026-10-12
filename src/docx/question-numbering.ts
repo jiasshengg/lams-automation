@@ -10,6 +10,8 @@
  */
 export const BREAK_MARKER = /^\s*(?:-{2,}|\*{3,})\s*BREAK\s*(?:-{2,}|\*{3,})\s*$/i;
 export const CASE_HEADING = /^Case\s+(\d+)\b/i;
+/** A heading or note the document addresses to faculty ("Case 1 Summary – For Faculty"), not to learners. */
+export const FACULTY_ONLY = /\b(?:for|notes? for)\s+faculty\b|\bfaculty\s+(?:only|notes?)\b/i;
 /** A new section opens the narrative for the question that follows it. */
 export const SECTION_BOUNDARY = new RegExp(`${BREAK_MARKER.source}|^Case\\s+\\d+\\b`, 'i');
 

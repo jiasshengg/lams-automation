@@ -1,5 +1,6 @@
 import type { DocxImage } from '../docx/media.js';
-import { aeGateTitle } from './plan.js';
+import { aeGateTitle, type RenderedFigureRequest } from './plan.js';
+import { IMAGE_SLOT_LINE, renderSlotId } from './prompt-lines.js';
 import type { AESOTAnalysis } from './sot-docx.js';
 
 /**
@@ -36,6 +37,8 @@ export interface AEDraftQuestion {
   images?: { path: string; altText?: string; widthPx?: number; placement?: 'before' | 'after'; caption?: string }[];
   replaceSourceFigures?: boolean;
   promptReplacements?: { find: string; replaceWith: string }[];
+  /** Tables and drawn figures Word rendered as pictures, each filling one image slot. */
+  renderedFigures?: RenderedFigureRequest[];
 }
 
 export interface AEDraftGate {
@@ -45,10 +48,19 @@ export interface AEDraftGate {
   beforeQuestionNumber: number;
 }
 
-export function buildAEDraft(
-  analysis: AESOTAnalysis,
-  options: { sourceDocx?: string; images?: DocxImage[]; columnQuestions?: boolean } = {}
-): AEDraftPlan {
+export interface AEDraftOptions {
+  sourceDocx?: string;
+  images?: DocxImage[];
+  columnQuestions?: boolean;
+  /** Word's pictures of the tables and figures the analysis marked for rendering, by render id. */
+  renders?: ReadonlyMap<string, RenderedFigureRequest>;
+  /** Leave the render markers in the prompts, to find which questions show which targets. */
+  keepRenderSlots?: boolean;
+  /** Further notes for `_review`, such as what was rendered and what could not be. */
+  reviewNotes?: string[];
+}
+
+export function buildAEDraft(analysis: AESOTAnalysis, options: AEDraftOptions = {}): AEDraftPlan {
   const nodes = analysis.nodes.map<AEDraftNode>((node) => ({
     title: node.suggestedTitle,
     questions: node.questionNumbers.map((number, index) => {
@@ -63,11 +75,13 @@ export function buildAEDraft(
         // prints it after the answer key.
         ...(question.creditLines.length > 0 ? ['', ...question.creditLines] : [])
       ]).join('\n');
+      const placed = placeRenderedFigures(prompt, options);
       const draft: AEDraftQuestion = {
         number,
         type: question.type === 'open-response' ? 'essay' : 'mcq',
-        prompt
+        prompt: placed.prompt
       };
+      if (placed.figures.length > 0) draft.renderedFigures = placed.figures;
       if (question.explicitMarks !== null) draft.marks = question.explicitMarks;
       if (question.options.length > 0) {
         draft.options = question.options.map((option) => ({
@@ -110,12 +124,30 @@ export function buildAEDraft(
               '(multipleAnswerCredit "split", e.g. 50/50) or give each correct answer 100% ("full"), then set multipleAnswerCredit.'
           ]
         : []),
+      ...(options.reviewNotes ?? []),
       ...analysis.warnings,
       ...analysis.reviewRequired
     ],
     nodes,
     gates
   };
+}
+
+/**
+ * Each rendered table or figure takes an ordinary image slot, and the question records the picture
+ * that fills it. A marker with no picture (the Source-of-Truth check reads the plan's figures back
+ * without rendering them) still becomes a slot, so both sides compare the same prompt.
+ */
+function placeRenderedFigures(prompt: string, options: AEDraftOptions): { prompt: string; figures: RenderedFigureRequest[] } {
+  const figures: RenderedFigureRequest[] = [];
+  const lines = prompt.split('\n').map((line) => {
+    const id = renderSlotId(line);
+    if (id === null || options.keepRenderSlots) return line;
+    const figure = options.renders?.get(id);
+    if (figure) figures.push(figure);
+    return IMAGE_SLOT_LINE;
+  });
+  return { prompt: lines.join('\n'), figures };
 }
 
 /** Blank lines above a prompt belong to whatever the document printed before it. */

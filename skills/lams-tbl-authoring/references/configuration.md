@@ -129,6 +129,8 @@ Do not use page boundaries as separators. Case headings are not separators eithe
 
 `--draft` additionally writes a reviewable AE plan JSON transcribed from the document: node titles, case context, stems and options with their emphasis, detected answer keys, explicit marks, and gates. Hand transcription is where titles, emphasis, and figure order drift from the Source-of-Truth, so always generate the draft; never retype it. It is still a draft: resolve every `_review` note and `TODO_` key before `apply:ae` or `run:tbl`.
 
+On Windows with Microsoft Word, the draft shows each learner-facing table (tab-stop column layouts included) and each figure drawn with shapes as Word's picture of it, written to `<draft name>-figures/` and listed per question under `renderedFigures`; each fills one `{{image}}` slot, and the SoT check reads those blocks the same way. Option tables, tables carrying an answer key, and answer or rationale material stay text. `--no-render` keeps the rebuilt HTML; without Word the draft rebuilds them and `_review` names each one to check by hand.
+
 ## AE layout follows the Source-of-Truth
 
 Prompts follow the document's layout while the paragraph format (Normal) and font stay at the LAMS defaults:

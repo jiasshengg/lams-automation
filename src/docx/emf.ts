@@ -81,7 +81,8 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   return c >>> 0;
 });
 
-function crc32(data: Buffer): number {
+/** The CRC-32 that PNG chunks and ZIP entries both carry. */
+export function crc32(data: Buffer): number {
   let crc = 0xffffffff;
   for (const byte of data) crc = CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;

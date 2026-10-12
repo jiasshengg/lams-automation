@@ -211,6 +211,20 @@ test('reads Q-prefixed stems and starred break markers', () => {
   expect(images[0]).toMatchObject({ questionNumber: 17, placement: 'before' });
 });
 
+test('a figure in a faculty section joins no question, while the next case\'s figure still does', () => {
+  const images = inspectDocxImages(mediaDocx(
+    paragraph('4. Explain the hemostat technique.') + paragraph('Answer: neurovascular bundle') +
+    paragraph('-- BREAK --') +
+    paragraph('Case 1 Summary – For Faculty: Gunshot Wound to Chest') +
+    paragraph('', drawing) +
+    paragraph('-- BREAK --') +
+    paragraph('Case 2: Imprint on my chest') +
+    paragraph('', drawing) +
+    paragraph('5. What caused the markings?')
+  ));
+  expect(images.map((image) => image.questionNumber)).toEqual([null, 5]);
+});
+
 test('a figure inside the vignette of an unnumbered question belongs to that question', () => {
   const images = inspectDocxImages(mediaDocx(
     paragraph('1. First question?') + paragraph('A. One') + paragraph('B. Two') +

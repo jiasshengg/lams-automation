@@ -9,6 +9,10 @@ export interface DocxBlock {
   kind: 'p' | 'tbl';
   /** The XML between the block's opening and closing tags. */
   inner: string;
+  /** Where the block's opening tag starts in the scanned XML. */
+  start: number;
+  /** Just past the block's closing tag in the scanned XML. */
+  end: number;
 }
 
 const BLOCK_TAG = /<(\/?)(w:p|w:tbl)(?=[\s>/])[^>]*?(\/?)>/g;
@@ -16,23 +20,23 @@ const BLOCK_TAG = /<(\/?)(w:p|w:tbl)(?=[\s>/])[^>]*?(\/?)>/g;
 /** The outermost paragraphs and tables of `xml`, in document order. */
 export function topLevelBlocks(xml: string): DocxBlock[] {
   const blocks: DocxBlock[] = [];
-  const stack: { kind: 'p' | 'tbl'; innerStart: number }[] = [];
+  const stack: { kind: 'p' | 'tbl'; start: number; innerStart: number }[] = [];
   for (const match of xml.matchAll(BLOCK_TAG)) {
     const closing = match[1] === '/';
     const kind = match[2] === 'w:p' ? 'p' : 'tbl';
     const selfClosing = match[3] === '/';
     const end = match.index! + match[0].length;
     if (selfClosing) {
-      if (stack.length === 0) blocks.push({ kind, inner: '' });
+      if (stack.length === 0) blocks.push({ kind, inner: '', start: match.index!, end });
       continue;
     }
     if (!closing) {
-      stack.push({ kind, innerStart: end });
+      stack.push({ kind, start: match.index!, innerStart: end });
       continue;
     }
     const open = stack.pop();
     if (!open || open.kind !== kind) throw new Error(`Unbalanced <w:${kind}> in the DOCX document.`);
-    if (stack.length === 0) blocks.push({ kind, inner: xml.slice(open.innerStart, match.index) });
+    if (stack.length === 0) blocks.push({ kind, inner: xml.slice(open.innerStart, match.index), start: open.start, end });
   }
   if (stack.length > 0) throw new Error('The DOCX document ends inside an open paragraph or table.');
   return blocks;

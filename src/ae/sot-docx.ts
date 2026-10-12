@@ -1,7 +1,7 @@
 import { isCaption } from '../docx/media.js';
-import { BREAK_MARKER, CASE_HEADING, NUMBERED_STEM, numberQuestionStems } from '../docx/question-numbering.js';
+import { BREAK_MARKER, CASE_HEADING, FACULTY_ONLY, NUMBERED_STEM, numberQuestionStems } from '../docx/question-numbering.js';
 import { sliceInlineHtml, stripOptionPrefixHtml, withoutUniformInlineTag } from './inline-html.js';
-import { IMAGE_SLOT_LINE } from './prompt-lines.js';
+import { IMAGE_SLOT_LINE, renderSlotLine } from './prompt-lines.js';
 import { extractSOTParagraphs, readDocumentXmlFromDocx, readSOTDocxParts, type SOTParagraph } from './sot-paragraphs.js';
 
 export { extractSOTParagraphs, readDocumentXmlFromDocx, readSOTDocxParts };
@@ -179,17 +179,18 @@ export function analyzeAESOT(
     .filter((index) => index >= 0);
 
   const boundaries = [-1, ...breakIndexes, relevant.length];
-  const groups = boundaries.slice(0, -1).map((boundary, index) => ({
+  const allGroups = boundaries.slice(0, -1).map((boundary, index) => ({
     offset: boundary + 1,
     paragraphs: relevant.slice(boundary + 1, boundaries[index + 1]!)
   }));
 
-  if (groups.length === 0) throw new Error('The AE SOT did not contain any content.');
+  if (allGroups.length === 0) throw new Error('The AE SOT did not contain any content.');
 
   // Every question the document opens, in reading order: its numbered stems and the columns of
   // any matching table. LAMS numbers questions 1..N, so that order is what the numbers follow.
   const structuralProblems: string[] = [];
   const starts = questionStartsInOrder(relevant, stemNumbers, structuralProblems, options.columnQuestions === true);
+  const { groups, facultySections } = withoutFacultySections(allGroups, starts);
   const renumbered = starts
     .map((start, index) =>
       start.printedNumber !== undefined && start.printedNumber !== index + 1
@@ -200,7 +201,7 @@ export function analyzeAESOT(
 
   const questions: AEQuestionObservation[] = [];
   const unlabelledOptionBlockQuestions: number[] = [];
-  const nodes = groups.map<AENodeObservation>(({ offset, paragraphs: untrimmedGroup }, index) => {
+  const nodes = groups.map<AENodeObservation>(({ offset, paragraphs: untrimmedGroup, number: groupNumber }, index) => {
     const startAt = (groupIndex: number): QuestionStart[] =>
       starts.filter((start) => start.paragraphIndex === offset + groupIndex);
     const firstQuestionIndex = untrimmedGroup.findIndex((_paragraph, paragraphIndex) => startAt(paragraphIndex).length > 0);
@@ -220,7 +221,7 @@ export function analyzeAESOT(
     );
 
     if (questionStarts.length === 0) {
-      throw new Error(`Break-derived AE group ${index + 1} does not contain a numbered question.`);
+      throw new Error(`Break-derived AE group ${groupNumber} does not contain a numbered question.`);
     }
 
     const slices = questionStarts.map((start, questionIndex) =>
@@ -303,6 +304,12 @@ export function analyzeAESOT(
     );
   }
   warnings.push(...structuralProblems);
+  for (const section of facultySections) {
+    warnings.push(
+      `Break-derived group ${section.number} ("${section.heading}") is faculty material with no AE question, so it is not an AE node; ` +
+        'the break markers around it make one gate. Confirm with the user if the document meant something else.'
+    );
+  }
   if (renumbered.length > 0) {
     warnings.push(
       `LAMS numbers AE questions 1..${questions.length} in order, but the document numbers ${renumbered.join(', ')}. ` +
@@ -323,6 +330,8 @@ export function analyzeAESOT(
   }
 
   const sourceLabel = applicationTitle ?? fallbackLabel;
+  // Only the breaks between AE nodes become gates; a faculty section between two breaks is not a node.
+  const separatingBreaks = groups.length - 1;
   const gates = nodes.slice(1).map<AEGateObservation>((node, index) => ({
     index: index + 1,
     afterNodeIndex: index + 1,
@@ -333,9 +342,9 @@ export function analyzeAESOT(
   return {
     sourceLabel,
     metadata: { applicationTitle, module, sessionTitle },
-    breakMarkerCount: breakIndexes.length,
+    breakMarkerCount: separatingBreaks,
     requiredAENodes: groups.length,
-    requiredAEGates: breakIndexes.length,
+    requiredAEGates: separatingBreaks,
     questionCount: questions.length,
     explicitMarksTotal: questions.reduce((sum, question) => sum + (question.explicitMarks ?? 0), 0),
     questionsWithoutExplicitMarks,
@@ -344,7 +353,7 @@ export function analyzeAESOT(
     questions,
     requestVariables: {
       expectedAENodes: groups.length,
-      expectedAEGates: breakIndexes.length
+      expectedAEGates: separatingBreaks
     },
     reviewRequired: [
       'Confirm exact AE node titles; suggested titles follow the "AE Case <n> Q<range>" convention but are not authority for existing LAMS nodes.',
@@ -400,6 +409,32 @@ function caseNumberByParagraph(paragraphs: SOTParagraph[]): (number | null)[] {
 }
 
 /**
+ * Leaves out a break-derived group that holds no question and is marked as faculty material
+ * ("Case 1 Summary – For Faculty"): it is the facilitator's summary between two AE nodes, not an AE
+ * node itself. Any other group without a question still stops extraction, because an extra or
+ * misplaced break is far more likely there than a section nobody answers.
+ */
+function withoutFacultySections(
+  groups: { offset: number; paragraphs: SOTParagraph[] }[],
+  starts: QuestionStart[]
+): { groups: { offset: number; paragraphs: SOTParagraph[]; number: number }[]; facultySections: { number: number; heading: string }[] } {
+  const kept: { offset: number; paragraphs: SOTParagraph[]; number: number }[] = [];
+  const facultySections: { number: number; heading: string }[] = [];
+  groups.forEach((group, index) => {
+    const end = group.offset + group.paragraphs.length;
+    const hasQuestion = starts.some((start) => start.paragraphIndex >= group.offset && start.paragraphIndex < end);
+    const facultyLine = group.paragraphs.find((paragraph) => FACULTY_ONLY.test(paragraph.text));
+    if (!hasQuestion && facultyLine) {
+      facultySections.push({ number: index + 1, heading: facultyLine.text.slice(0, 80) });
+      return;
+    }
+    kept.push({ ...group, number: index + 1 });
+  });
+  if (kept.length === 0) throw new Error('The AE SOT holds faculty material only; no break-derived group contains a numbered question.');
+  return { groups: kept, facultySections };
+}
+
+/**
  * The LAMS naming convention: a hyphen joins the ends of a range, whether both are in one case
  * ("AE Case 3 Q3-6") or the range runs across two ("AE Case 5 Q14-Case 6 Q15"). One question names
  * itself ("AE Case 2 Q6"). Every AE gate then carries the title of the node it leads into.
@@ -422,6 +457,16 @@ function promptLines(paragraphs: SOTParagraph[]): string[] {
   const lines: string[] = [];
   let awaitingCaption = false;
   for (const paragraph of paragraphs) {
+    if (paragraph.render) {
+      // One slot holds Word's picture of the whole table or figure; the words a figure's paragraphs
+      // print outside the drawing, and the caption under it, stay as text.
+      const { render } = paragraph;
+      if (render.lead || render.textHtml !== '') lines.push(...blankLines(paragraph.blankLinesBefore));
+      if (render.lead) lines.push(renderSlotLine(render.id));
+      if (render.textHtml !== '') lines.push(render.textHtml);
+      awaitingCaption = false;
+      continue;
+    }
     if (paragraph.text === '' || (paragraph.imageCount > 0 && paragraph.text.trim() === '')) {
       // A grouped figure holds several pictures, each uploaded separately into its own slot.
       const slots = Array.from({ length: Math.max(1, paragraph.imageCount) }, () => IMAGE_SLOT_LINE);
@@ -737,16 +782,25 @@ function learnerBody(paragraphs: SOTParagraph[], options: OptionEntry[]): SOTPar
     .filter((paragraph) => options.every((option) => option.table?.paragraph !== paragraph || !option.table.consumed))
     .map((paragraph) =>
       options.some((option) => option.table?.paragraph === paragraph)
-        ? { ...paragraph, html: withoutAnswerRowEmphasis(paragraph.html, options) }
+        ? withoutRender({ ...paragraph, html: withoutAnswerRowEmphasis(paragraph.html, options) })
         : paragraph
     )
     // Word marks the answer by emboldening the whole caption. The learner reads the caption under
     // the figure, so it keeps the words and loses the emphasis that would give the answer away.
     .map((paragraph) =>
       options.some((option) => option.paragraph === paragraph)
-        ? { ...paragraph, html: withoutUniformInlineTag(paragraph.html, 'strong') }
+        ? withoutRender({ ...paragraph, html: withoutUniformInlineTag(paragraph.html, 'strong') })
         : paragraph
     );
+}
+
+/**
+ * An option table keeps its HTML: the answer emphasis is removed from it here, and a picture of the
+ * printed table would still show that emphasis to the learner.
+ */
+function withoutRender(paragraph: SOTParagraph): SOTParagraph {
+  const { render: _render, ...rest } = paragraph;
+  return rest;
 }
 
 /** The credits the document prints for the figures this question shows. */

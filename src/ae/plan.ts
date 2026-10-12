@@ -41,6 +41,23 @@ export interface AEQuestionInput {
    * reads the document the same way and still compares every other word.
    */
   promptReplacements?: { find: string; replaceWith: string }[];
+  /**
+   * Tables and drawn figures shown as Word's own picture of them, in place of an HTML rebuild or
+   * the separate pieces of a drawing. Each fills one image slot, and the pictures inside its blocks
+   * are not imported separately.
+   */
+  renderedFigures?: RenderedFigureRequest[];
+}
+
+export interface RenderedFigureRequest {
+  /** The PNG Word rendered when the draft was made. */
+  path: string;
+  kind: 'table' | 'figure';
+  /** The first and last document block it pictures, counted as `findRenderTargets` counts them. */
+  blocks: [number, number];
+  /** The printed width; the PNG itself is rendered larger so its text stays sharp. */
+  widthPx?: number;
+  altText?: string;
 }
 
 export interface AENodeInput {
@@ -103,6 +120,7 @@ export interface AEQuestionPlan {
   /** The reviewed images replace the document's figure; the document's own are not imported. */
   replaceSourceFigures: boolean;
   promptReplacements: { find: string; replaceWith: string }[];
+  renderedFigures: RenderedFigureRequest[];
 }
 
 export interface AENodePlan {
@@ -264,7 +282,8 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
       sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
       images: question.images ?? [],
       replaceSourceFigures: question.replaceSourceFigures === true,
-      promptReplacements: question.promptReplacements ?? []
+      promptReplacements: question.promptReplacements ?? [],
+      renderedFigures: question.renderedFigures ?? []
     };
   }
 
@@ -329,7 +348,8 @@ function buildQuestion(question: AEQuestionInput, multipleAnswerCredit?: AEMulti
     sourceQuestionNumber: question.sourceQuestionNumber ?? question.number,
     images: question.images ?? [],
     replaceSourceFigures: question.replaceSourceFigures === true,
-    promptReplacements: question.promptReplacements ?? []
+    promptReplacements: question.promptReplacements ?? [],
+    renderedFigures: question.renderedFigures ?? []
   };
 }
 
@@ -684,6 +704,12 @@ function parseInput(value: unknown): AEPlanInput {
         if (!Array.isArray(question.images)) throw new Error(`Question ${number} images must be an array`);
         parsedQuestion.images = question.images.map((image, imageIndex) => parseQuestionImage(image, `Question ${number} image ${imageIndex + 1}`));
       }
+      if (question.renderedFigures !== undefined) {
+        if (!Array.isArray(question.renderedFigures)) throw new Error(`Question ${number} renderedFigures must be an array`);
+        parsedQuestion.renderedFigures = question.renderedFigures.map((figure, figureIndex) =>
+          parseRenderedFigure(figure, `Question ${number} renderedFigures[${figureIndex}]`)
+        );
+      }
       return parsedQuestion;
     });
     return description === undefined ? { title, questions } : { title, description, questions };
@@ -741,6 +767,26 @@ function parseQuestionImage(value: unknown, label: string): QuestionImageRequest
     image.caption = value.caption;
   }
   return image;
+}
+
+function parseRenderedFigure(value: unknown, label: string): RenderedFigureRequest {
+  if (!isRecord(value)) throw new Error(`${label} must be an object`);
+  if (value.kind !== 'table' && value.kind !== 'figure') throw new Error(`${label} kind must be "table" or "figure"`);
+  if (!Array.isArray(value.blocks) || value.blocks.length !== 2) throw new Error(`${label} blocks must be [first, last]`);
+  const first = nonNegativeInteger(value.blocks[0], `${label} blocks[0]`);
+  const last = nonNegativeInteger(value.blocks[1], `${label} blocks[1]`);
+  if (last < first) throw new Error(`${label} blocks must run forward`);
+  const figure: RenderedFigureRequest = { path: nonEmptyString(value.path, `${label} path`), kind: value.kind, blocks: [first, last] };
+  if (value.widthPx !== undefined) {
+    const width = numberValue(value.widthPx, `${label} widthPx`);
+    if (width <= 0) throw new Error(`${label} widthPx must be positive`);
+    figure.widthPx = width;
+  }
+  if (value.altText !== undefined) {
+    if (typeof value.altText !== 'string') throw new Error(`${label} altText must be a string`);
+    figure.altText = value.altText;
+  }
+  return figure;
 }
 
 function assertUnique(values: string[], label: string): void {
