@@ -131,10 +131,14 @@ export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts 
       continue;
     }
     const spacing = spacingBlankLines(previous, layout);
+    // Some documents start a page by typing empty paragraphs rather than a page break. Word then
+    // records only where it rendered the break; that is a page boundary when empty paragraphs led
+    // up to it, never when text simply flows on (a rationale running onto the next page).
+    const paddedOntoNewPage = block.kind === 'p' && emptyParagraphs > 0 && renderedPageBreakBeforeText(block.inner);
     result.push({
       ...content,
       blankLinesBefore: result.length === 0 ? 0 : emptyParagraphs > 0 ? emptyParagraphs : spacing,
-      pageBreakBefore: pageBreak,
+      pageBreakBefore: pageBreak || paddedOntoNewPage,
       indentTwips: layout.indentTwips
     });
     previous = layout;
@@ -142,6 +146,14 @@ export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts 
     pageBreak = layout.pageBreakAfter;
   }
   return asTabTables(result);
+}
+
+/** Word rendered a page break ahead of the paragraph's first visible character. */
+function renderedPageBreakBeforeText(paragraphXml: string): boolean {
+  const body = paragraphXml.replace(/<w:pPr>[\s\S]*?<\/w:pPr>/, '');
+  const rendered = body.search(/<w:lastRenderedPageBreak\s*\/>/);
+  const firstText = body.search(/<w:t[\s>]/);
+  return rendered >= 0 && (firstText < 0 || rendered < firstText);
 }
 
 /** A line the document pushes this far across the page stands over a column, not at the margin. */
@@ -213,7 +225,12 @@ function asTabTables(paragraphs: SOTParagraph[]): SOTParagraph[] {
  */
 function tabColumns(paragraph: SOTParagraph | undefined): string[] | null {
   if (paragraph === undefined || paragraph.imageCount > 0 || !paragraph.html.includes(TAB_GAP)) return null;
-  const columns = paragraph.html.split(TAB_COLUMN_BREAK).map((cell) => cell.trim());
+  // A tab inside emphasis splits its closing tag into a cell of its own; a cell with nothing
+  // visible in it is not a column.
+  const columns = paragraph.html
+    .split(TAB_COLUMN_BREAK)
+    .map((cell) => cell.trim())
+    .map((cell) => (cell.replace(/<[^>]+>/g, '').trim() === '' ? '' : cell));
   const filled = columns.filter((cell) => cell !== '').length;
   // "8.<tab>Human nucleated cells tend to be:" is a question number hung before its stem.
   const text = columns.filter((cell) => cell !== '');

@@ -47,3 +47,25 @@ export async function requestNewVersionCheck(frame: Frame, timeoutMs: number): P
   });
   await waitForQuestionFormIdle(frame, timeoutMs);
 }
+
+/**
+ * Asks for the new-version check until LAMS offers "Save as new version". afterVersionCheck always
+ * reveals that button, whatever its answer, so a hidden button means the check never answered;
+ * on a 25-question iRAT this happened to one question in twenty (Q4 once, Q22 once), stranding the
+ * whole unsaved activity. Re-asking is harmless: the check only reads the form. Plain Save is never
+ * used as a fallback, because it rewrites the shared question in place.
+ */
+export async function waitForNewVersionOffer(frame: Frame, timeoutMs: number, attempts = 3): Promise<boolean> {
+  const saveAs = frame.locator('#saveAsButton');
+  const perAttempt = Math.max(2_000, Math.floor(timeoutMs / attempts));
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await requestNewVersionCheck(frame, timeoutMs);
+    try {
+      await saveAs.waitFor({ state: 'visible', timeout: perAttempt });
+      return true;
+    } catch {
+      // The check did not answer; ask again.
+    }
+  }
+  return false;
+}

@@ -163,10 +163,16 @@ from settings import DOWNLOAD_DIR, REPO_ROOT
 MANIFEST_NAME = "sources.json"  # per event: which file is the iRAT and which the AE SoT
 LATEST_NAME = "latest.json"  # per run: the events this run downloaded or confirmed
 
-IRA_AE_PATTERN = re.compile(r"\b(iRA|AE)\b", re.IGNORECASE)
+IRA_AE_PATTERN = re.compile(r"\b(iRAT?|AE)\b", re.IGNORECASE)  # "iRA" or "IRAT"
+
+
+def _words(title: str) -> str:
+    """Underscores separate words in titles such as "SEEM_2.1_AE_Question", but \\b treats them as letters."""
+    return title.replace("_", " ")
 
 
 def is_qa_resource(title: str) -> bool:
+    title = _words(title)
     if not IRA_AE_PATTERN.search(title):
         return False
     lowered = title.lower()
@@ -187,7 +193,8 @@ def find_qa_resources(soup: BeautifulSoup):
 
 def sot_kind(title: str) -> str:
     """Which LAMS stage a QA file feeds, from its Elentra resource title."""
-    is_irat = re.search(r"\biRA\b", title, re.IGNORECASE) is not None
+    title = _words(title)
+    is_irat = re.search(r"\biRAT?\b", title, re.IGNORECASE) is not None
     is_ae = re.search(r"\bAE\b", title, re.IGNORECASE) is not None
     if is_irat == is_ae:
         return "unknown"

@@ -91,6 +91,12 @@ class TitleTest(unittest.TestCase):
         )
         row = {"Module": "Skin (SKIN)", "TBL/Quiz Details": "TBL 1\nSKIN TBL 1 real"}
         self.assertEqual(kanban_reader._build_title(row), "SKIN TBL 1 real")
+        # A second-line lesson title is never prefixed, even when it names another module first.
+        row = {"Module": "SEEM", "TBL/Quiz Details": "2.1 Study design and measures of association\nBLS RSE SEEM 2.1 131026 2025Y2"}
+        self.assertEqual(
+            build_title(kanban_reader._build_title(row), "monitoring"), "LAMS BLS RSE SEEM 2.1 131026 2025Y2 (Facilitator/CE)"
+        )
+        self.assertEqual(build_title(kanban_reader._build_title(row), "learner"), "LAMS BLS RSE SEEM 2.1 131026 2025Y2")
         # A title that only begins with the same letters still gets its module.
         row = {"Module": "INF", "TBL/Quiz Details": "INFLUENZA TBL"}
         self.assertEqual(kanban_reader._build_title(row), "INF - INFLUENZA TBL")
@@ -226,6 +232,18 @@ class DownloadManifestTest(unittest.TestCase):
         self.assertEqual(main.sot_kind("AY2627 FOM TBL 11 AE Faculty QA"), "ae")
         self.assertEqual(main.sot_kind("iRA and AE QA"), "unknown")
         self.assertEqual(main.sot_kind("Faculty QA"), "unknown")
+        self.assertEqual(main.sot_kind("AY2627 DHPM 2.1 AI in Medicine-IRAT Question and Answer"), "irat")
+        self.assertEqual(main.sot_kind("AY2627 SEEM_2.1_AE_Question and Answer"), "ae")
+
+    def test_irat_titled_question_and_answer_files_are_downloaded(self):
+        import main
+        self.assertTrue(main.is_qa_resource("AY2627 DHPM 2.1 AI in Medicine-IRAT Question and Answer"))
+        self.assertTrue(main.is_qa_resource("AY2627 FOM TBL 11 iRA Faculty QA"))
+        self.assertTrue(main.is_qa_resource("AY2627 DHPM 2.1 AI in Medicine-AE Question and Answer"))
+        self.assertTrue(main.is_qa_resource("AY2627 SEEM_2.1_AE_Question and Answer"))
+        self.assertFalse(main.is_qa_resource("AY2627 DHPM 2.1 AI in Medicine-IRAT Question only (PDF)"))
+        self.assertFalse(main.is_qa_resource("AY2627 DHPM 2.1 AI in Medicine-IRAT Question only"))
+        self.assertFalse(main.is_qa_resource("DHPM 2.1 AI in Medicine"))
 
     def test_an_event_counts_as_downloaded_only_when_every_listed_file_exists(self):
         import main

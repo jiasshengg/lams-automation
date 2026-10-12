@@ -140,3 +140,14 @@ test('range spelling renames leave reviewed titles, ambiguous spellings and expl
   const both: AuthoringGraph = { ...graph, nodes: [node(3, 'AE Q1 to Q2', 'tool'), node(6, 'AE Case 1 Q1 to Q2', 'tool')] };
   expect(withRangeSpellingRenames(both, plan, 'Copy', explicit)?.renames).toEqual(explicit.renames);
 });
+
+test('an earlier AE activity titled by its question range alone can be renamed, but only as a tool', () => {
+  const parsed = parseAERenamePlan({ lessonTitle: 'Copy', renames: [
+    { type: 'tool', from: 'Q3 to Case 2 Q4', to: 'AE Case 1 Q3-Case 2 Q4' },
+    { type: 'tool', from: 'Q5', to: 'AE Case 2 Q5' }
+  ] });
+  expect(parsed.renames.map((rename) => rename.from)).toEqual(['Q3 to Case 2 Q4', 'Q5']);
+  expect(() => parseAERenamePlan({ lessonTitle: 'Copy', renames: [{ type: 'gate', from: 'Q5', to: 'AE Gate AE Case 2 Q5' }] })).toThrow('exact AE title');
+  expect(() => parseAERenamePlan({ lessonTitle: 'Copy', renames: [{ type: 'tool', from: 'Questions', to: 'AE Case 2 Q5' }] })).toThrow('exact AE title');
+  expect(() => parseAERenamePlan({ lessonTitle: 'Copy', renames: [{ type: 'tool', from: 'QA', to: 'AE Case 2 Q5' }] })).toThrow('exact AE title');
+});

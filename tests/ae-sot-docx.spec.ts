@@ -138,6 +138,45 @@ test('does not split prose that merely contains a capital letter followed by a p
   expect(question.correctAnswerLabels).toEqual(['B']);
 });
 
+test('an answer line written with an en dash ends the options and keeps the rationale out', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. Which statement is the most accurate?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Correct', { bold: true })}
+    ${paragraph('Answer – B', { bold: true })}
+    ${paragraph('A. This is not significant')}
+    ${paragraph('B. This is accurate')}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const question = analyzeAESOT(paragraphs, 'Example').questions[0]!;
+  expect(question.optionLabels).toEqual(['A', 'B']);
+  expect(question.correctAnswerLabels).toEqual(['B']);
+});
+
+test('a "For Questions N to M" heading after an answer key opens the next question\'s reading', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. First question?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Correct', { bold: true })}
+    ${paragraph('Answer - ', { bold: true })}
+    ${paragraph('Worked answer', { bold: true })}
+    ${paragraph('For Questions 2 to 3:')}
+    ${paragraph('Your colleague proposes a design for each scenario.')}
+    ${paragraph('2. Objective: first scenario.')}
+    ${paragraph('A. Correct', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('3. Objective: second scenario.')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Correct', { bold: true })}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const [first, second] = analyzeAESOT(paragraphs, 'Example').questions;
+  expect([first!.promptHtml, ...first!.bodyLines, ...first!.leadInLines].join('\n')).not.toContain('colleague');
+  expect(second!.leadInLines).toEqual(['For Questions 2 to 3:', 'Your colleague proposes a design for each scenario.']);
+});
+
 test('labels an unlabelled option block bounded by an explicit answer line', () => {
   const paragraphs = extractSOTParagraphs(`<w:document><w:body>
     ${paragraph('1. Which individuals should be prioritised for immediate genetic testing?')}
@@ -932,4 +971,102 @@ test('a wider lettered table stays in the prompt without the answer row emphasis
   expect(table).toContain('<strong>X</strong>');
   expect(table).toContain('<td>A.</td><td>Low</td><td>High</td>');
   expect(table).not.toContain('<strong>Low</strong>');
+});
+
+test('numbers lettered parts of one question (12a, 12b, 12c) as consecutive questions', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('11. Earlier question?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Right', { bold: true })}
+    ${paragraph('Answer: B')}
+    ${paragraph('12a. A patient presents with pain. What is the finding?')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('Answer: A')}
+    ${paragraph('12b. A year later she returns. What is inside the abscess?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Right', { bold: true })}
+    ${paragraph('Answer: B')}
+    ${paragraph('12c. Name the outcomes.')}
+    ${paragraph('Answer: Resolution, chronic inflammation, fibrosis')}
+    ${paragraph('13a. A second patient. Which process?')}
+    ${paragraph('A. Right', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('Answer: A')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Parts');
+  expect(analysis.questions.map((question) => question.number)).toEqual([1, 2, 3, 4, 5]);
+  expect(analysis.questions.map((question) => question.type)).toEqual(['single-select', 'single-select', 'single-select', 'open-response', 'single-select']);
+});
+
+test('reads a bare Answer heading over label-to-statement pairings as a matching task', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('1. Recognise the cells and match them with the statements below.')}
+    ${paragraph('a. Acute inflammation')}
+    ${paragraph('b. Chronic inflammation')}
+    ${paragraph('Answer', { bold: true })}
+    ${paragraph('A. Plasma cell, c, b', { bold: true })}
+    ${paragraph('B. Lymphocyte , b', { bold: true })}
+    ${paragraph('C. Eosinophil e', { bold: true })}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Matching');
+  expect(analysis.questions).toHaveLength(1);
+  expect(analysis.questions[0]!.type).toBe('open-response');
+});
+
+test('keeps a figure whose paragraph holds only indentation in its printed place', () => {
+  const analysis = analyzeAESOT(extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('4. The kidney lesion is seen below. What is the main pathology seen?')}
+    <w:p><w:r><w:tab/><w:drawing><wp:inline><a:blip r:embed="rId1"/></wp:inline></w:drawing></w:r></w:p>
+    ${paragraph('Copyright@Elseiver')}
+    ${paragraph('A. Atherosclerosis')}
+    ${paragraph('B. Infarction', { bold: true })}
+    ${paragraph('Answer: B')}
+    ${paragraph('END')}
+  </w:body></w:document>`), 'Figure');
+  const prompt = analysis.questions[0]!.bodyLines.join('\n');
+  expect(prompt).toContain('{{image}}');
+  expect(prompt.indexOf('{{image}}')).toBeLessThan(prompt.indexOf('Copyright@Elseiver'));
+});
+
+test('a tab inside emphasis does not turn one answer line into a table', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>B,G</w:t><w:tab/></w:r></w:p>
+  </w:body></w:document>`);
+  expect(paragraphs[0]!.html).not.toContain('<table');
+});
+
+test('reads "Application Exercise" headings, "Answers -" keys, and a typed ranking list under a stem', () => {
+  const paragraphs = extractSOTParagraphs(`<w:document><w:body>
+    ${paragraph('Learning Outcomes:')}
+    ${paragraph('Application Exercise 1: Public Health')}
+    ${paragraph('The ministry proposes a surveillance system.')}
+    ${paragraph('1. Which measure improves accuracy?')}
+    ${paragraph('A. Wrong')}
+    ${paragraph('B. Correct', { bold: true })}
+    ${paragraph('Answer - B')}
+    ${paragraph('2. Provide at least 3 suggestions.')}
+    ${paragraph('Answers - {Open ended}', { bold: true })}
+    ${paragraph('3. Which is the greatest concern?')}
+    ${paragraph('A. Correct', { bold: true })}
+    ${paragraph('B. Wrong')}
+    ${paragraph('Answer - A')}
+    ${paragraph('4. Rank the following (1=highest):')}
+    ${paragraph('1. Full scale rollout')}
+    ${paragraph('2. Do not proceed')}
+    ${paragraph('A. 1, 2')}
+    ${paragraph('B. 2, 1')}
+    ${paragraph('Answer - A, B')}
+    ${paragraph('END')}
+  </w:body></w:document>`);
+
+  const analysis = analyzeAESOT(paragraphs, 'Example');
+
+  expect(analysis.questions.map((question) => question.number)).toEqual([1, 2, 3, 4]);
+  expect(analysis.nodes[0]?.contextHtml.join(' ')).toContain('Application Exercise 1: Public Health');
+  expect(analysis.nodes[0]?.contextHtml.join(' ')).not.toContain('Learning Outcomes');
+  expect(analysis.questions[1]?.type).toBe('open-response');
+  expect(JSON.stringify(analysis.questions[1])).not.toContain('Open ended');
+  expect(analysis.questions[3]?.bodyLines.join(' ')).toContain('1. Full scale rollout');
+  expect(analysis.questions[3]?.correctAnswerLabels).toEqual(['A', 'B']);
 });

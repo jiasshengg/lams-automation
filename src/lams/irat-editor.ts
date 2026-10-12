@@ -1,4 +1,4 @@
-import { requestNewVersionCheck, waitForQuestionFormIdle } from './question-form.js';
+import { waitForNewVersionOffer, waitForQuestionFormIdle } from './question-form.js';
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import type { IratQuestionRequest, IratRequest } from '../config.js';
 import { inspectAuthoringGraph, letClicksThroughDecorations, openActivityProperties, type AuthoringGraph, type GraphNode } from './authoring.js';
@@ -340,9 +340,9 @@ export class LamsIratEditor implements IratEditor {
     // in place, which would also change the source lesson this copy came from, so the run
     // stops rather than falling back to it.
     const saveQuestion = questionFrame.locator(existing ? '#saveAsButton' : '#saveButton');
-    if (existing) await requestNewVersionCheck(questionFrame, this.timeoutMs);
+    if (existing) await waitForNewVersionOffer(questionFrame, this.timeoutMs);
     try {
-      await saveQuestion.waitFor({ state: 'visible', timeout: this.timeoutMs });
+      await saveQuestion.waitFor({ state: 'visible', timeout: existing ? 1_000 : this.timeoutMs });
     } catch {
       throw new Error(existing
         ? `"Save as new version" never appeared for "${question.title}"; refusing to save the shared question in place.`
@@ -993,6 +993,7 @@ export class LamsIratEditor implements IratEditor {
     const frame = await (await iframe.elementHandle())?.contentFrame();
     if (!frame) throw new Error(`The authoring iframe for "${activity.name}" was not available.`);
     await frame.locator('#authoringForm').waitFor({ state: 'visible', timeout: this.timeoutMs });
+    await waitForStableQuestionList(frame, this.timeoutMs);
     this.activityFrame = frame;
     return frame;
   }
@@ -1504,6 +1505,27 @@ function visibleField(dialog: Locator, className: string): Locator {
   return dialog.locator(className).filter({ visible: true }).first();
 }
 
+
+/**
+ * The references table keeps filling in after #authoringForm is visible, so a long iRAT can be
+ * read with only its first rows (7 or 14 of 25 were observed), and an Edit click lands on a row
+ * that is then replaced. Wait for the page to finish loading and the titles to hold still.
+ */
+export async function waitForStableQuestionList(frame: Frame, timeoutMs: number, quietMs = 1500): Promise<void> {
+  await frame.waitForFunction(() => document.readyState === 'complete', undefined, { timeout: timeoutMs });
+  const deadline = Date.now() + timeoutMs;
+  let previous = JSON.stringify(await questionTitles(frame));
+  let stableSince = Date.now();
+  while (Date.now() - stableSince < quietMs) {
+    if (Date.now() > deadline) throw new Error(`The iRAT question list was still changing after ${timeoutMs}ms.`);
+    await frame.waitForTimeout(250);
+    const current = JSON.stringify(await questionTitles(frame));
+    if (current !== previous) {
+      previous = current;
+      stableSince = Date.now();
+    }
+  }
+}
 
 async function questionTitles(frame: Frame): Promise<string[]> {
   return (await frame.locator(`#referencesTable tbody tr ${QUESTION_TITLE}`).allTextContents()).map(normalizeText);

@@ -339,3 +339,29 @@ test('still fails the AE gate count when the leading gate is duplicated', () => 
   expect(report.checks.find((check) => check.label === 'AE plan gate count')?.detail).toBe('Expected: 1; Found: 2');
   expect(report.passed).toBe(false);
 });
+
+test('checks Team Setup associations against the grouping name the lesson configures', () => {
+  const flow = ['Teams', 'iRAT', 'tRAT'];
+  const nodes: GraphNode[] = flow.map((name, index) => ({
+    uiid: index + 6,
+    name,
+    type: name === 'Teams' ? 'grouping' : 'tool',
+    grouped: name !== 'Teams',
+    groupingUiid: name !== 'Teams' ? 6 : null,
+    x: null,
+    y: null,
+    toolId: null,
+    gateType: null,
+    description: null,
+    dynamicPassword: null,
+    rotationSeconds: null,
+    stopAtPrecedingActivity: null,
+    gradebookOutput: null
+  }));
+  const graph: AuthoringGraph = { rendering: 'svg', modelAvailable: true, nodes, transitions: [] };
+  const association = (config: LamsConfig) =>
+    validateAuthoringGraph(graph, config).checks.find((check) => check.label === 'Team Setup associations');
+
+  expect(association({ expectedFlow: flow, irat: { teamSetupName: 'Teams' } } as LamsConfig)?.passed).toBe(true);
+  expect(association({ expectedFlow: flow } as LamsConfig)?.passed).toBe(false);
+});

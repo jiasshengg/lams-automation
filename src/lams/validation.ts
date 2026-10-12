@@ -74,7 +74,9 @@ export function validateAuthoringGraph(graph: AuthoringGraph, config: LamsConfig
             : 'All expected adjacent nodes are connected in one chain'
   });
 
-  const teamSetup = nodesByName.get('Team Setup')?.[0];
+  // The copied template names its grouping; `Teams` in some lessons, `Team Setup` in most.
+  const teamSetupName = config.irat?.teamSetupName ?? 'Team Setup';
+  const teamSetup = nodesByName.get(teamSetupName)?.[0];
   const associationFailures = graph.nodes.filter(
     (node) => node.type === 'tool' && (!teamSetup || !node.grouped || node.groupingUiid !== teamSetup.uiid)
   );
@@ -83,8 +85,8 @@ export function validateAuthoringGraph(graph: AuthoringGraph, config: LamsConfig
     passed: Boolean(teamSetup) && associationFailures.length === 0,
     detail:
       teamSetup && associationFailures.length === 0
-        ? 'All tool activities are grouped with Team Setup; gates are exempt per the reference lesson'
-        : `Not associated: ${associationFailures.map((node) => node.name).join(', ') || 'Team Setup missing'}`
+        ? `All tool activities are grouped with ${teamSetupName}; gates are exempt per the reference lesson`
+        : `Not associated: ${associationFailures.map((node) => node.name).join(', ') || `${teamSetupName} missing`}`
   });
 
   const gateNameFailures: string[] = [];

@@ -120,6 +120,42 @@ test('a page break does not count as a blank line but is recorded on the next pa
   ]);
 });
 
+test('empty paragraphs that push text onto a new page start that page; text flowing on does not', () => {
+  const rendered = (text: string) => `<w:p><w:r><w:lastRenderedPageBreak/><w:t>${text}</w:t></w:r></w:p>`;
+  const paragraphs = extractSOTParagraphs(doc(p('Rationale - one'), p(''), p(''), rendered('Later that night'), rendered('Rationale continues')));
+  expect(paragraphs.map((paragraph) => [paragraph.text, paragraph.pageBreakBefore])).toEqual([
+    ['Rationale - one', false],
+    ['Later that night', true],
+    ['Rationale continues', false]
+  ]);
+});
+
+test('a scenario padded onto the next page leads the next question rather than trailing the rationale', () => {
+  const analysis = analyzeAESOT(
+    extractSOTParagraphs(
+      doc(
+        p('1. Which disorder fits? (4 marks)'),
+        p('A. One'),
+        p('B. Two'),
+        p('Answer - B'),
+        p('Rationale - the picture describes two.'),
+        p(''),
+        p(''),
+        '<w:p><w:r><w:lastRenderedPageBreak/><w:t>Later that night she bled from venepuncture sites.</w:t></w:r></w:p>',
+        p(''),
+        p('2. Which test is least appropriate? (4 marks)'),
+        p('A. Three'),
+        p('B. Four'),
+        p('Answer - A'),
+        p('END')
+      )
+    ),
+    'fallback'
+  );
+  const second = buildAEDraft(analysis).nodes[0]!.questions.find((question) => question.number === 2)!;
+  expect(second.prompt).toBe(['Later that night she bled from venepuncture sites.', '', '2. Which test is least appropriate? (4 marks)'].join('\n'));
+});
+
 function spacedSot() {
   return analyzeAESOT(
     extractSOTParagraphs(

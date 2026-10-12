@@ -68,3 +68,31 @@ test('asks LAMS for its version check so a quickly filled question is offered Sa
 
   await expect(page.locator('#saveAsButton')).toBeVisible();
 });
+
+test('asks for the version check again when LAMS never answers the first one', async ({ page }) => {
+  const { waitForNewVersionOffer } = await import('../src/lams/question-form.js');
+  // The first quick check is swallowed (no reply, button stays hidden); the second answers.
+  await page.setContent(`<form id="assessmentQuestionForm" action="/saveQuestion.do"></form>
+    <button id="saveAsButton" style="display:none">Save as new version</button>
+    <script>
+      window.checks = 0;
+      window.checkQuestionNewVersion = function (quick) {
+        if (!quick) return;
+        window.checks += 1;
+        if (window.checks === 1) return;
+        setTimeout(function () { document.getElementById('saveAsButton').style.display = ''; }, 100);
+      };
+    </script>`);
+
+  expect(await waitForNewVersionOffer(page.mainFrame(), 6000)).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { checks: number }).checks)).toBe(2);
+});
+
+test('reports false rather than falling back when Save as new version never appears', async ({ page }) => {
+  const { waitForNewVersionOffer } = await import('../src/lams/question-form.js');
+  await page.setContent(`<form id="assessmentQuestionForm" action="/saveQuestion.do"></form>
+    <button id="saveAsButton" style="display:none">Save as new version</button>
+    <script>window.checkQuestionNewVersion = function () {};</script>`);
+
+  expect(await waitForNewVersionOffer(page.mainFrame(), 6000, 2)).toBe(false);
+});
