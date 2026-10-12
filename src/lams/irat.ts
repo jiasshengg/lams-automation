@@ -215,6 +215,7 @@ export async function resolveIratRequest(config: LamsConfig): Promise<IratReques
   if (formatting.applied.length > 0) {
     console.log(`SoT inline formatting applied from ${request.sourceDocx} to ${formatting.applied.length} question fields.`);
   }
+  for (const correction of formatting.spacingCorrections) console.warn(`SoT spacing corrected: ${correction}`);
   for (const warning of formatting.warnings) console.warn(`SoT formatting warning: ${warning}`);
   for (const warning of formatting.reviewWarnings) console.warn(`SoT review needed: ${warning}`);
   return request;
