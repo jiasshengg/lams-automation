@@ -7,6 +7,7 @@ import {
   withoutCompatibilityFallback,
   withoutTextBoxes
 } from '../docx/blocks.js';
+import type { RenderKind } from '../docx/render-targets.js';
 
 /** The gap a tab leaves: four non-breaking spaces, because HTML collapses ordinary ones. */
 const TAB_GAP = '    ';
@@ -56,6 +57,26 @@ export interface SOTParagraph {
   cellHtml?: string[][];
   /** How far the document indents the line from the left margin, in twips. */
   indentTwips?: number;
+  /** Set when this block is shown as Word's own picture of it rather than rebuilt. */
+  render?: SOTRender;
+}
+
+/** A block the draft shows as a rendered picture: a whole table, or a figure drawn with shapes. */
+export interface SOTRender {
+  id: string;
+  kind: RenderKind;
+  /** The first block of the target to reach the prompt; it holds the target's one image slot. */
+  lead: boolean;
+  /** The words the paragraph prints outside its drawings, which stay in the prompt as text. */
+  textHtml: string;
+}
+
+/** The blocks to show as rendered pictures, as `findRenderTargets` names them. */
+export interface SOTRenderRange {
+  id: string;
+  kind: RenderKind;
+  firstBlock: number;
+  lastBlock: number;
 }
 
 export function readDocumentXmlFromDocx(buffer: Buffer): string {
@@ -110,21 +131,53 @@ export function readParagraphsWithListLabels(
  * table into a column of stray lines. Empty paragraphs are not blocks; they become the
  * `blankLinesBefore` of the next block that carries content.
  */
-export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts = {}): SOTParagraph[] {
+export function extractSOTParagraphs(
+  documentXml: string,
+  parts: SOTLayoutParts = {},
+  options: { renders?: readonly SOTRenderRange[] } = {}
+): SOTParagraph[] {
+  return asTabTables(readBlocks(documentXml, parts, options).paragraphs);
+}
+
+/**
+ * The blocks of each column layout the document builds with tab stops rather than a table
+ * ("Hb   8.2 g/dL   13.6 – 16.6 g/dL"). It reads as a table, so the draft renders it like one.
+ */
+export function tabTableBlockRanges(documentXml: string, parts: SOTLayoutParts = {}): { firstBlock: number; lastBlock: number; text: string }[] {
+  const { paragraphs, blocks } = readBlocks(documentXml, parts);
+  const ranges: { firstBlock: number; lastBlock: number; text: string }[] = [];
+  asTabTables(paragraphs, (first, last, table) => ranges.push({ firstBlock: blocks[first]!, lastBlock: blocks[last]!, text: table.text }));
+  return ranges;
+}
+
+/** The content blocks in order, each with the index of the document block it was read from. */
+function readBlocks(
+  documentXml: string,
+  parts: SOTLayoutParts,
+  options: { renders?: readonly SOTRenderRange[] } = {}
+): { paragraphs: SOTParagraph[]; blocks: number[] } {
   const reader = new SOTLayoutReader(parts);
   const result: SOTParagraph[] = [];
+  const blocks: number[] = [];
+  const renders = options.renders ?? [];
+  const started = new Set<string>();
   let previous: ParagraphLayout | null = null;
   let emptyParagraphs = 0;
   let pageBreak = false;
 
-  for (const block of topLevelBlocks(documentXml)) {
+  for (const [index, block] of topLevelBlocks(documentXml).entries()) {
     const layout = block.kind === 'p' ? reader.read(block.inner) : TABLE_LAYOUT;
-    const content =
+    const read =
       block.kind === 'p'
         ? withListItem(paragraphContent(block.inner, layout.listLabel, layout.displayLabel ?? null), layout.listItem ?? null)
         : tableContent(block.inner, (paragraph) => reader.read(paragraph).listLabel);
+    const range = renders.find((entry) => entry.firstBlock <= index && index <= entry.lastBlock);
+    const content = range ? withRender(read, range, block, layout, started) : read;
     pageBreak ||= layout.pageBreakBefore;
-    if (content.text === '' && content.imageCount === 0) {
+    // An empty paragraph a rendered figure is drawn over is part of its picture, not a blank line.
+    if (content.render && !content.render.lead && content.text === '' && content.imageCount === 0 && content.render.textHtml === '') continue;
+    // A drawing with no words and no picture (an arrow) still leads a rendered figure.
+    if (content.text === '' && content.imageCount === 0 && !content.render) {
       // A paragraph holding only a page break moves to a new page; it is not a typed blank line.
       if (!layout.pageBreakAfter && !layout.pageBreakBefore) emptyParagraphs += 1;
       pageBreak ||= layout.pageBreakAfter;
@@ -141,11 +194,33 @@ export function extractSOTParagraphs(documentXml: string, parts: SOTLayoutParts 
       pageBreakBefore: pageBreak || paddedOntoNewPage,
       indentTwips: layout.indentTwips
     });
+    blocks.push(index);
     previous = layout;
     emptyParagraphs = 0;
     pageBreak = layout.pageBreakAfter;
   }
-  return asTabTables(result);
+  return { paragraphs: result, blocks };
+}
+
+/**
+ * Marks a block as part of a rendered target. Its text and cells are kept as read, so questions,
+ * options and answer keys are recognised exactly as before; only the prompt shows the picture.
+ */
+function withRender(
+  content: SOTParagraph,
+  range: SOTRenderRange,
+  block: { kind: 'p' | 'tbl'; inner: string },
+  layout: ParagraphLayout,
+  started: Set<string>
+): SOTParagraph {
+  const lead = !started.has(range.id);
+  started.add(range.id);
+  // A figure's paragraph keeps its words as text; a table's lines are all inside the picture.
+  const textHtml =
+    block.kind === 'p' && range.kind === 'figure'
+      ? paragraphContent(block.inner.replace(/<w:drawing\b[\s\S]*?<\/w:drawing>|<w:pict\b[\s\S]*?<\/w:pict>/g, ''), layout.listLabel, layout.displayLabel ?? null).html
+      : '';
+  return { ...content, render: { id: range.id, kind: range.kind, lead, textHtml } };
 }
 
 /** Word rendered a page break ahead of the paragraph's first visible character. */
@@ -172,7 +247,10 @@ const OPTION_LABEL_CELL = /^[A-Z][.)]$/;
  * up as the document prints them, and the line the document indents over the last column - the
  * "Reference Range" heading - joins it there.
  */
-function asTabTables(paragraphs: SOTParagraph[]): SOTParagraph[] {
+function asTabTables(
+  paragraphs: SOTParagraph[],
+  onTable?: (first: number, last: number, table: SOTParagraph) => void
+): SOTParagraph[] {
   const result: SOTParagraph[] = [];
   for (let index = 0; index < paragraphs.length; index += 1) {
     const rows: string[][] = [];
@@ -206,14 +284,18 @@ function asTabTables(paragraphs: SOTParagraph[]): SOTParagraph[] {
     const fitted = padded.map((row) => fitToWidth(row.filter((cell, at) => at < width || cell !== ''), width));
     if (opensWithHeader) fitted.unshift([...Array.from({ length: width - 1 }, () => ''), header!.html]);
     const source = paragraphs[first]!;
-    result.push({
+    const table: SOTParagraph = {
       text: fitted.flat().filter((cell) => cell !== '').join(' '),
       html: '<table data-layout="tabs">' + fitted.map((row) => '<tr>' + row.map((cell) => '<td>' + cell + '</td>').join('') + '</tr>').join('') + '</table>',
       bold: false,
       imageCount: 0,
       blankLinesBefore: source.blankLinesBefore,
-      pageBreakBefore: source.pageBreakBefore
-    });
+      pageBreakBefore: source.pageBreakBefore,
+      // Rendered as a whole, the block is Word's one picture of its lines.
+      ...(source.render ? { render: { ...source.render, lead: true, textHtml: '' } } : {})
+    };
+    result.push(table);
+    onTable?.(first, index - 1, table);
     index -= 1;
   }
   return result;
@@ -224,7 +306,8 @@ function asTabTables(paragraphs: SOTParagraph[]): SOTParagraph[] {
  * one word after a run of tabs counts too: that is how the document positions a column heading.
  */
 function tabColumns(paragraph: SOTParagraph | undefined): string[] | null {
-  if (paragraph === undefined || paragraph.imageCount > 0 || !paragraph.html.includes(TAB_GAP)) return null;
+  // A line inside a rendered figure is part of the picture; a line of a rendered tab table is still read as one.
+  if (paragraph === undefined || paragraph.imageCount > 0 || paragraph.render?.kind === 'figure' || !paragraph.html.includes(TAB_GAP)) return null;
   // A tab inside emphasis splits its closing tag into a cell of its own; a cell with nothing
   // visible in it is not a column.
   const columns = paragraph.html

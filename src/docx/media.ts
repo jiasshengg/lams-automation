@@ -6,6 +6,8 @@ import { readZipEntries, requireZipEntry } from './archive.js';
 import { paragraphBlocks, textBoxContents, withoutCompatibilityFallback } from './blocks.js';
 import {
   ANSWER_OR_RATIONALE,
+  BREAK_MARKER,
+  FACULTY_ONLY,
   NUMBERED_STEM,
   SECTION_BOUNDARY,
   isOptionLine,
@@ -194,6 +196,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
   let currentStem = -1;
   let imageIndex = 0;
   let sectionStarted = false;
+  let facultySection = false;
 
   paragraphs.forEach((paragraph, paragraphIndex) => {
     const xml = paragraph.xml;
@@ -203,6 +206,10 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
       for (const pending of awaitingCaption.splice(0)) pending.caption = caption;
     }
     const stem = stems[paragraphIndex];
+    // Material addressed to faculty runs to the next break or question; its figures are for
+    // the facilitator, so they join no question, as the AE extractor leaves that section out.
+    if ((stem !== null && stem !== undefined) || BREAK_MARKER.test(text)) facultySection = false;
+    else if (FACULTY_ONLY.test(text)) facultySection = true;
     if (stem !== null && stem !== undefined) {
       currentQuestion = stem;
       currentStem = paragraphIndex;
@@ -233,7 +240,7 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
       const altText = attribute(docProperties, 'descr') || attribute(docProperties, 'title') || '';
       const extension = isEmf ? '.png' : path.extname(sourcePart).toLowerCase();
       const sha256 = createHash('sha256').update(data).digest('hex');
-      const assigned = leadIn ? null : currentQuestion;
+      const assigned = leadIn || facultySection ? null : currentQuestion;
       const image: DocxImage = {
         id: `image-${imageIndex}`,
         relationshipId: picture.relationshipId,
@@ -253,14 +260,14 @@ export function inspectDocxImages(buffer: Buffer): DocxImage[] {
         ...displaySize(picture, extent),
         sha256,
         // A lead-in figure already goes to the next question, so it is shared with nothing.
-        ...(leadIn ? NOT_SHARED : sharingSignals(paragraphs, stems, paragraphIndex, currentQuestion)),
+        ...(leadIn || facultySection ? NOT_SHARED : sharingSignals(paragraphs, stems, paragraphIndex, currentQuestion)),
         data
       };
       images.push(image);
       awaitingCaption.push(image);
       // Before the document's first section boundary there is no question to wait
       // for, so cover art and logos stay unassigned instead of joining question 1.
-      if (leadIn || (currentQuestion === null && sectionStarted)) awaitingQuestion.push(image);
+      if (!facultySection && (leadIn || (currentQuestion === null && sectionStarted))) awaitingQuestion.push(image);
     }
   });
   return images;

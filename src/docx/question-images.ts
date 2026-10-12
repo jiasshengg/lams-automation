@@ -1,9 +1,11 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import type { IratRequest, QuestionImageRequest } from '../config.js';
-import type { AEPlan } from '../ae/plan.js';
+import type { AEPlan, RenderedFigureRequest } from '../ae/plan.js';
+import { readDocumentXmlFromDocx } from '../ae/sot-paragraphs.js';
 import { resolveInputFile } from '../input-file.js';
-import { inspectDocxImages, type ImageCrop, type ImagePlacement } from './media.js';
+import { inspectDocxImages, type DocxImage, type ImageCrop, type ImagePlacement } from './media.js';
+import { readParagraphBlockIndexes } from './render-targets.js';
 
 export interface QuestionImageAsset {
   filename: string;
@@ -55,13 +57,15 @@ export async function resolveIratQuestionImages(request: IratRequest): Promise<M
 
 export async function resolveAEQuestionImages(plan: AEPlan): Promise<Map<number, QuestionImageAsset[]>> {
   const result = new Map<number, QuestionImageAsset[]>();
-  const sourceImages = plan.sourceDocx ? await imagesFromDocx(plan.sourceDocx) : [];
+  const source = plan.sourceDocx ? await readSourceDocx(plan.sourceDocx) : null;
+  const sourceImages = source ? source.images.filter((image) => !image.afterAnswerKey) : [];
   for (const question of plan.nodes.flatMap((node) => node.questions)) {
     // A replaced figure means the reviewed images stand in for the document's own, which could
     // not be handed over; importing both would show the broken arrangement alongside the fix.
-    const automatic = question.replaceSourceFigures
+    const own = question.replaceSourceFigures
       ? []
-      : sourceImages.filter((image) => image.questionNumber === question.sourceQuestionNumber).map(toAsset);
+      : sourceImages.filter((image) => image.questionNumber === question.sourceQuestionNumber);
+    const automatic = await withRenderedFigures(own, question.renderedFigures, source?.blockOfParagraph ?? []);
     const explicit = await resolveExplicitImages(question.images);
     result.set(question.number, deduplicate([...automatic, ...explicit]));
   }
@@ -69,13 +73,53 @@ export async function resolveAEQuestionImages(plan: AEPlan): Promise<Map<number,
 }
 
 /**
- * The figures a question may import: everything the document prints for it except the ones under
- * its own answer key, which belong to the rationale. An excluded figure can still be imported by
- * naming its file in the question's own `images`.
+ * The document's figures for a question with Word's pictures of its tables and drawn figures in
+ * place: a picture inside a rendered block is part of that rendering, so it is not imported on its
+ * own. Everything stays in document order, which is the order of the prompt's image slots.
  */
+async function withRenderedFigures(
+  images: DocxImage[],
+  figures: readonly RenderedFigureRequest[],
+  blockOfParagraph: readonly number[]
+): Promise<QuestionImageAsset[]> {
+  if (figures.length === 0) return images.map(toAsset);
+  const blockOf = (image: DocxImage) => blockOfParagraph[image.paragraphIndex] ?? -1;
+  const inside = (block: number) => figures.some((figure) => figure.blocks[0] <= block && block <= figure.blocks[1]);
+  const placed: { block: number; asset: QuestionImageAsset }[] = images
+    .filter((image) => !inside(blockOf(image)))
+    .map((image) => ({ block: blockOf(image), asset: toAsset(image) }));
+  for (const figure of figures) placed.push({ block: figure.blocks[0], asset: await renderedAsset(figure) });
+  return placed.sort((left, right) => left.block - right.block).map((entry) => entry.asset);
+}
+
+async function renderedAsset(figure: RenderedFigureRequest): Promise<QuestionImageAsset> {
+  const filename = await resolveInputFile(figure.path, path.extname(figure.path) || '.png');
+  return {
+    filename: path.basename(filename),
+    contentType: contentType(path.extname(filename)),
+    data: await readFile(filename),
+    altText: figure.altText ?? '',
+    widthPx: figure.widthPx ?? null,
+    // The slot the draft left for it already places it among the prompt's lines.
+    placement: 'after',
+    crop: null,
+    caption: '',
+    source: filename
+  };
+}
+
+/**
+ * The figures a question may import, with the block each picture's paragraph belongs to. Figures
+ * under a question's own answer key belong to the rationale and are filtered out by the caller; an
+ * excluded figure can still be imported by naming its file in the question's own `images`.
+ */
+async function readSourceDocx(query: string): Promise<{ images: DocxImage[]; blockOfParagraph: number[] }> {
+  const buffer = await readFile(await resolveInputFile(query, '.docx'));
+  return { images: inspectDocxImages(buffer), blockOfParagraph: readParagraphBlockIndexes(readDocumentXmlFromDocx(buffer)) };
+}
+
 async function imagesFromDocx(query: string) {
-  const filename = await resolveInputFile(query, '.docx');
-  return inspectDocxImages(await readFile(filename)).filter((image) => !image.afterAnswerKey);
+  return (await readSourceDocx(query)).images.filter((image) => !image.afterAnswerKey);
 }
 
 async function resolveExplicitImages(images: QuestionImageRequest[]): Promise<QuestionImageAsset[]> {

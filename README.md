@@ -207,6 +207,8 @@ The extractor treats only a standalone literal `--- BREAK ---` paragraph as an A
 
 `--draft` writes a reviewable AE plan JSON transcribed from the document: those node titles, the case narrative that opens each node, every stem and option with the bold, italic, underline, superscript, and subscript the document uses, detected answer keys, explicit marks, and gates. Retyping the document by hand is what makes titles, emphasis, and figure order drift, so always start from the draft and resolve its `_review` notes and `TODO_` keys.
 
+On Windows with Microsoft Word installed, the draft also shows each learner-facing table and each figure drawn with shapes (grouped pictures, arrows, text-box labels) as Word's own picture of it, instead of rebuilding it: merged cells, shading, coloured text, and the arrangement of a drawing all come through as printed. The PNGs are written next to the draft in `<draft name>-figures/` and listed per question under `renderedFigures`; open each one and check it before applying. Word runs invisibly on a temporary copy of the document. Add `--no-render` to keep the rebuilt HTML tables. On macOS, or without Word, the draft rebuilds tables and figures as before and its `_review` lists each one to check.
+
 The draft follows the document's layout, while the paragraph format and font stay at the LAMS defaults:
 
 - each Word paragraph is one line, and each blank line is an empty line — whether the document typed an empty paragraph or left a visible gap (6pt or more) with paragraph spacing;

@@ -67,6 +67,21 @@ export class LamsAEEditor {
       );
     }
 
+    // LAMS keeps a question's type for good: an essay cannot be rewritten as multiple choice. A
+    // mismatch is reported before anything in the node is written, not as a missing control later.
+    for (let index = 0; index < existingCount; index += 1) {
+      const question = nodePlan.questions[index]!;
+      const expected = question.type === 'mcq' ? 'Multiple choice' : 'Essay';
+      const row = (await rows.nth(index).innerText()).replace(/\s+/g, ' ').trim();
+      if (!row.includes(expected)) {
+        throw new Error(
+          `AE node "${nodePlan.title}" already holds "${row.slice(0, 80)}" in position ${index + 1}, but the reviewed plan's ` +
+            `question ${question.number} is ${expected.toLowerCase()}. LAMS cannot change a question's type in place; ` +
+            'remove the earlier activity from the copy with an authorised placeholder repair (--repair-json) and let the AE stage create it.'
+        );
+      }
+    }
+
     const updatedQuestions: string[] = [];
     const createdQuestions: string[] = [];
     const uploadedImages: UploadedImage[] = [];

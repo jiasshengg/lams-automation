@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { renderTargetId } from '../docx/render-targets.js';
 import { resolveInputFile } from '../input-file.js';
 import { buildAEDraft } from './draft.js';
 import { buildAEPlan, type AEPlan } from './plan.js';
@@ -68,7 +69,12 @@ export async function assertAEPlanMatchesSOT(plan: AEPlan, argv: readonly string
     throw new Error(`The AE JSON names no sourceDocx, so it cannot be checked against the AE Source-of-Truth. ${regenerate}`);
   }
   const { documentXml, ...layout } = readSOTDocxParts(await readFile(await resolveInputFile(plan.sourceDocx, '.docx')));
-  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout), plan.sourceLabel, {
+  // A table or figure the draft showed as Word's picture is read as that picture on this side too.
+  const renders = plan.nodes
+    .flatMap((node) => node.questions)
+    .flatMap((question) => question.renderedFigures)
+    .map((figure) => ({ id: renderTargetId(figure.blocks[0], figure.blocks[1]), kind: figure.kind, firstBlock: figure.blocks[0], lastBlock: figure.blocks[1] }));
+  const analysis = analyzeAESOT(extractSOTParagraphs(documentXml, layout, { renders }), plan.sourceLabel, {
     columnQuestions: plan.columnQuestions === true
   });
   const differences = compareAEPlanToSOT(plan, analysis);

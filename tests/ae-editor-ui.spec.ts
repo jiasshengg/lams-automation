@@ -276,7 +276,7 @@ test('a Print View check names the line that is missing, not the whole prompt', 
       promptHtml: '<div>QUESTION 1</div><div>The tracings below:</div><div>Note: CSFA is the control lane.</div><div>Which tracing fits?</div>',
       marks: 4, answerRequired: true as const, prefixSequentialLetters: false, multipleAnswersAllowed: false,
       saveAsNewVersion: true as const, selectLatestVersion: true as const, options: [], sourceQuestionNumber: 1,
-      images: [], replaceSourceFigures: false, promptReplacements: []
+      images: [], replaceSourceFigures: false, promptReplacements: [], renderedFigures: []
     }]
   };
 
@@ -293,7 +293,7 @@ test('a Print View check accepts figure captions between the prompt lines, but n
       number: 15, title: 'Question 15', type: 'essay' as const, promptHtml,
       marks: 4, answerRequired: true as const, prefixSequentialLetters: false, multipleAnswersAllowed: false,
       saveAsNewVersion: true as const, selectLatestVersion: true as const, options: [], sourceQuestionNumber: 15,
-      images: [], replaceSourceFigures: false, promptReplacements: []
+      images: [], replaceSourceFigures: false, promptReplacements: [], renderedFigures: []
     }]
   });
   const prompt = '<div>Mr Kong fell in his kitchen.</div><div>QUESTION 15</div><div>Which diagram applies?</div>';
