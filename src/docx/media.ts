@@ -343,7 +343,10 @@ function pictureReferences(paragraphXml: string): PictureReference[] {
     const wrapped = pictures.filter((match) => match[0].startsWith('<pic:pic'));
     const chosen = wrapped.length > 0 ? wrapped : pictures;
     for (const picture of chosen) {
-      const relationshipId = /(?:r:embed|r:id)=["']([^"']+)["']/.exec(picture[0])?.[1];
+      // A picture can carry a click hyperlink (`<a:hlinkClick r:id>`) ahead of its image, so the
+      // embedded image is preferred; `r:id` is the VML form and only used when there is no embed.
+      const relationshipId =
+        /r:embed=["']([^"']+)["']/.exec(picture[0])?.[1] ?? /\br:id=["']([^"']+)["']/.exec(picture[0])?.[1];
       if (!relationshipId) continue;
       const pictureXml = wrapped.length > 0 ? picture[0] : drawingXml;
       references.push({ relationshipId, drawingXml, pictureXml, grouped: chosen.length > 1, overlayText });

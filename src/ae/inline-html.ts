@@ -90,7 +90,7 @@ export function linkifyUrls(sanitizedHtml: string): string {
 export function stripQuestionNumberHtml(value: string, numbers: number | readonly number[]): string | null {
   const known = typeof numbers === 'number' ? [numbers] : numbers;
   const text = inlineHtmlToText(value);
-  const punctuated = /^\s*(?:Q\s?)?(\d+)\s*[.):]\s+/i.exec(text);
+  const punctuated = /^\s*(?:Q\s?)?(\d+)[a-z]?\s*[.):]\s+/i.exec(text);
   const bare = /^\s*(\d+),?\s+/.exec(text);
   const match = punctuated ?? (bare && known.includes(Number(bare[1])) ? bare : null);
   if (!match) return null;

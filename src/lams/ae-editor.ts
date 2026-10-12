@@ -1,4 +1,4 @@
-import { requestNewVersionCheck, waitForQuestionFormIdle } from './question-form.js';
+import { waitForNewVersionOffer, waitForQuestionFormIdle } from './question-form.js';
 import type { Dialog, Frame, Locator, Page } from '@playwright/test';
 import { inlineHtmlToText, sanitizeInlineHtml } from '../ae/inline-html.js';
 import type { AENodePlan, AEPlan, AEQuestionPlan } from '../ae/plan.js';
@@ -211,8 +211,8 @@ export class LamsAEEditor {
     }
 
     const save = existing ? frame.locator('#saveAsButton') : frame.locator('#saveButton');
-    if (existing) await requestNewVersionCheck(frame, this.timeoutMs);
-    await save.waitFor({ state: 'visible', timeout: this.timeoutMs });
+    if (existing) await waitForNewVersionOffer(frame, this.timeoutMs);
+    await save.waitFor({ state: 'visible', timeout: existing ? 1_000 : this.timeoutMs });
     await waitForQuestionFormIdle(frame, this.timeoutMs);
     await save.click();
     return uploaded;

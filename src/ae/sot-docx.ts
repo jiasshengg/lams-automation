@@ -96,8 +96,8 @@ export const SOT_QUESTION_START = NUMBERED_STEM;
 const END_MARKER = /^END$/i;
 const OPTION_START = /^([A-Z])[.)]\s+\S/;
 const INLINE_OPTION = /(?:^|\s)([A-Z])[.)]\s+\S/g;
-// A bare "Answer:" opens a key stated on the lines below it.
-const ANSWER_LINE = /^Answer\s*[-:]\s*(.*)$/i;
+// A bare "Answer:" (or a heading "Answer" alone) opens a key stated on the lines below it.
+const ANSWER_LINE = /^\s*Answers?\s*(?:[-–—:]\s*(.*)|$)/i;
 /** "Select from above images: A, B, C, D" — the document naming the options it prints as figures. */
 const DECLARED_LABELS = /^(?:select|choose)\b[^:]*:\s*([A-Z](?:\s*,\s*[A-Z])+)/i;
 /** "possibly H", "possible C and G": an answer the document will not commit to, which is ignored. */
@@ -120,12 +120,31 @@ const DECLARED_LABEL_RANGE = /\b(?:match|select|choose)\b[^.]*\(\s*([A-Z])\s*[�
 const DECLARED_COLUMN_SET = /\bQ(\d+)\s*(?:to|through|[-–—])\s*Q?(\d+)\b/i;
 const ANSWER_ROW = /^Answer\b/i;
 const RATIONALE_LINE = /^Rationale\b/i;
+/** "For Questions 2 to 6:", "Questions 3-4": a heading over the scenario the questions it names share. */
+const QUESTION_RANGE_HEADING = /^(?:For\s+)?(?:Questions|Qs?)\s*\d+\s*(?:to|through|and|[-–—])\s*Q?\d+\s*:?\s*$/i;
 /** One pairing in a matching key: an item, a dash, and the option letter it matches. */
 const MATCHING_KEY_LINE = /^\s*\S.*\s[–—-]\s*[A-Z]\.?\s*$/;
 
 function isMatchingPair(text: string): boolean {
   return MATCHING_KEY_LINE.test(text) && !ANSWER_LINE.test(text.trim()) && !RATIONALE_LINE.test(text.trim());
 }
+
+/** "A, C" as item 4 of a numbered key: the letters matched to the fourth numbered item. */
+const NUMBERED_LETTER_KEY = /^\s*[A-Z](?:\s*,\s*[A-Z])*\s*$/;
+/** "A. Plasma cell, c, b": a labelled figure named and paired with the lettered statements it matches. */
+const LABEL_TO_STATEMENTS_KEY = /^\s*[A-Z][.)]\s+\S.*?[\s,]\s*[a-z](?:\s*,\s*[a-z])*\s*$/;
+
+/** One pairing in a matching key, however the document writes it. */
+function isMatchingKeyParagraph(paragraph: SOTParagraph): boolean {
+  if (isMatchingPair(paragraph.text)) return true;
+  if (paragraph.listItem && NUMBERED_LETTER_KEY.test(paragraph.text)) return true;
+  return LABEL_TO_STATEMENTS_KEY.test(paragraph.text);
+}
+/**
+ * A heading that opens the first question's reading above the front matter: a Case heading, or the
+ * "Application Exercise 1: …" some SoTs title their cases with instead.
+ */
+const NARRATIVE_HEADING = new RegExp(`${CASE_HEADING.source}|^Application\\s+exercise\\s+\\d+\\b`, 'i');
 /** Front matter of the first group (copyright, outcomes, labels) is never case narrative. */
 const METADATA_LABEL =
   /^(?:Module|Session Title|Authors and affiliations|Resource|Learning Outcomes|Specific Objectives for Session|Application title|Copyright Statement)\b/i;
@@ -187,7 +206,7 @@ export function analyzeAESOT(
     const firstQuestionIndex = untrimmedGroup.findIndex((_paragraph, paragraphIndex) => startAt(paragraphIndex).length > 0);
     const precedingCaseIndex = untrimmedGroup.reduce(
       (latest, paragraph, paragraphIndex) =>
-        paragraphIndex < firstQuestionIndex && CASE_HEADING.test(paragraph.text) ? paragraphIndex : latest,
+        paragraphIndex < firstQuestionIndex && NARRATIVE_HEADING.test(paragraph.text) ? paragraphIndex : latest,
       -1
     );
     const groupStart = precedingCaseIndex >= 0 ? precedingCaseIndex : 0;
@@ -403,7 +422,7 @@ function promptLines(paragraphs: SOTParagraph[]): string[] {
   const lines: string[] = [];
   let awaitingCaption = false;
   for (const paragraph of paragraphs) {
-    if (paragraph.text === '') {
+    if (paragraph.text === '' || (paragraph.imageCount > 0 && paragraph.text.trim() === '')) {
       // A grouped figure holds several pictures, each uploaded separately into its own slot.
       const slots = Array.from({ length: Math.max(1, paragraph.imageCount) }, () => IMAGE_SLOT_LINE);
       lines.push(...blankLines(paragraph.blankLinesBefore), ...slots);
@@ -433,7 +452,10 @@ function blankLines(count: number): string[] {
 function leadInStart(slice: SOTParagraph[]): number {
   // A new Case opens the reading for the question after it: its heading, narrative and figures
   // all belong to that question, however the page happens to break around them.
-  const caseHeading = slice.findIndex((paragraph, index) => index > 0 && CASE_HEADING.test(paragraph.text));
+  // "For Questions 2 to 6:" does the same for the shared scenario it introduces.
+  const caseHeading = slice.findIndex(
+    (paragraph, index) => index > 0 && (CASE_HEADING.test(paragraph.text) || QUESTION_RANGE_HEADING.test(paragraph.text))
+  );
   if (caseHeading > 0) return caseHeading;
   let start = -1;
   slice.forEach((paragraph, index) => {
@@ -534,7 +556,7 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   // A key that pairs several items with letters ("AntiVir-A – C", "AntiVir-B – B") answers a
   // matching task: the lettered list is what the learner matches against, not one choice to pick,
   // so the question takes a written answer and the list stays in its prompt.
-  if (keyIndex >= 0 && body.slice(keyIndex).filter((paragraph) => isMatchingPair(paragraph.text)).length >= 2) {
+  if (keyIndex >= 0 && body.slice(keyIndex).filter(isMatchingKeyParagraph).length >= 2) {
     return { entries: [], unlabelledOptionBlock: false };
   }
   const beforeKey = keyIndex < 0 ? body : body.slice(0, keyIndex);
@@ -578,7 +600,7 @@ function collectOptionEntries(paragraphs: SOTParagraph[]): {
   // Only an answer line naming a label inside the block proves these paragraphs
   // are options. A prose answer belongs to an open-response question whose stem
   // simply spans several paragraphs.
-  const answerLabel = /^([A-Z])(?:[.):]|\s|$)/.exec(paragraphs[answerIndex]!.text.match(ANSWER_LINE)![1]!.trim())?.[1];
+  const answerLabel = /^([A-Z])(?:[.):]|\s|$)/.exec((paragraphs[answerIndex]!.text.match(ANSWER_LINE)?.[1] ?? '').trim())?.[1];
   const inRange =
     answerLabel !== undefined && candidates.length <= 26 && answerLabel <= optionLabelAt(candidates.length - 1);
   const usable = candidates.every(
@@ -709,7 +731,8 @@ function learnerBody(paragraphs: SOTParagraph[], options: OptionEntry[]): SOTPar
   const end = ends.length > 0 ? Math.min(...ends) : paragraphs.length;
   return paragraphs
     .slice(1, end)
-    .filter((paragraph) => !ANSWER_SPACE.test(paragraph.text))
+    // A figure's paragraph can hold nothing but the indentation typed around the picture.
+    .filter((paragraph) => paragraph.imageCount > 0 || !ANSWER_SPACE.test(paragraph.text))
     .filter((paragraph) => options.every((option) => option.paragraph !== paragraph || option.caption === true))
     .filter((paragraph) => options.every((option) => option.table?.paragraph !== paragraph || !option.table.consumed))
     .map((paragraph) =>

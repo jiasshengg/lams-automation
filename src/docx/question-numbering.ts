@@ -17,7 +17,12 @@ export const SECTION_BOUNDARY = new RegExp(`${BREAK_MARKER.source}|^Case\\s+\\d+
  * A stem numbered with punctuation: `7. …`, `7) …`, or `Q16. …`. The `Q` form needs its
  * punctuation so a reference such as "Q16 to 20 relate to this case" is never a stem.
  */
-export const NUMBERED_STEM = /^\s*(?:Q\s?(\d+)[.):]|(\d+)[.)])\s+\S/i;
+export const NUMBERED_STEM = /^\s*(?:Q\s?(\d+)[a-z]?[.):]|(\d+)[a-z]?[.)])\s+\S/i;
+/**
+ * `12a. …`, `12b. …`: the parts of one numbered question. Each part is its own question, so every
+ * part after the first takes the next number and the document's later numbers shift with it.
+ */
+const SUB_LETTER_STEM = /^\s*(?:Q\s?)?(\d+)([a-z])[.)]\s+\S/;
 /**
  * `3 Increased LDH…` or `14, What is…`: a stem whose full stop was dropped or mistyped as a comma.
  * Only trusted as the next number.
@@ -28,7 +33,7 @@ const MARK_ANNOTATION = /(?:\(\s*(?:mark\s*\d+|\d+\s*marks?)\s*\)|\[\s*\d+\s*mar
 
 export const OPTION_LINE = /^([A-Z])[.)]\s+\S/;
 /** Answer keys, explanations, and rationales follow a question; they never open one. */
-export const ANSWER_OR_RATIONALE = /^(?:Answer|Rationale|Explanation|Reason|Faculty Notes)\b/i;
+export const ANSWER_OR_RATIONALE = /^(?:Answers?|Rationale|Explanation|Reason|Faculty Notes)\b/i;
 /** Roman-numeral statements (`I. …`, `IV. …`) that a stem lists before its lettered options. */
 const ROMAN_STATEMENT = /^(?:I|II|III|IV|V|VI|VII|VIII|IX|X)[.)]\s+\S/;
 const CAPTION_PREFIX = /^(?:fig(?:ure)?|table|chart|diagram|image|illustration)\b/i;
@@ -88,6 +93,10 @@ export interface ListItemNumber {
 export function numberQuestionStems(texts: string[], options: NumberingOptions): (number | null)[] {
   const stems: (number | null)[] = texts.map(() => null);
   let highest = 0;
+  // How far the document's printed numbers trail the sequence: one per extra lettered part.
+  let offset = 0;
+  // The printed number and letter of the latest lettered part, which the next part continues.
+  let lastPart: { number: number; letter: string } | null = null;
   let lastStem = -1;
   let stemHasOptions = false;
   let answered = false;
@@ -112,18 +121,31 @@ export function numberQuestionStems(texts: string[], options: NumberingOptions):
     // A rationale that Word numbers as a list ("1) …" under an answer key) restarts below the
     // current question number; the rest of that list is rationale, exactly as a typed one is.
     if (listItem && answered && listItem.number <= highest) rationaleLists.add(listItem.key);
-    const numbered = numberedStem(text, highest + 1, nextText) ?? listStem(texts, options.listItems ?? [], index, {
-      expected: highest + 1,
+    const part = SUB_LETTER_STEM.exec(text);
+    if (part && lastPart && Number(part[1]) === lastPart.number && part[2] === nextLetter(lastPart.letter)) {
+      offset += 1;
+      lastPart = { number: lastPart.number, letter: part[2]! };
+      return open(index, highest + 1);
+    }
+    const printed = numberedStem(text, highest + 1 - offset, nextText) ?? listStem(texts, options.listItems ?? [], index, {
+      expected: highest + 1 - offset,
       previousClosed: lastStem < 0 || answered || optionsSinceStem,
       rationaleLists
     });
+    const numbered = printed === null ? null : printed + offset;
     // Once a question's answer key is stated, a list that numbers from 1 again ("1. His adaptive
     // immunity…") is the rationale for that answer, not a question the document goes back to.
     if (numbered !== null && answered && (numbered <= highest || (inRationaleList && options.bold?.[index] === true))) {
       inRationaleList = true;
       return;
     }
-    if (numbered !== null) return open(index, numbered);
+    // A typed list that numbers from 1 again under a stem still awaiting its options ("Rank the
+    // following: 1. … 2. …") is a statement list the options refer to, not questions.
+    if (numbered !== null && numbered <= highest && lastStem >= 0 && !answered && !optionsSinceStem) return;
+    if (numbered !== null) {
+      lastPart = part && part[2] === 'a' ? { number: printed!, letter: 'a' } : null;
+      return open(index, numbered);
+    }
     if (lastStem >= 0 && ANSWER_OR_RATIONALE.test(text)) answered = true;
     if (lastStem >= 0 && isOptionLine(text)) optionsSinceStem = true;
     if (!options.inferUnnumbered) return;
@@ -140,6 +162,10 @@ export function numberQuestionStems(texts: string[], options: NumberingOptions):
     stemHasOptions = true;
   });
   return stems;
+}
+
+function nextLetter(letter: string): string {
+  return String.fromCharCode(letter.charCodeAt(0) + 1);
 }
 
 /**

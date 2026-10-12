@@ -27,8 +27,9 @@ export function parseAERenamePlan(value: unknown): AERenamePlan {
     const entry = item as Record<string, unknown>;
     if (entry.type !== 'tool' && entry.type !== 'gate') throw new Error(`renames[${index}].type must be "tool" or "gate".`);
     // Earlier lessons also title AE gates "AEGate …" with no space, and some title their AE
-    // activities by case alone ("Case 1 Q2 to Q4"); both are still earlier AE titles.
-    const earlierAETitle = entry.type === 'tool' ? /^(?:AE|Case)\b/ : /^AE(?:Gate)?\b/;
+    // activities by case or question range alone ("Case 1 Q2 to Q4", "Q3 to Case 2 Q4", "Q5");
+    // all are still earlier AE titles.
+    const earlierAETitle = entry.type === 'tool' ? /^(?:AE\b|Case\b|Q\d+\b)/ : /^AE(?:Gate)?\b/;
     if (typeof entry.from !== 'string' || !earlierAETitle.test(entry.from.trim())) throw new Error(`renames[${index}].from must be an exact AE title.`);
     if (typeof entry.to !== 'string' || !/^AE\b/.test(entry.to.trim())) throw new Error(`renames[${index}].to must be an exact AE title.`);
     if (entry.from.trim() === entry.to.trim()) throw new Error(`renames[${index}] renames "${entry.from}" to itself.`);

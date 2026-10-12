@@ -193,6 +193,11 @@ def _build_title(row) -> str:
     module = row.get("Module", "")
     if not isinstance(module, str):
         module = ""
+    lines = _detail_lines(row.get(DETAILS_COL, ""))
+    # A second line is the lesson's own title, used exactly as written: "BLS RSE SEEM 2.1 …" in
+    # module SEEM must not become "SEEM - BLS RSE SEEM 2.1 …".
+    if len(lines) > 1:
+        return lines[-1]
     details = _resolve_title(row.get(DETAILS_COL, ""))
     # A lesson title usually starts with its module code already ("ANPA CS 1.2.1T ..."), so
     # prefixing the module again would repeat it ("ANPA - ANPA CS ...").

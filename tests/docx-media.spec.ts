@@ -320,3 +320,13 @@ test('does not flag a figure as shared with a non-adjacent question number', () 
   ));
   expect(images[0]).toMatchObject({ questionNumber: 4, sharedWithQuestionNumber: null });
 });
+
+test('reads the embedded image of a picture that also carries a click hyperlink', () => {
+  const linked =
+    '<w:r><w:drawing><wp:inline><wp:extent cx="5715000" cy="2857500"/><wp:docPr id="54" name="Picture 54">' +
+    '<a:hlinkClick r:id="rId9"/></wp:docPr><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Picture 54"><a:hlinkClick r:id="rId9"/></pic:cNvPr></pic:nvPicPr>' +
+    '<pic:blipFill><a:blip r:embed="rId1"/></pic:blipFill></pic:pic></wp:inline></w:drawing></w:r>';
+  const images = inspectDocxImages(mediaDocx(paragraph('3. The picture below shows a slice of lung.', linked)));
+  expect(images).toHaveLength(1);
+  expect(images[0]).toMatchObject({ relationshipId: 'rId1', sourceFilename: 'chart.png', questionNumber: 3 });
+});
