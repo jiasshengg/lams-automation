@@ -58,6 +58,7 @@ export interface IratEditor {
   updateQuestion(question: IratQuestionRequest): Promise<IratSavedQuestionReference | void>;
   createQuestion(question: IratQuestionRequest): Promise<IratSavedQuestionReference | void>;
   applyAnswerRequired(questions: IratQuestionRequest[]): Promise<string[]>;
+  updateInstructions(): Promise<void>;
   updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void>;
   verifyPrintView(request: IratRequest): Promise<void>;
   save(): Promise<void>;
@@ -104,6 +105,10 @@ export function createIratPlan(request: IratRequest): IratPlanStep[] {
     });
   });
   steps.push(
+    {
+      phase: 'activity',
+      action: `Set the Instructions box to the standard iRAT instruction in bold at the default paragraph format, font, and size`
+    },
     {
       phase: 'advanced',
       action: `Set shuffle questions=${request.advanced.shuffleQuestions}, shuffle answers=${request.advanced.shuffleAnswers}, questions' numbering=${request.advanced.questionsNumbering}, display all questions=${request.advanced.displayAllQuestions}, display all questions and answers once finished=${request.advanced.displayAllAfterCompletion}, answer justification=${request.advanced.answerJustification}, confidence levels=${request.advanced.confidenceLevels}`
@@ -191,6 +196,7 @@ export async function executeIratAutomation(
     }
   }
   await editor.applyAnswerRequired(request.questions);
+  await editor.updateInstructions();
   await editor.updateAdvancedSettings(request.advanced);
   await editor.verifyPrintView(request);
   await editor.save();

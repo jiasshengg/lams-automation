@@ -118,6 +118,16 @@ export const ACTIVITY_DIALOG_CLOSE = '.modal.dialogContainer.show[id^="dialogAct
 export const ACTIVITY_DIALOG = '.modal.dialogContainer.show[id^="dialogActivity"]';
 /** "Continue" in the frame's own "Confirm Cancel" modal, raised when closing unsaved work. */
 export const CANCEL_CONFIRM = '#authoringCancelModalConfirm';
+// Observed in the Assessment activity frame: the Instructions box under the title is the
+// CKEditor instance "assessment.instructions" (the same one AE activities use).
+const INSTRUCTIONS_EDITOR = 'assessment.instructions';
+/**
+ * The standard iRAT instruction learners see above the questions, in bold at LAMS's
+ * default paragraph format (Normal (DIV)), font, and size. It never comes from the SoT.
+ */
+export const IRAT_INSTRUCTIONS =
+  'The Individual Readiness Assurance Test (iRAT) is a closed-book assessment to be taken on-site at the venue of the team-based learning (TBL) session.';
+export const IRAT_INSTRUCTIONS_HTML = `<div><strong>${IRAT_INSTRUCTIONS}</strong></div>`;
 
 /**
  * Every iRAT advanced setting has a stable id in the activity frame's markup. The labels
@@ -468,6 +478,17 @@ export class LamsIratEditor implements IratEditor {
       await setAnswerRequired(this.page, requiredToggle, item.stored, question.mandatory, question.title, this.timeoutMs);
     }
     return changed;
+  }
+
+  async updateInstructions(): Promise<void> {
+    const frame = await this.ensureActivityFrame();
+    await setCkEditor(frame, INSTRUCTIONS_EDITOR, IRAT_INSTRUCTIONS_HTML);
+    const saved = await frame.evaluate((editorId) => {
+      const editor = (window as typeof window & { CKEDITOR: { instances: Record<string, { getData(): string }> } }).CKEDITOR.instances[editorId];
+      return editor?.getData() ?? '';
+    }, INSTRUCTIONS_EDITOR);
+    const problems = instructionsProblems(saved);
+    if (problems.length > 0) throw new Error(`iRAT Instructions did not keep the standard text: ${problems.join('; ')}.`);
   }
 
   async updateAdvancedSettings(settings: IratRequest['advanced']): Promise<void> {
@@ -1263,6 +1284,15 @@ export function formattingProblems(savedHtml: string, requested: string): string
       if (!canonical.includes(`<${tag}>${segment[1]}</${tag}>`)) problems.push(`<${tag}> formatting of "${stripHtml(segment[1] ?? '')}" was lost`);
     }
   }
+  return problems;
+}
+
+/** Why saved Instructions HTML is not exactly the standard bold sentence at LAMS defaults. */
+export function instructionsProblems(savedHtml: string): string[] {
+  const problems = formattingProblems(savedHtml, IRAT_INSTRUCTIONS_HTML);
+  if (/<p\b/i.test(savedHtml)) problems.push('the paragraph format is not Normal (DIV)');
+  const body = canonicalInlineHtml(savedHtml.replace(/<\/?(?:div|p)\b[^>]*>/gi, ''));
+  if (body !== `<strong>${IRAT_INSTRUCTIONS}</strong>`) problems.push(`the saved text is "${body}"`);
   return problems;
 }
 
