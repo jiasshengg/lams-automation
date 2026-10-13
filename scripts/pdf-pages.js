@@ -23,16 +23,15 @@ function run(argv) {
       null, width, height, 8, 4, true, false, $.NSDeviceRGBColorSpace, 0, 0
     );
     const context = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(bitmap);
-    $.NSGraphicsContext.saveGraphicsState;
-    $.NSGraphicsContext.currentContext = context;
-    $.NSColor.whiteColor.setFill;
-    $.NSRectFill($.NSMakeRect(0, 0, width, height));
     const graphics = context.CGContext;
+    // Filled through Core Graphics on the bitmap's own context: a fill through the current
+    // NSGraphicsContext does not reach it from a script, and the page would stay transparent.
+    $.CGContextSetRGBFillColor(graphics, 1, 1, 1, 1);
+    $.CGContextFillRect(graphics, $.CGRectMake(0, 0, width, height));
     $.CGContextScaleCTM(graphics, scale, scale);
     $.CGContextTranslateCTM(graphics, -bounds.origin.x, -bounds.origin.y);
     page.drawWithBoxToContext(mediaBox, graphics);
     context.flushGraphics;
-    $.NSGraphicsContext.restoreGraphicsState;
     const png = bitmap.representationUsingTypeProperties(pngType, $());
     if (!png.writeToFileAtomically(`${prefix}-${index + 1}.png`, true)) throw new Error(`Cannot write page ${index + 1} of ${pdfPath}.`);
   }
