@@ -9,7 +9,7 @@ import { readZipEntries, requireZipEntry } from './archive.js';
 import { topLevelBlocks } from './blocks.js';
 import type { RenderTarget } from './render-targets.js';
 import { macPageExporter, windowsPageExporter } from './page-exporters.js';
-import { renderWithWordPages } from './word-render-pages.js';
+import { renderWithWordPages, type PageExporter } from './word-render-pages.js';
 import { writeZipEntries } from './zip-writer.js';
 
 const run = promisify(execFile);
@@ -54,6 +54,16 @@ export interface RenderOutcome {
   failures: Map<string, string>;
   /** Set when nothing could be rendered on this computer at all. */
   unavailable?: string;
+  /** The targets an agent cropped from Word's page by eye, rather than the renderer. */
+  agentCropped?: ReadonlySet<string>;
+}
+
+/** Word's pages of a document as images, on the platforms whose Word can save a PDF unattended. */
+export function platformPageExporter(): { exporter: PageExporter; workspace: string } {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    throw new Error('Printing the document to pages needs Microsoft Word on Windows or macOS.');
+  }
+  return { exporter: process.platform === 'darwin' ? macPageExporter : windowsPageExporter, workspace: PAGE_WORKSPACE };
 }
 
 export interface RenderRequest {

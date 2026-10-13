@@ -1,9 +1,12 @@
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { topLevelBlocks } from '../docx/blocks.js';
 import { hyperlinkTargets } from '../docx/hyperlinks.js';
 import type { DocxImage } from '../docx/media.js';
+import { CROPS_FILE, exportTargetPages, sha256, TARGETS_FILE, type CropManifest } from '../docx/agent-crops.js';
 import { findRenderTargets, isEmptyParagraph, renderTargetId, type RenderTarget } from '../docx/render-targets.js';
-import { renderWithWord, type RenderOutcome } from '../docx/word-render.js';
+import type { PageExporter } from '../docx/word-render-pages.js';
+import { platformPageExporter, renderWithWord, RENDER_SCALE, type RenderOutcome } from '../docx/word-render.js';
 import { buildAEDraft, type AEDraftPlan } from './draft.js';
 import type { RenderedFigureRequest } from './plan.js';
 import { renderSlotId } from './prompt-lines.js';
@@ -21,6 +24,13 @@ export interface RenderedDraftOptions {
   figuresDirectory: string;
   /** False keeps every table and figure as the draft rebuilds it, without opening Word. */
   render: boolean;
+  /**
+   * Where Word's pages are written when a table or figure could not be pictured, for an agent to
+   * crop it from by eye. Left out once the agent's crops are in use.
+   */
+  pagesDirectory?: string;
+  /** Stands in for Word when it prints those pages, in tests. */
+  pageExporter?: { exporter: PageExporter; workspace: string };
   /** Stands in for Word in tests. */
   renderer?: (docx: Buffer, requests: { target: RenderTarget; outputPath: string }[]) => Promise<RenderOutcome>;
 }
@@ -36,20 +46,13 @@ export async function buildRenderedAEDraft(
   parts: SOTLayoutParts & { documentXml: string },
   options: RenderedDraftOptions
 ): Promise<AEDraftPlan> {
-  const { documentXml, ...layout } = parts;
+  const { documentXml } = parts;
   const draftOptions = {
     sourceDocx: options.sourceDocx,
     images: options.images,
     ...(options.columnQuestions ? { columnQuestions: true } : {})
   };
-  const analyse = (renders: readonly RenderTarget[]) =>
-    analyzeAESOT(extractSOTParagraphs(documentXml, layout, { renders }), options.sourceLabel, {
-      columnQuestions: options.columnQuestions === true,
-      linkedUrls: hyperlinkTargets(documentXml, layout.relationshipsXml)
-    });
-
-  const targets = options.render ? withTabTables(findRenderTargets(documentXml), tabTableBlockRanges(documentXml, layout)) : [];
-  const shown = shownTargets(buildAEDraft(analyse(targets), { keepRenderSlots: true }), targets);
+  const { analyse, shown } = learnerFacingTargets(parts, options);
   if (shown.length === 0) return buildAEDraft(analyse([]), draftOptions);
 
   const requests = shown.map(({ target, question }) => ({
@@ -61,9 +64,11 @@ export async function buildRenderedAEDraft(
   const renders = new Map<string, RenderedFigureRequest>();
   const renderedTargets: RenderTarget[] = [];
   const labels = new Map<string, { target: RenderTarget; question: number }>();
+  const cropped: { target: RenderTarget; question: number }[] = [];
   for (const entry of shown) {
     const rendered = outcome.rendered.get(entry.target.id);
     if (!rendered) continue;
+    if (outcome.agentCropped?.has(entry.target.id)) cropped.push(entry);
     // A figure printed across two pages comes back as one picture per page, each in its own slot.
     rendered.parts.forEach((part, index) => {
       const last = index === rendered.parts.length - 1;
@@ -88,12 +93,83 @@ export async function buildRenderedAEDraft(
   const missed = shown.filter(({ target }) => !outcome.rendered.has(target.id));
   // A table or figure rebuilt from the DOCX can lose merged cells, shading, list numbers and its
   // arrangement, so a learner-facing one Word could not picture stops the draft instead.
-  if (missed.length > 0) throw new Error(unrenderedMessage(missed, outcome));
+  if (missed.length > 0) {
+    const reasons = missed.map((entry) => ({ ...entry, reason: outcome.unavailable ?? outcome.failures.get(entry.target.id) ?? 'no picture was produced' }));
+    throw new Error(unrenderedMessage(reasons) + (await cropInstructions(docx, documentXml, reasons, options)));
+  }
   return buildAEDraft(analyse(renderedTargets), {
     ...draftOptions,
     renders,
-    reviewNotes: renderNotes([...labels.values()])
+    reviewNotes: [...renderNotes([...labels.values()]), ...cropNotes(cropped)]
   });
+}
+
+type Missed = { target: RenderTarget; question: number; reason: string };
+
+/**
+ * Prints the Source-of-Truth with Word and writes its pages to `directory`, with the list of the
+ * tables and figures the renderer could not picture: what an agent needs to crop each from its
+ * page by eye. Only those are listed, so nothing the renderer left out on purpose (an option table,
+ * an answer key) can be cropped.
+ */
+export async function writeFigurePages(
+  docx: Buffer,
+  documentXml: string,
+  missed: readonly Missed[],
+  options: { directory: string; pageExporter?: { exporter: PageExporter; workspace: string } }
+): Promise<CropManifest> {
+  const pages = await exportTargetPages(docx, missed.map(({ target }) => target), {
+    ...(options.pageExporter ?? platformPageExporter()),
+    scale: RENDER_SCALE,
+    directory: options.directory
+  });
+  const blocks = topLevelBlocks(documentXml);
+  const manifest: CropManifest = {
+    sourceSha256: sha256(docx),
+    scale: RENDER_SCALE,
+    pages,
+    targets: missed.map(({ target, question, reason }) => ({
+      id: target.id,
+      question,
+      kind: target.kind,
+      blocks: [target.firstBlock, target.lastBlock],
+      text: altText(blocks.slice(target.firstBlock, target.lastBlock + 1).map((block) => block.inner)),
+      reason
+    }))
+  };
+  await writeFile(path.join(options.directory, TARGETS_FILE), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  return manifest;
+}
+
+/** What to do about the tables and figures that were not pictured, once their pages are written. */
+async function cropInstructions(docx: Buffer, documentXml: string, missed: readonly Missed[], options: RenderedDraftOptions): Promise<string> {
+  const rebuild = 'Only if a rebuilt copy is acceptable for this lesson, rerun with --no-render and check each table and figure against the document.';
+  if (!options.pagesDirectory) return `\nGive each a box in ${CROPS_FILE}, or fix what is named above, and run again. ${rebuild}`;
+  try {
+    await writeFigurePages(docx, documentXml, missed, { directory: options.pagesDirectory, ...(options.pageExporter ? { pageExporter: options.pageExporter } : {}) });
+  } catch (error) {
+    return `\nWord could not print the pages to crop them from either (${error instanceof Error ? error.message : String(error)}). Fix what is named above and run again. ${rebuild}`;
+  }
+  return (
+    `\nWord's pages are in ${options.pagesDirectory}, with these listed in ${TARGETS_FILE}. An agent can crop each from its page: ` +
+    `write a box for each into ${path.join(options.pagesDirectory, CROPS_FILE)} and run again with --figure-crops ${options.pagesDirectory}. ${rebuild}`
+  );
+}
+
+/** The tables and figures that reach a learner prompt, and the analysis that reads them as pictures. */
+function learnerFacingTargets(
+  parts: SOTLayoutParts & { documentXml: string },
+  options: { sourceLabel: string; columnQuestions?: boolean; render: boolean }
+) {
+  const { documentXml, ...layout } = parts;
+  const analyse = (renders: readonly RenderTarget[]) =>
+    analyzeAESOT(extractSOTParagraphs(documentXml, layout, { renders }), options.sourceLabel, {
+      columnQuestions: options.columnQuestions === true,
+      linkedUrls: hyperlinkTargets(documentXml, layout.relationshipsXml)
+    });
+  const targets = options.render ? withTabTables(findRenderTargets(documentXml), tabTableBlockRanges(documentXml, layout)) : [];
+  const shown = shownTargets(buildAEDraft(analyse(targets), { keepRenderSlots: true }), targets);
+  return { analyse, shown };
 }
 
 /**
@@ -156,14 +232,21 @@ function renderNotes(rendered: { target: RenderTarget; question: number }[]): st
   ];
 }
 
-/** Why the draft stopped: each table or figure Word could not picture, with Word's reason. */
-function unrenderedMessage(missed: { target: RenderTarget; question: number }[], outcome: RenderOutcome): string {
-  const lines = missed.map((entry) => `- ${targetLabel(entry)} (blocks ${entry.target.firstBlock}-${entry.target.lastBlock}): ${outcome.unavailable ?? outcome.failures.get(entry.target.id) ?? 'no picture was produced'}`);
+function cropNotes(cropped: { target: RenderTarget; question: number }[]): string[] {
+  if (cropped.length === 0) return [];
+  return [
+    `Cropped from Word's page by the agent, by eye, because the renderer could not picture them: ${cropped.map(targetLabel).join(', ')}. ` +
+      'Check each of these edge to edge against the document: nothing cut off, and nothing from the lines around it. ' +
+      'Every empty line typed directly after a cropped figure was taken as room left for it.'
+  ];
+}
+
+/** Why the draft stopped: each table or figure the renderer could not picture, with its reason. */
+function unrenderedMessage(missed: readonly Missed[]): string {
+  const lines = missed.map((entry) => `- ${targetLabel(entry)} (blocks ${entry.target.firstBlock}-${entry.target.lastBlock}): ${entry.reason}`);
   return (
     'These learner-facing tables and figures could not be pictured with Microsoft Word, and a rebuilt copy can lose merged cells, ' +
-    `shading, list numbers and arrangement, so no draft was written:\n${lines.join('\n')}\n` +
-    'Fix what is named above and run again, or run this step on a computer whose Word can picture them (Windows renders every case). ' +
-    'Only if a rebuilt copy is acceptable for this lesson, rerun with --no-render and check each table and figure against the document.'
+    `shading, list numbers and arrangement, so no draft was written:\n${lines.join('\n')}`
   );
 }
 
