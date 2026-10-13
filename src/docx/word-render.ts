@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { readZipEntries, requireZipEntry } from './archive.js';
 import { topLevelBlocks } from './blocks.js';
 import type { RenderTarget } from './render-targets.js';
 import { macPageExporter, windowsPageExporter } from './page-exporters.js';
-import { renderWithWordPages } from './word-render-pages.js';
+import { renderWithWordPages, type PageExporter } from './word-render-pages.js';
 import { writeZipEntries } from './zip-writer.js';
 
 const run = promisify(execFile);
@@ -18,11 +19,17 @@ export const RENDER_SCALE = 2;
 const RENDER_TIMEOUT_MS = 300_000;
 const BOOKMARK_ID_BASE = 990_000;
 const SCRIPT = fileURLToPath(new URL('../../scripts/render-docx-figures.ps1', import.meta.url));
+/** Word for Mac's own folder: it is sandboxed, and this is where it may read and write without asking. */
+const OFFICE_CONTAINER = path.join(os.homedir(), 'Library', 'Group Containers', 'UBF8T346G9.Office');
 /**
- * One stable folder for the copies Word saves as PDF. Word for Mac is sandboxed and asks once for
- * access to a folder it has not seen; a folder that never changes is granted once and remembered.
+ * One stable folder for the copies Word saves as PDF, emptied after every run and never removed.
+ * On a Mac it lies inside Word's own folder, so Word never asks to be granted it; without that
+ * folder, and on Windows, it is `.word-render/` in the repository.
  */
-const PAGE_WORKSPACE = fileURLToPath(new URL('../../.word-render/', import.meta.url));
+const PAGE_WORKSPACE =
+  process.platform === 'darwin' && existsSync(OFFICE_CONTAINER)
+    ? path.join(OFFICE_CONTAINER, 'lams-word-render')
+    : fileURLToPath(new URL('../../.word-render/', import.meta.url));
 
 export interface RenderedFigure {
   id: string;
@@ -47,6 +54,16 @@ export interface RenderOutcome {
   failures: Map<string, string>;
   /** Set when nothing could be rendered on this computer at all. */
   unavailable?: string;
+  /** The targets an agent cropped from Word's page by eye, rather than the renderer. */
+  agentCropped?: ReadonlySet<string>;
+}
+
+/** Word's pages of a document as images, on the platforms whose Word can save a PDF unattended. */
+export function platformPageExporter(): { exporter: PageExporter; workspace: string } {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') {
+    throw new Error('Printing the document to pages needs Microsoft Word on Windows or macOS.');
+  }
+  return { exporter: process.platform === 'darwin' ? macPageExporter : windowsPageExporter, workspace: PAGE_WORKSPACE };
 }
 
 export interface RenderRequest {

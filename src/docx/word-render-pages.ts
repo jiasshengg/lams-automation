@@ -111,9 +111,33 @@ export async function renderWithWordPages(
     }
   });
 
-  // The folder itself stays: Word for Mac remembers access to it, not to what it holds.
-  await mkdir(options.workspace, { recursive: true });
-  for (const entry of await readdir(options.workspace)) await rm(path.join(options.workspace, entry), { recursive: true, force: true });
+  await emptyWorkspace(options.workspace);
+  try {
+    return await pictureFromPages(entries, documents, usable, blocks, marked, outcome, options);
+  } finally {
+    if (!process.env.LAMS_WORD_RENDER_KEEP) await emptyWorkspace(options.workspace);
+  }
+}
+
+/**
+ * Empties the folder Word saves into, creating it when missing. The folder itself always stays:
+ * the copies and page images of one document run to hundreds of megabytes, and nothing reads them
+ * after the run. `LAMS_WORD_RENDER_KEEP=1` leaves them in place to look at.
+ */
+export async function emptyWorkspace(workspace: string): Promise<void> {
+  await mkdir(workspace, { recursive: true });
+  for (const entry of await readdir(workspace)) await rm(path.join(workspace, entry), { recursive: true, force: true });
+}
+
+async function pictureFromPages(
+  entries: ReturnType<typeof readZipEntries>,
+  documents: Map<string, string>,
+  usable: PageRenderRequest[],
+  blocks: ReturnType<typeof topLevelBlocks>,
+  marked: Set<string>,
+  outcome: PageRenderOutcome,
+  options: { exporter: PageExporter; workspace: string; scale: number }
+): Promise<PageRenderOutcome> {
   const files: { name: string; docx: string }[] = [];
   for (const [name, xml] of documents) {
     const file = path.join(options.workspace, `${name}.docx`);

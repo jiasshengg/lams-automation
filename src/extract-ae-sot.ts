@@ -4,12 +4,14 @@ import path from 'node:path';
 import { buildRenderedAEDraft } from './ae/render-figures.js';
 import { analyzeAESOT, extractSOTParagraphs, formatAESOTSummary, readSOTDocxParts } from './ae/sot-docx.js';
 import { hyperlinkTargets } from './docx/hyperlinks.js';
+import { agentCropRenderer } from './docx/agent-crops.js';
 import { inspectDocxImages } from './docx/media.js';
+import { renderWithWord } from './docx/word-render.js';
 
 async function main(): Promise<void> {
   const inputPath = readArgument('--sot-docx');
   if (!inputPath) {
-    throw new Error('Usage: npm run extract:ae-sot -- --sot-docx <path> [--out <json-path>] [--draft <json-path> [--no-render]] [--json]');
+    throw new Error('Usage: npm run extract:ae-sot -- --sot-docx <path> [--out <json-path>] [--draft <json-path> [--no-render] [--figure-crops <directory>]] [--json]');
   }
   if (process.argv.includes('--commit')) throw new Error('AE SOT extraction is read-only and does not accept --commit.');
 
@@ -33,6 +35,7 @@ async function main(): Promise<void> {
   const draftPath = readArgument('--draft');
   if (draftPath) {
     const absoluteDraft = path.resolve(draftPath);
+    const cropsDirectory = readArgument('--figure-crops');
     // Tables and drawn figures are shown as Word's picture of them, written beside the draft.
     const figuresDirectory = path.join(path.dirname(absoluteDraft), `${path.basename(absoluteDraft, path.extname(absoluteDraft))}-figures`);
     const draft = await buildRenderedAEDraft(buffer, { documentXml, ...layout }, {
@@ -41,7 +44,11 @@ async function main(): Promise<void> {
       images: inspectDocxImages(buffer),
       ...(columnQuestions ? { columnQuestions: true } : {}),
       figuresDirectory,
-      render: !process.argv.includes('--no-render')
+      render: !process.argv.includes('--no-render'),
+      // What Word cannot picture is left for an agent to crop from Word's pages, written beside the draft.
+      ...(cropsDirectory
+        ? { renderer: agentCropRenderer(path.resolve(cropsDirectory), renderWithWord) }
+        : { pagesDirectory: path.join(path.dirname(absoluteDraft), `${path.basename(absoluteDraft, path.extname(absoluteDraft))}-figure-pages`) })
     });
     await writeFile(absoluteDraft, `${JSON.stringify(draft, null, 2)}\n`, 'utf8');
     console.log(`Wrote a reviewable AE plan draft to ${absoluteDraft}`);
