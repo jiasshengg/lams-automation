@@ -71,7 +71,7 @@ function macWordProblem(error: unknown, workspace: string): string {
   if ((error as { killed?: boolean }).killed) {
     return (
       'Microsoft Word did not finish saving the copies. If Word is showing a "Grant File Access" dialog, ' +
-      `click Select, choose the folder ${workspace}, and run again; Word remembers the folder after that.`
+      `click Select, choose the folder ${workspace} itself (not a file in it), and run again.`
     );
   }
   if (/-1743|not allowed to send Apple events|Not authori[sz]ed/i.test(stderr)) {
