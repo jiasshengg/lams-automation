@@ -651,7 +651,7 @@ def main() -> None:
     if args.event_id and not lessons:
         raise SystemExit(
             f"No ready Kanban row matched Elentra Event ID {args.event_id}. "
-            "Check that the row has status 'Can start', a Lesson ID in column M, "
+            "Check that the row has status 'Can start', a filled-in Lesson ID column, "
             "and an Elentra Event ID in column P."
         )
 

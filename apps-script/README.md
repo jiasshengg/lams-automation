@@ -3,13 +3,18 @@
 `kanban-code-sink.gs` writes a published lesson's 5-digit LAMS code into the Kanban sheet.
 The publishing stage (`lesson:index`, `run:tbl --publish`) and `send:code` call it.
 
+It also lets the Elentra scripts read the sheet (`action: "tabs"` lists the tabs, `action:
+"read"` returns one tab's cells as displayed), with the same secret. Whenever this machine has
+the script's URL and secret, every Kanban read goes through it, so the sheet does not need to be
+shared by link. Reading never writes to the sheet.
+
 - **Tab:** named per run (`kanbanTab` in `--request-json`, or `--tab` for `send:code`).
   The script writes only to that tab and never assumes one. Case, spacing, and `_` versus
   space are ignored, but only for a whole tab name.
 - **Row:** the one row whose column G ("TBL/Quiz Details") contains the run's TBL/Quiz
   Details text (`kanbanDetails`, or `--details`). No match or more than one match is an
   error; nothing is written.
-- **Column:** the code goes into column M.
+- **Column:** the code goes into the column headed `Lesson ID` (found by its header, so inserted columns do not move it).
 - **Secret:** read from the script's `SHARED_SECRET` Script property, not from the source.
 
 The script is bound to the spreadsheet it is pasted into (`getActiveSpreadsheet()`), so each
@@ -20,8 +25,9 @@ spreadsheet needs its own copy and its own Web App deployment.
 The same steps apply to a brand-new spreadsheet and to a **File > Make a copy** of an existing
 one. A copy brings the script along, but not its deployment, so it still needs steps 3-6.
 
-1. **Share for reading.** Share > General access > *Anyone with the link* - *Viewer*. The
-   Elentra scripts read tabs through the public CSV export, without signing in.
+1. **Sharing.** The sheet can stay restricted: the automation reads and writes it through the
+   script below. Only a machine without the script's URL and secret falls back to the
+   shared-link CSV export, which needs Share > General access > *Anyone with the link* - *Viewer*.
 2. **Add the script.** Extensions > Apps Script. Replace the editor contents with
    `kanban-code-sink.gs` from this folder and save.
 3. **Set the secret.** Project Settings (gear) > Script properties > Add script property:
@@ -61,3 +67,12 @@ npm run send:code -- --code 12345 --tab "<tab>" --details "<TBL/Quiz Details tex
 ```
 
 Drop `--dry-run` to write for real, and only against a test row.
+
+Reading, which never writes:
+
+```bash
+npm run elentra:kanban -- --tabs
+```
+
+"The deployed Kanban Apps Script cannot read yet" means the sheet still runs a version from
+before the read actions: paste this file again and deploy a New version as above.

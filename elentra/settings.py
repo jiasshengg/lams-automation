@@ -71,6 +71,55 @@ def kanban_sheet_id() -> str:
     return sheet_id
 
 
+ENV_FILE_PATH = REPO_ROOT / ".env"
+
+
+def _env_file_value(key: str) -> str | None:
+    """KEY=value from the ignored .env, which the TypeScript commands also read."""
+    try:
+        lines = ENV_FILE_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        name, sep, value = line.strip().partition("=")
+        if sep and name.strip() == key:
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            return value.strip() or None
+    return None
+
+
+def sheet_script() -> tuple[str, str] | None:
+    """
+    (Web App /exec URL, shared secret) of the Kanban Apps Script, or None when this machine has
+    none. Same sources and order as the publishing stage: LAMS_SHEET_WEBHOOK_URL and
+    LAMS_SHEET_SECRET from the shell, then from .env, then sheet.webhookUrl and sheet.secret in
+    configs/local.json. With it the Kanban is read through the script, so the sheet need not be
+    shared by link.
+    """
+    def value(env_key: str, config_key: str) -> str | None:
+        return (os.environ.get(env_key, "").strip() or _env_file_value(env_key)
+                or _local_config_value("sheet", config_key))
+
+    url, secret = value("LAMS_SHEET_WEBHOOK_URL", "webhookUrl"), value("LAMS_SHEET_SECRET", "secret")
+    # .env.example's placeholder URL is not a deployment.
+    if not url or not secret or "REPLACE-WITH" in url:
+        return None
+    return url, secret
+
+
+DEFAULT_KANBAN_TAB = "Kanban AY26/27"
+
+
+def default_kanban_tab() -> str:
+    """
+    The tab a run reads when the user names none: sheet.defaultTab in configs/local.json, else
+    the current academic year's Kanban. A tab the user names always wins.
+    """
+    return _local_config_value("sheet", "defaultTab") or DEFAULT_KANBAN_TAB
+
+
 def launch_options(headless: bool) -> dict:
     """Keyword arguments for launching Chromium; use this for every Elentra browser."""
     options = {"headless": headless}

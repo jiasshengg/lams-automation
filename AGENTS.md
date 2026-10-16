@@ -21,17 +21,23 @@ Build and verify a reusable Playwright + TypeScript automation layer for the LAM
   design that run just saved. `lesson:index --commit` remains the standalone way to publish an
   already-authored lesson. Never pass `--publish` on a request that only asks to author, copy,
   fix, or update a lesson. Before publishing, obtain `lessonIndex.endDate`
-  from the user for that specific lesson. Never default it, and never inherit it from a
-  configuration file, an example, or a previous run. Because that value can only come from
-  the user, publishing can never happen without their involvement; `--publish` refuses to start
-  without it, before anything is copied.
+  for that specific lesson from the user: stated in the prompt, or written in that lesson's
+  own Kanban row (Column L, `Publishing end time/date`), with the prompt taking precedence.
+  Never default it, and never inherit it from a configuration file, an example, another row,
+  or a previous run; when neither source gives a readable date, ask. `--publish` refuses to
+  start without it, before anything is copied.
 - Adding the LAMS links to an Elentra event is learner-facing, like publishing. Run it only
   when the user asks for Elentra links or as the last stage of a full/end-to-end/deploy
   request, after the lesson code is recorded in the Kanban sheet, and limit it to that lesson
-  with `--lesson-id`. Test changes only on the sandbox event `42374`. The Kanban tab is a
-  per-run input the user names (`--tab`); never assume one or reuse a tab from configuration
-  or an earlier run. A Kanban-driven run asks whether to run every "Can start" row, one at a
-  time, or one row the user identifies by its TBL/Quiz Details.
+  with `--lesson-id`. Test changes only on the sandbox event `42374`. The Kanban tab is the one
+  the user names for the run (`--tab`); when they name none it is the default tab
+  (`Kanban AY26/27`, or `sheet.defaultTab` in `configs/local.json`), never a tab from an
+  earlier run. A Kanban-driven run asks whether to run every "Can start" row, one at a
+  time, or one row the user identifies by its TBL/Quiz Details; a prompt that already names
+  the lesson ("run our automation for <title>, as reflected in Kanban") is that one row.
+  The row runs only when its status (column A) is "Can start"; otherwise, or when no row
+  matches, stop and report. Its Column L supplies the source lesson, source folder,
+  destination, and publishing end date; the second line of TBL/Quiz Details is the new title.
   The LAMS stages use the Source-of-Truth files that run just downloaded (recorded in
   `sot-docs/latest.json`) by default; documents the user supplies in the prompt take precedence
   per kind (iRAT or AE). Write their concrete paths into requests and AE plans. The Elentra scripts never

@@ -1,7 +1,7 @@
 # Elentra QA files and LAMS links
 
 Python scripts for the Elentra side of the LAMS deployment pipeline at NTU LKC. They are
-driven by the live LAMS Kanban Google Sheet (the tab you name with `--tab`, read as a CSV export), so there
+driven by the live LAMS Kanban Google Sheet (the tab you name with `--tab`, read through the sheet's Apps Script, or as a shared-link CSV export when no script is configured), so there
 is no local file to keep in sync. The agent skill that runs them is
 [lams-elentra-resources](../skills/lams-elentra-resources/SKILL.md).
 

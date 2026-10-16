@@ -18,9 +18,10 @@ LINK = "https://ilams.lamsinternational.com/lams/home/learner.do?lessonID=41170"
 
 def patch_sheet_id(test):
     """Tests never depend on the machine's configured Kanban spreadsheet."""
-    patcher = mock.patch.object(kanban_reader, "kanban_sheet_id", return_value="test-sheet")
-    patcher.start()
-    test.addCleanup(patcher.stop)
+    for name, value in (("kanban_sheet_id", "test-sheet"), ("sheet_script", None)):
+        patcher = mock.patch.object(kanban_reader, name, return_value=value)
+        patcher.start()
+        test.addCleanup(patcher.stop)
 
 
 class FakeResponse:
@@ -154,6 +155,71 @@ class KanbanReaderTest(unittest.TestCase):
             self.assertEqual([r["event_id"] for r in kanban_reader.find_rows("Tab", "TBL 1")], ["1"])
 
 
+RUN_CELL = (
+    "Source lesson: ANPA CS 1.2.2T 281025 2025Y1\n"
+    "Source folder: Year 1 - Cohort2025 > 0_Vertical Theme > Y1 ANPA\n"
+    "Destination: Year 1 - Cohort2026 !!! > 0_Vertical Theme > Y1 ANPA\n"
+    "Publishing start time/date: NIL\n"
+    "Publishing end time/date: 171026 23:59"
+)
+
+
+class RunDetailsTest(unittest.TestCase):
+    def test_column_l_gives_source_folders_and_end_date(self):
+        details = kanban_reader.parse_run_details(RUN_CELL)
+        self.assertEqual(details["problems"], [])
+        self.assertEqual(details["source_lesson"], "ANPA CS 1.2.2T 281025 2025Y1")
+        self.assertEqual(
+            details["source_folder_path"],
+            ["Courses", "! My Courses", "Year 1 - Cohort2025", "0_Vertical Theme", "Y1 ANPA"],
+        )
+        self.assertEqual(details["destination_folder_path"][2], "Year 1 - Cohort2026 !!!")
+        self.assertEqual((details["end_date"], details["end_time"]), ("2026-10-17", "23:59"))
+
+    def test_other_date_spellings_and_same_folder_destination(self):
+        cell = RUN_CELL.replace("171026 23:59", "17/10/2026").replace(
+            "Destination: Year 1 - Cohort2026 !!! > 0_Vertical Theme > Y1 ANPA", "Destination: same folder as source")
+        details = kanban_reader.parse_run_details(cell)
+        self.assertEqual((details["end_date"], details["end_time"]), ("2026-10-17", None))
+        self.assertEqual(details["destination_folder_path"], details["source_folder_path"])
+
+    def test_unusable_values_are_problems_not_guesses(self):
+        details = kanban_reader.parse_run_details(
+            RUN_CELL.replace("171026 23:59", "DDMMYY 23:59").replace(": NIL", ": 101026 09:00"))
+        self.assertIsNone(details["end_date"])
+        self.assertEqual(len(details["problems"]), 2)
+        self.assertIn("start", details["problems"][0])
+        self.assertIn("end date", details["problems"][1])
+
+    def test_a_ready_row_becomes_request_fields(self):
+        csv_text = (
+            "w,Module,TBL/Quiz Details,Lesson ID,Elentra Event ID,Date,Run details\n"
+            f'Can start,ANPA,"ANPA-Path TBL: Principles\nPrinciples of Clinical Path TBL 281026",,27662,28/10/2026,"{RUN_CELL}"\n'
+            'Can start,ANPA,"Other TBL\nOther TBL 291026",,27663,29/10/2026,\n'
+        )
+        patch_sheet_id(self)
+        with mock.patch.object(kanban_reader, "resolve_tab", return_value=("Kanban AY26/27", "1")), \
+                mock.patch.object(kanban_reader.requests, "get", return_value=mock.Mock(content=csv_text.encode("utf-8"))):
+            ready, missing = kanban_reader.list_rows("Kanban AY26/27")
+        self.assertEqual(ready["request"], {
+            "sourceLessonTitle": "ANPA CS 1.2.2T 281025 2025Y1",
+            "lessonTitle": "Principles of Clinical Path TBL 281026",
+            "kanbanTab": "Kanban AY26/27",
+            "kanbanDetails": "ANPA-Path TBL: Principles",
+            "lessonIndex": {"endDate": "2026-10-17", "endTime": "23:59"},
+            "sourceFolderPath": ["Courses", "! My Courses", "Year 1 - Cohort2025", "0_Vertical Theme", "Y1 ANPA"],
+            "destinationFolderPath": ["Courses", "! My Courses", "Year 1 - Cohort2026 !!!", "0_Vertical Theme", "Y1 ANPA"],
+        })
+        self.assertIsNone(missing["run_details"])
+        self.assertIsNone(missing["request"])
+
+    def test_default_tab_follows_local_config(self):
+        with mock.patch.object(settings, "_local_config_value", return_value=None):
+            self.assertEqual(settings.default_kanban_tab(), "Kanban AY26/27")
+        with mock.patch.object(settings, "_local_config_value", return_value="INTERNS Kanban AY26/27"):
+            self.assertEqual(settings.default_kanban_tab(), "INTERNS Kanban AY26/27")
+
+
 HTMLVIEW = (
     'items.push({name: "Kanban AY26\\/27", pageUrl: "https:\\/\\/docs\\/htmlview\\/sheet?headers\\x3dtrue&gid=111"});'
     'items.push({name: "DONOTUSE_Kanban AY25\\/26", pageUrl: "https:\\/\\/docs\\/sheet?headers\\x3dtrue&gid=222"});'
@@ -188,7 +254,74 @@ class TabTest(unittest.TestCase):
             kanban_reader.resolve_tab("  ")
 
 
+class ScriptReadTest(unittest.TestCase):
+    """With the Apps Script configured, tabs and rows come from it, never the shared link."""
+
+    def setUp(self):
+        patcher = mock.patch.object(kanban_reader, "sheet_script", return_value=("https://script/exec", "s3cret"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        get = mock.patch.object(kanban_reader.requests, "get", side_effect=AssertionError("shared link used"))
+        get.start()
+        self.addCleanup(get.stop)
+
+    def answer(self, *bodies):
+        responses = [mock.Mock(status_code=200, text=b if isinstance(b, str) else json.dumps(b)) for b in bodies]
+        patcher = mock.patch.object(kanban_reader.requests, "post", side_effect=responses)
+        post = patcher.start()
+        self.addCleanup(patcher.stop)
+        return post
+
+    def test_tabs_and_rows_are_read_through_the_script(self):
+        post = self.answer(
+            {"status": "ok", "tabs": [{"name": "Kanban AY26/27", "gid": "111"}, {"name": "DONOTUSE_Kanban AY25/26", "gid": "222"}]},
+            {"status": "ok", "tab": "Kanban AY26/27", "values": [
+                ["w", "Module", "TBL/Quiz Details", "Lesson ID", "Elentra Event ID"],
+                ["Can start", "MSK", "TBL 2\nMSK TBL 2 real", "", "27323"],
+            ]},
+        )
+        rows = kanban_reader.list_rows("kanban ay26/27")
+        self.assertEqual([(r["tab"], r["lesson_title"], r["event_id"]) for r in rows], [("Kanban AY26/27", "MSK TBL 2 real", "27323")])
+        sent = [json.loads(call.kwargs["data"]) for call in post.call_args_list]
+        self.assertEqual(sent, [
+            {"secret": "s3cret", "action": "tabs"},
+            {"secret": "s3cret", "action": "read", "tab": "Kanban AY26/27"},
+        ])
+
+    def test_an_answer_wrapped_in_html_is_still_read(self):
+        wrapped = '<html><body><div>{&quot;status&quot;:&quot;ok&quot;,&quot;tabs&quot;:[{&quot;name&quot;:&quot;A&quot;,&quot;gid&quot;:&quot;1&quot;}]}</div></body></html>'
+        self.answer(wrapped)
+        self.assertEqual(kanban_reader.list_tabs(), [("A", "1")])
+
+    def test_failures_name_their_cause(self):
+        self.answer({"status": "error", "message": "Invalid code format: "})
+        with self.assertRaisesRegex(kanban_reader.KanbanError, "New version"):
+            kanban_reader.list_tabs()
+        self.answer({"status": "error", "message": "Unauthorized"})
+        with self.assertRaisesRegex(kanban_reader.KanbanError, "Unauthorized"):
+            kanban_reader.list_tabs()
+        self.answer("<html>Sign in to continue</html>")
+        with self.assertRaisesRegex(kanban_reader.KanbanError, "Anyone"):
+            kanban_reader.list_tabs()
+
+
 class SettingsTest(unittest.TestCase):
+    def test_sheet_script_prefers_the_shell_then_env_file_then_local_config(self):
+        with tempfile.TemporaryDirectory() as folder:
+            env_file, config = Path(folder) / ".env", Path(folder) / "local.json"
+            with mock.patch.object(settings, "ENV_FILE_PATH", env_file), \
+                    mock.patch.object(settings, "LOCAL_CONFIG_PATH", config), \
+                    mock.patch.dict(os.environ, {"LAMS_SHEET_WEBHOOK_URL": "", "LAMS_SHEET_SECRET": ""}):
+                self.assertIsNone(settings.sheet_script())
+                config.write_text('{"sheet": {"webhookUrl": "https://cfg/exec", "secret": "c"}}', encoding="utf-8")
+                self.assertEqual(settings.sheet_script(), ("https://cfg/exec", "c"))
+                env_file.write_text('LAMS_SHEET_WEBHOOK_URL="https://env/exec"\nLAMS_SHEET_SECRET=e\n', encoding="utf-8")
+                self.assertEqual(settings.sheet_script(), ("https://env/exec", "e"))
+                with mock.patch.dict(os.environ, {"LAMS_SHEET_SECRET": "shell"}):
+                    self.assertEqual(settings.sheet_script(), ("https://env/exec", "shell"))
+                env_file.write_text("LAMS_SHEET_WEBHOOK_URL=https://x/REPLACE-WITH-DEPLOYMENT-ID/exec\nLAMS_SHEET_SECRET=e\n", encoding="utf-8")
+                self.assertIsNone(settings.sheet_script())
+
     def test_session_and_downloads_stay_in_ignored_folders(self):
         self.assertEqual(settings.PROFILE_DIR, settings.REPO_ROOT / ".playwright" / "elentra-profile")
         self.assertEqual(settings.LEGACY_AUTH_STATE_PATH.parent, settings.REPO_ROOT / ".playwright")

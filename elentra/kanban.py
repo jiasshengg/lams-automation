@@ -4,6 +4,7 @@ Choose Kanban rows to run. Read-only: it never edits the sheet.
 Usage (from the repository root):
     npm run elentra:kanban -- --tabs                                  # list the sheet's tabs
     npm run elentra:kanban -- --tab "<tab name>"                      # every "Can start" row
+    (without --tab it reads the default tab, sheet.defaultTab in configs/local.json or "Kanban AY26/27")
     npm run elentra:kanban -- --tab "<tab name>" --details "<text>"   # the row matching TBL/Quiz Details
 
 Add --json for machine-readable output. The tab name may be partial if it matches one
@@ -19,6 +20,7 @@ import json
 import sys
 
 from kanban_reader import KanbanError, find_rows, list_rows, list_tabs
+from settings import default_kanban_tab
 
 
 def _show(row: dict) -> str:
@@ -33,7 +35,19 @@ def _show(row: dict) -> str:
     ]
     shown = " | ".join(parts)
     problem = row.get("title_date_problem")
-    return f"{shown}\n    DATE MISMATCH: {problem}" if problem else shown
+    if problem:
+        shown += f"\n    DATE MISMATCH: {problem}"
+    details = row.get("run_details")
+    if details is None:
+        shown += "\n    Column L: no run details (no \"Source lesson:\" line)"
+    else:
+        for key in ("source_lesson", "source_folder_path", "destination_folder_path", "end_date", "end_time"):
+            value = details.get(key)
+            if value:
+                shown += f"\n    {key}: {' > '.join(value) if isinstance(value, list) else value}"
+        for issue in details.get("problems", []):
+            shown += f"\n    COLUMN L: {issue}"
+    return shown
 
 
 def main() -> None:
@@ -50,7 +64,8 @@ def main() -> None:
             print(json.dumps(names, indent=2) if args.json else "\n".join(names))
             return
         if not args.tab:
-            raise KanbanError("Name the Kanban tab to read with --tab, or use --tabs to list them.")
+            args.tab = default_kanban_tab()
+            print(f'No --tab given; reading the default tab "{args.tab}".', file=sys.stderr)
 
         if args.details is None:
             rows = list_rows(args.tab)

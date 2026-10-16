@@ -1,5 +1,7 @@
 """
-Reads the live LAMS Kanban Google Sheet directly over HTTP (CSV export).
+Reads the live LAMS Kanban Google Sheet directly over HTTP: through the sheet's own Apps Script
+(apps-script/kanban-code-sink.gs, authorised by the shared secret) when this machine has its
+URL and secret, so the sheet can stay private; otherwise through the shared-link CSV export.
 No local file, no syncing — always reads whatever is currently live in the sheet.
 
 The tab is always named by the user for each run (--tab); nothing is assumed:
@@ -32,12 +34,14 @@ living on one shared Elentra event) — this is fine, since filtering happens pe
 
 import codecs
 import csv
+import html
 import io
+import json
 import re
 
 import requests
 
-from settings import kanban_sheet_id
+from settings import kanban_sheet_id, sheet_script
 
 READY_STATUS = "can start"  # matched case-insensitively, see below
 
@@ -71,8 +75,59 @@ def _normalize_tab(text: str) -> str:
     return _normalize(str(text).replace("_", " "))
 
 
+def _script_answer(text: str) -> dict | None:
+    """
+    The Apps Script's JSON answer. The googleusercontent redirect sometimes wraps it in an HTML
+    page, so the first {"status": ...} object is taken out of the markup when the body is not
+    bare JSON (as parseSinkBody does in src/sheets/code-sink.ts). None when there is none.
+    """
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) and "status" in parsed else None
+    except ValueError:
+        pass
+    plain = html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)))
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'\{\s*"status"', plain):
+        try:
+            parsed, _ = decoder.raw_decode(plain, match.start())
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _script_call(payload: dict) -> dict:
+    """One read request to the Kanban Apps Script (sheet_script()); raises KanbanError on failure."""
+    url, secret = sheet_script()
+    try:
+        resp = requests.post(url, data=json.dumps({"secret": secret, **payload}),
+                             headers={"Content-Type": "text/plain"}, timeout=60)
+    except requests.RequestException as exc:
+        raise KanbanError(f"Could not reach the Kanban Apps Script: {exc}") from exc
+    answer = _script_answer(resp.text)
+    if answer is None:
+        raise KanbanError(
+            f"The Kanban Apps Script answered HTTP {resp.status_code} without a result. Check that its Web App "
+            "deployment's access is set to Anyone (apps-script/README.md)."
+        )
+    if answer.get("status") != "ok":
+        message = str(answer.get("message", ""))
+        if message.startswith("Invalid code format"):
+            # A deployment from before the read actions treats every request as a code write.
+            raise KanbanError(
+                "The deployed Kanban Apps Script cannot read yet. Paste apps-script/kanban-code-sink.gs into the "
+                "sheet's Apps Script and deploy a New version (apps-script/README.md, \"Updating the script\")."
+            )
+        raise KanbanError(f"Kanban Apps Script: {message or answer}")
+    return answer
+
+
 def list_tabs() -> list[tuple[str, str]]:
     """(tab name, gid) for every tab, in the sheet's order."""
+    if sheet_script():
+        return [(str(tab["name"]), str(tab["gid"])) for tab in _script_call({"action": "tabs"}).get("tabs", [])]
     resp = requests.get(f"https://docs.google.com/spreadsheets/d/{kanban_sheet_id()}/htmlview", timeout=30)
     resp.raise_for_status()
     tabs = []
@@ -81,7 +136,7 @@ def list_tabs() -> list[tuple[str, str]]:
         name = codecs.decode(raw_name.replace("\\/", "/"), "unicode_escape")
         tabs.append((name, gid))
     if not tabs:
-        raise KanbanError("Could not read the Kanban sheet's tab list. Check that the sheet is still shared by link.")
+        raise KanbanError("Could not read the Kanban sheet's tab list. Check that the sheet is still shared by link, or configure the Kanban Apps Script (apps-script/README.md) so the sheet can stay private.")
     return tabs
 
 
@@ -107,16 +162,21 @@ def resolve_tab(name: str) -> tuple[str, str]:
     raise KanbanError(f'"{name}" {problem}. Choose one of: {names}')
 
 
-def _read_sheet(gid: str) -> tuple[list[str], list[dict]]:
+def _read_sheet(gid: str, tab_name: str | None = None) -> tuple[list[str], list[dict]]:
     """
-    Reads one tab's CSV export as (column names, rows). Uses the standard
+    Reads one tab as (column names, rows): through the Kanban Apps Script when this machine has
+    one, so the sheet can stay private, else the tab's shared-link CSV export. Uses the standard
     library rather than pandas: Windows Smart App Control blocks pandas'
     unsigned compiled modules, and a CSV read is all this needs.
     When a header repeats, the first column with that name wins (as pandas did).
     """
-    resp = requests.get(_sheet_csv_url(gid), timeout=30)
-    resp.raise_for_status()
-    records = list(csv.reader(io.StringIO(resp.content.decode("utf-8-sig"))))
+    if sheet_script():
+        values = _script_call({"action": "read", "tab": tab_name}).get("values", [])
+        records = [[str(cell) for cell in record] for record in values]
+    else:
+        resp = requests.get(_sheet_csv_url(gid), timeout=30)
+        resp.raise_for_status()
+        records = list(csv.reader(io.StringIO(resp.content.decode("utf-8-sig"))))
     if not records:
         return [], []
     header = records[0]
@@ -164,7 +224,7 @@ def _resolve_title(details_cell: str) -> str:
 
 def _read_tab(tab: str) -> tuple[str, list[str], list[dict]]:
     tab_name, gid = resolve_tab(tab)
-    columns, rows = _read_sheet(gid)
+    columns, rows = _read_sheet(gid, tab_name)
     missing = [c for c in ("w", DETAILS_COL, "Elentra Event ID", LESSON_ID_COL) if c not in columns]
     if missing:
         raise KanbanError(f'Tab "{tab_name}" has no {", ".join(repr(c) for c in missing)} column; it is not a Kanban tab.')
@@ -266,10 +326,150 @@ def title_date_problem(title: str, date_cell: str) -> str | None:
     )
 
 
+# Column L holds the run details as labelled lines, one value per label:
+#   Source lesson: ANPA CS 1.2.2T 281025 2025Y1
+#   Source folder: Year 1 - Cohort2025 > 0_Vertical Theme > Y1 ANPA
+#   Destination: Year 1 - Cohort2026 !!! > 0_Vertical Theme > Y1 ANPA
+#   Publishing start time/date: NIL
+#   Publishing end time/date: 171026 23:59
+# The cell is found by its "Source lesson:" label rather than by its header or position, so a
+# renamed header or an inserted column does not make the flow read the wrong cell.
+_RUN_LABELS = (
+    ("source_lesson", re.compile(r"source\s*lesson")),
+    ("source_folder", re.compile(r"source\s*folder")),
+    ("destination", re.compile(r"destination")),
+    ("publish_start", re.compile(r"start")),
+    ("publish_end", re.compile(r"end")),
+)
+_RUN_LINE = re.compile(r"^\s*([^:]{1,60}?)\s*:\s*(.*?)\s*$")
+_RUN_CELL = re.compile(r"(?im)^\s*source\s*lesson\s*:")
+_NONE_VALUES = {"", "nil", "na", "n/a", "none", "-"}
+# Folders under this root are written in the sheet without it ("Year 1 - Cohort2025 > ...").
+LIBRARY_ROOT = ["Courses", "! My Courses"]
+
+
+def _folder_path(text: str) -> list[str]:
+    parts = [" ".join(part.split()) for part in re.split(r"\s*>\s*", text) if part.strip()]
+    if parts and _normalize(parts[0]) == "courses":
+        return parts
+    if parts and _normalize(parts[0]) == _normalize(LIBRARY_ROOT[1]):
+        return [LIBRARY_ROOT[0], *parts]
+    return [*LIBRARY_ROOT, *parts] if parts else []
+
+
+def _end_date_time(text: str) -> tuple[str, str | None] | None:
+    """("YYYY-MM-DD", "HH:MM" or None) from "171026 23:59", "17/10/2026 23:59" or "17-10-26"."""
+    text = " ".join(text.split())
+    time = re.search(r"(?<!\d)([01]?\d|2[0-3])[:.]([0-5]\d)(?!\d)", text)
+    rest = (text[: time.start()] + " " + text[time.end():]) if time else text
+    compact = re.search(r"(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)", rest)
+    split = re.search(r"(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})(?!\d)", rest)
+    found = compact or split
+    if not found:
+        return None
+    day, month, year = (int(part) for part in found.groups())
+    year = year if year > 99 else 2000 + year
+    if not (1 <= day <= 31 and 1 <= month <= 12):
+        return None
+    hhmm = f"{int(time.group(1)):02d}:{time.group(2)}" if time else None
+    return f"{year:04d}-{month:02d}-{day:02d}", hhmm
+
+
+def parse_run_details(cell: str) -> dict:
+    """
+    The run details in one Column L cell. Every value that cannot be used as written is named in
+    "problems" rather than guessed, so the flow stops and asks instead of copying or publishing
+    the wrong thing.
+    """
+    found: dict[str, str] = {}
+    problems: list[str] = []
+    for line in str(cell or "").splitlines():
+        match = _RUN_LINE.match(line)
+        if not match:
+            continue
+        label = _normalize(match.group(1))
+        key = next((key for key, pattern in _RUN_LABELS if pattern.search(label)), None)
+        if key is None:
+            continue
+        if key in found:
+            problems.append(f'Column L gives "{match.group(1)}" more than once.')
+            continue
+        found[key] = " ".join(match.group(2).split())
+
+    details: dict = {
+        "source_lesson": found.get("source_lesson") or None,
+        "source_folder_path": None,
+        "destination_folder_path": None,
+        "publish_start": None,
+        "end_date": None,
+        "end_time": None,
+    }
+    if not details["source_lesson"]:
+        problems.append("Column L has no Source lesson.")
+    if found.get("source_folder", "").casefold() not in _NONE_VALUES:
+        details["source_folder_path"] = _folder_path(found["source_folder"])
+    destination = found.get("destination", "")
+    if destination.casefold() in _NONE_VALUES or re.search(r"\bsame\b", destination, re.IGNORECASE):
+        # No destination, or "same folder as source": the copy saves beside its source.
+        details["destination_folder_path"] = details["source_folder_path"]
+    else:
+        details["destination_folder_path"] = _folder_path(destination)
+
+    start = found.get("publish_start", "")
+    if start.casefold() not in _NONE_VALUES:
+        details["publish_start"] = start
+        problems.append(
+            f'Column L sets a publishing start "{start}", which the publishing stage cannot apply '
+            "(it only sets an end date). Ask the user how to proceed."
+        )
+
+    end = found.get("publish_end", "")
+    parsed = _end_date_time(end) if end.casefold() not in _NONE_VALUES else None
+    if parsed:
+        details["end_date"], details["end_time"] = parsed
+    else:
+        what = f'"{end}" is not a date (DDMMYY HH:MM)' if end else "is missing"
+        problems.append(f"Column L's publishing end date {what}. Ask the user for this lesson's end date.")
+
+    details["problems"] = problems
+    return details
+
+
+def _run_details(row: dict) -> dict | None:
+    cells = list(dict.fromkeys(value for value in row.values() if isinstance(value, str) and _RUN_CELL.search(value)))
+    if not cells:
+        return None
+    if len(cells) > 1:
+        return {"problems": ['Several cells in this row hold a "Source lesson:" label; the user must say which is meant.']}
+    return parse_run_details(cells[0])
+
+
+def run_request(described: dict) -> dict | None:
+    """
+    The --request-json fields this row supplies, or None while anything is missing or open. The
+    new title is the second line of TBL/Quiz Details, the lesson's new LAMS title.
+    """
+    details = described.get("run_details")
+    if not details or details["problems"] or not described.get("lesson_title") or described.get("title_date_problem"):
+        return None
+    request = {
+        "sourceLessonTitle": details["source_lesson"],
+        "lessonTitle": described["lesson_title"],
+        "kanbanTab": described["tab"],
+        "kanbanDetails": described["session"],
+        "lessonIndex": {"endDate": details["end_date"], **({"endTime": details["end_time"]} if details["end_time"] else {})},
+    }
+    if details["source_folder_path"]:
+        request["sourceFolderPath"] = details["source_folder_path"]
+    if details["destination_folder_path"]:
+        request["destinationFolderPath"] = details["destination_folder_path"]
+    return request
+
+
 def describe_row(tab_name: str, idx: int, row: dict) -> dict:
     """Everything the flow needs to choose and start one row."""
     lines = _detail_lines(row.get(DETAILS_COL, ""))
-    return {
+    described = {
         "tab": tab_name,
         "sheet_row": idx + 2,  # the row number shown in Google Sheets (header is row 1)
         "status": row["w"].strip(),
@@ -282,7 +482,10 @@ def describe_row(tab_name: str, idx: int, row: dict) -> dict:
         "title_date_problem": title_date_problem(lines[1] if len(lines) > 1 else "", row.get("Date", "")),
         "event_id": _build_event_id(row),
         "lesson_id": _as_id(row.get(LESSON_ID_COL)),
+        "run_details": _run_details(row),
     }
+    described["request"] = run_request(described)
+    return described
 
 
 def list_rows(tab: str, ready_only: bool = True) -> list[dict]:
